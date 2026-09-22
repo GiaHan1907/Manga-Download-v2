@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="960" viewBox="0 0 640 960">
+  <rect width="640" height="960" fill="#101016"/>
+  <rect x="70" y="160" width="500" height="60" rx="30" fill="#A78BFA" opacity="0.3"/>
+  <rect x="70" y="260" width="380" height="60" rx="30" fill="#8B5CF6" opacity="0.22"/>
+  <circle cx="320" cy="560" r="180" fill="none" stroke="#F5F3FF" stroke-width="6" opacity="0.3"/>
+  <circle cx="320" cy="560" r="90" fill="#34D399" opacity="0.18"/>
+  <text x="320" y="920" text-anchor="middle" fill="#A1A1B5" font-family="system-ui" font-size="30">Sample page 4 — original placeholder art</text>
+</svg>

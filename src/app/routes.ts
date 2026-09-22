@@ -5,6 +5,7 @@ export type AppRouteId =
   | "downloads"
   | "favorites"
   | "settings"
+  | "sources"
   | "manga-detail"
   | "reader";
 
@@ -14,78 +15,27 @@ export type AppRoute = {
   label: string;
   description: string;
   sidebar: boolean;
-  phase: "Phase 02" | "Phase 03";
 };
 
 export const appRoutes = [
-  {
-    id: "home",
-    path: "/",
-    label: "Home",
-    description: "Tổng quan nền tảng và trạng thái hệ thống Phase 01.",
-    sidebar: true,
-    phase: "Phase 02",
-  },
-  {
-    id: "discover",
-    path: "/discover",
-    label: "Discover",
-    description: "Khung điều hướng khám phá truyện, chưa kết nối nguồn dữ liệu.",
-    sidebar: true,
-    phase: "Phase 03",
-  },
-  {
-    id: "library",
-    path: "/library",
-    label: "Library",
-    description: "Khung thư viện local-first cho các phase sau.",
-    sidebar: true,
-    phase: "Phase 03",
-  },
-  {
-    id: "downloads",
-    path: "/downloads",
-    label: "Downloads",
-    description: "Khung hàng đợi tải, chưa có downloader hoặc tiến độ thật.",
-    sidebar: true,
-    phase: "Phase 03",
-  },
-  {
-    id: "favorites",
-    path: "/favorites",
-    label: "Favorites",
-    description: "Khung danh sách yêu thích cho dữ liệu người dùng ở phase sau.",
-    sidebar: true,
-    phase: "Phase 03",
-  },
-  {
-    id: "settings",
-    path: "/settings",
-    label: "Settings",
-    description: "Khung cài đặt ứng dụng, chưa ghi setting thật vào database.",
-    sidebar: true,
-    phase: "Phase 03",
-  },
-  {
-    id: "manga-detail",
-    path: "/manga/demo",
-    label: "Manga Detail",
-    description: "Placeholder màn hình chi tiết truyện, không tải dữ liệu thật.",
-    sidebar: false,
-    phase: "Phase 03",
-  },
-  {
-    id: "reader",
-    path: "/reader/demo",
-    label: "Reader",
-    description: "Placeholder trình đọc offline, chưa có reader engine.",
-    sidebar: false,
-    phase: "Phase 03",
-  },
+  { id: "home", path: "/", label: "Home", description: "Bảng điều khiển demo từ mock state + health IPC thật.", sidebar: true },
+  { id: "discover", path: "/discover", label: "Discover", description: "Tìm kiếm fixture nội bộ và import URL demo.", sidebar: true },
+  { id: "library", path: "/library", label: "Library", description: "Thư viện mẫu trong mock state của phiên.", sidebar: true },
+  { id: "downloads", path: "/downloads", label: "Downloads", description: "Hàng đợi demo với transition do người dùng điều khiển.", sidebar: true },
+  { id: "favorites", path: "/favorites", label: "Favorites", description: "Danh sách yêu thích dùng chung mock state.", sidebar: true },
+  { id: "settings", path: "/settings", label: "Settings", description: "Cài đặt demo, validate và lưu trong mock state.", sidebar: true },
+  { id: "sources", path: "/settings/sources", label: "Sources", description: "Bật/tắt nguồn demo, ảnh hưởng bộ lọc Discover.", sidebar: false },
+  { id: "manga-detail", path: "/manga/:mangaId", label: "Manga Detail", description: "Chi tiết manga và chọn chương demo.", sidebar: false },
+  { id: "reader", path: "/reader/:mangaId/:chapterId", label: "Reader", description: "Sample reader UI với ảnh trung tính nội bộ.", sidebar: false },
 ] satisfies AppRoute[];
 
 export const sidebarRoutes = appRoutes.filter((route) => route.sidebar);
 
-export function getRouteByPath(pathname: string) {
-  return appRoutes.find((route) => route.path === pathname) ?? appRoutes[0];
+export function resolvePageTitle(pathname: string): string {
+  if (pathname === "/") return "Home";
+  if (pathname.startsWith("/manga/")) return "Manga Detail";
+  if (pathname.startsWith("/reader/")) return "Reader";
+  if (pathname === "/settings/sources") return "Sources";
+  const match = appRoutes.find((route) => route.path === pathname);
+  return match?.label ?? "Manga Downloader 1989";
 }

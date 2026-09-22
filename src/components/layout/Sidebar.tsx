@@ -1,4 +1,4 @@
-import { BookMarked, Compass, Download, Heart, Home, Library, Menu, Settings } from "lucide-react";
+import { BookMarked, Compass, Download, Heart, Home, Library, Menu, Server, Settings } from "lucide-react";
 import { useRef } from "react";
 import { NavLink } from "react-router-dom";
 import { sidebarRoutes, type AppRoute } from "../../app/routes";
@@ -12,6 +12,7 @@ const icons = {
   downloads: Download,
   favorites: Heart,
   settings: Settings,
+  sources: Server,
   "manga-detail": BookMarked,
   reader: BookMarked,
 } satisfies Record<AppRoute["id"], typeof Home>;

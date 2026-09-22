@@ -47,8 +47,6 @@ describe("App shell", () => {
 
     render(<App />);
 
-    expect(screen.getByText("Đang kiểm tra hệ thống...")).toBeDefined();
-
     await waitFor(() => {
       expect(screen.getByText("0.1.0")).toBeDefined();
     });
@@ -73,7 +71,7 @@ describe("App shell", () => {
     expect(screen.getByText("Test error")).toBeDefined();
   });
 
-  it("renders route placeholders and highlights active sidebar item", () => {
+  it("renders the downloads screen and highlights active sidebar item", async () => {
     mockHealthySystem();
 
     render(
@@ -83,8 +81,10 @@ describe("App shell", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeDefined();
-    expect(screen.getByText("Downloads đang chuẩn bị")).toBeDefined();
     expect(screen.getByRole("link", { name: "Downloads" }).className).toContain("sidebar__link--active");
+    await waitFor(() => {
+      expect(screen.getByText(/Hàng đợi demo —/)).toBeDefined();
+    });
   });
 
   it("collapses and expands the sidebar", () => {

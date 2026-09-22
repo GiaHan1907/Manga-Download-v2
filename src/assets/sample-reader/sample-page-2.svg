@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="960" viewBox="0 0 640 960">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171720"/>
+      <stop offset="1" stop-color="#292938"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="960" fill="url(#bg2)"/>
+  <rect x="80" y="120" width="480" height="300" rx="24" fill="#A78BFA" opacity="0.22"/>
+  <circle cx="460" cy="620" r="170" fill="#34D399" opacity="0.18"/>
+  <line x1="60" y1="520" x2="580" y2="520" stroke="#F5F3FF" stroke-width="4" opacity="0.35"/>
+  <text x="320" y="920" text-anchor="middle" fill="#A1A1B5" font-family="system-ui" font-size="30">Sample page 2 — original placeholder art</text>
+</svg>

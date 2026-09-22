@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+  <defs>
+    <linearGradient id="cov" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#20202C"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#cov)"/>
+  <circle cx="200" cy="230" r="90" fill="#F5F3FF" opacity="0.18"/>
+  <rect x="60" y="430" width="280" height="26" rx="13" fill="#F5F3FF" opacity="0.28"/>
+  <rect x="60" y="470" width="180" height="20" rx="10" fill="#F5F3FF" opacity="0.18"/>
+  <text x="200" y="560" text-anchor="middle" fill="#F5F3FF" font-family="system-ui" font-size="18" opacity="0.7">Sample cover</text>
+</svg>

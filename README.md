@@ -2,14 +2,15 @@
 
 Local-first desktop app for downloading and reading manga offline. Built with Tauri 2, React, TypeScript, Vite, Rust, and SQLx/SQLite.
 
-> **Phase 01 — Project Foundation & Architecture** ✅ + **Phase 02 — Design System & UI Shell**  
-> Phase 02 adds the Dark Purple design system, custom Windows titlebar, AppShell (sidebar/topbar), typed routing with honest placeholders, and reusable UI primitives. No business features (URL import, search, download queue, library, offline reader) are implemented yet — those come in Phase 03+. See `docs/phase-02/implementation-notes.md`.
+> **Phase 01 — Foundation** ✅ · **Phase 02 — Design System & UI Shell** ✅ · **Phase 03 — Core UI Screens (Interactive Prototype)** ✅  
+> Phase 03 adds all product screens (Home, Discover/URL import, Manga Detail, Library, Favorites, Downloads, Sample Reader, Settings/Sources) on top of the Phase 02 shell, backed by **typed mock services with deterministic fixture data**. This is a prototype: no real search, downloading, CBZ export, or file storage. See `docs/phase-03/`.
 
 ---
 
 ## Stack
 
 - **Frontend:** React 19 + TypeScript + Vite 8 + React Router (HashRouter) + Lucide icons
+- **State/services (Phase 03):** typed service interfaces + deterministic mock provider (`src/services/`), single mock store (`useSyncExternalStore`) — swap to IPC backend in Phase 04–07 without reworking screens
 - **Desktop/Backend:** Tauri 2 + Rust 1.98 (MSVC)
 - **Database:** SQLite via SQLx 0.8 (embedded migrations)
 - **Target:** Windows 10/11 x64
@@ -89,12 +90,12 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 8/8 tests (Phase 01 IPC states + Phase 02 routing/sidebar/404/dialog/windowService) |
-| `npm run build` | ✅ Pass | Vite 8.3.0, 1920 modules → `dist/` (298 kB JS, gzip 93.9 kB) |
+| `npm run test` | ✅ Pass | 44/44 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix) |
+| `npm run build` | ✅ Pass | Vite, 1952 modules → `dist/` (356 kB JS, gzip 109.7 kB) |
 | `cargo check` | ✅ Pass | 1 warning (dead_code: `Internal` variant, expected until business logic) |
 | `cargo clippy` | ✅ Pass | Same 1 warning |
-| `cargo test` | ✅ Pass | 2/2 DB tests (init + idempotency) |
-| `npm run tauri dev` | ✅ Smoke pass | App compiled, launched with custom titlebar, exited cleanly (code 0). Human visual checks (drag/resize/scaling) still recommended — see `docs/phase-02/implementation-notes.md` §5 |
+| `cargo test` | ✅ Pass | 2/2 DB tests (regression intact — Phase 03 changed no Rust) |
+| `npm run tauri dev` | ✅ Smoke | Phase 03 prototype runs in the Tauri window (compile + clean launch recorded in `docs/phase-03/implementation-notes.md` §7.1). Visual checks: drag/resize/scaling — human confirmation recommended |
 | `npm run tauri build` | ⏳ Not run | Slow (~10-20 min); run before release |
 
 ---
@@ -117,8 +118,12 @@ manga-downloader-1989/
 ├── eslint.config.js             # Flat config: typescript-eslint + react-hooks + react-refresh
 ├── index.html                   # Vite entry, mounts #root
 ├── docs/
-│   └── phase-02/
-│       └── implementation-notes.md  # Phase 02 audit, UI contract, test results, open issues
+│   ├── phase-02/
+│   │   └── implementation-notes.md  # Phase 02 audit, UI contract, test results, open issues
+│   └── phase-03/
+│       ├── README.md                # Routes, UI states, sample-data disclaimer
+│       ├── screen-checklist.md      # Per-screen acceptance checklist
+│       └── implementation-notes.md  # Phase 03 audit, mock→backend swap map, results
 ├── src/
 │   ├── main.tsx                 # React root, imports globals.css
 │   ├── vite-env.d.ts
@@ -132,17 +137,39 @@ manga-downloader-1989/
 │   │   └── ui/                  # Button, Input, Dialog, Tabs, Tooltip, Progress,
 │   │                            # StatusBadge, Skeleton, EmptyState, ErrorState,
 │   │                            # MangaCard, ChapterRow, DownloadCard (presentation-only)
-│   ├── features/
-│   │   ├── system/
-│   │   │   └── SystemStatus.tsx # IPC consumer: loading/error/success states
-│   │   └── placeholders/
-│   │       └── PlaceholderPage.tsx  # Honest "Coming in Phase 03" pages per route
+│   ├── assets/
+│   │   └── sample-reader/           # Original neutral SVG pages + cover placeholder (no 3rd-party art)
+│   ├── domain/                      # Typed models
+│   │   ├── manga.ts                 # MangaSummary/Detail, ChapterSummary, MangaStatus
+│   │   ├── download.ts              # DemoDownloadTask + discriminated transitions
+│   │   └── reader.ts                # ReaderPage, ReadingProgress, zoom/page clamps
 │   ├── services/
-│   │   └── windowService.ts     # Tauri window API wrapper (minimize/maximize/close/drag)
+│   │   ├── catalog.service.ts       # Interfaces only — screens never import fixtures
+│   │   ├── library.service.ts
+│   │   ├── download.service.ts
+│   │   ├── reader.service.ts
+│   │   ├── settings.service.ts
+│   │   ├── provider.ts              # Wires mock impls; Phase 04+ swaps to IPC here
+│   │   ├── windowService.ts         # Tauri window API wrapper (minimize/maximize/close/drag)
+│   │   └── mock/
+│   │       ├── fixtures.ts          # Deterministic demo catalog, fixed IDs/ISO timestamps
+│   │       ├── store.ts             # Single mutable mock state + subscribe + resetMockState
+│   │       └── mockServices.ts      # Fixture-backed service implementations
+│   ├── features/
+│   │   ├── home/                    # HomePage + StatCard, ContinueReading
+│   │   ├── discover/                # DiscoverPage + UrlImportPanel + useDebouncedValue
+│   │   ├── manga-detail/            # MangaDetailPage + ChapterSelectRow
+│   │   ├── library/                 # LibraryPage, FavoritesPage
+│   │   ├── downloads/               # DownloadsPage (mock transitions)
+│   │   ├── reader/                  # ReaderPage + ReaderImage (SVG sample pages)
+│   │   ├── settings/                # SettingsPage, SourcesPage
+│   │   └── system/
+│   │       └── SystemStatus.tsx     # IPC consumer: loading/error/success states
 │   ├── shared/
-│   │   └── api/
-│   │       ├── contracts.ts     # AppInfo, AppHealth, AppError types
-│   │       └── desktop.ts       # Sole IPC boundary: getAppInfo, getAppHealth, normalizeIpcError
+│   │   ├── api/
+│   │   │   ├── contracts.ts         # AppInfo, AppHealth, AppError types
+│   │   │   └── desktop.ts           # Sole IPC boundary: getAppInfo, getAppHealth, normalizeIpcError
+│   │   └── hooks/                   # useAsyncData, useServices (store), useCatalogData
 │   └── styles/
 │       ├── tokens.css           # Semantic Dark Purple design tokens (colors, type, spacing, radii)
 │       └── globals.css          # Reset + shell/UI component styles, reduced-motion
@@ -170,7 +197,9 @@ manga-downloader-1989/
 └── tests/
     ├── setup.ts                 # Testing Library cleanup; per-file mocks
     ├── app.test.tsx             # IPC states + routing/sidebar/404/dialog keyboard tests
-    └── windowService.test.ts    # Window command wrapping + rejection fallback
+    ├── windowService.test.ts    # Window command wrapping + rejection fallback
+    ├── mockServices.test.ts     # Fixture integrity, search, queue dedupe, transitions, reset
+    └── phase03.test.tsx         # Integration matrix T03-01..13 (journey, a11y, states)
 ```
 
 ---
@@ -205,9 +234,15 @@ To verify DB location during dev, add a temporary `println!("{:?}", app_data_dir
 - Reusable UI primitives (Button, Input, Dialog, Tabs, Tooltip, Progress, StatusBadge, Skeleton, EmptyState, ErrorState) and presentation-only domain cards (MangaCard, ChapterRow, DownloadCard) — fixture data only, clearly labeled
 - ErrorBoundary + component/route/window-service tests
 
-**NOT implemented (Phase 03+):**
-- URL import from manga sources
-- In-app search (the topbar search affordance only navigates to the Discover placeholder)
+**Implemented in Phase 3 (interactive prototype — mock data only):**
+- Full screen set: Home dashboard, Discover search + demo URL import, Manga Detail chapter selection/queue, Library + Favorites, Downloads queue with mock transitions, Sample Reader (single/double/vertical, LTR/RTL, zoom), Settings + Sources
+- Typed domain models + service interfaces (`src/services/*.service.ts`) with deterministic fixture-backed mock implementations behind a provider (`src/services/provider.ts`)
+- Cross-screen shared mock state (favorites, queue, reading progress) via a single external store; session-scoped by design
+- Original neutral SVG sample pages in `src/assets/sample-reader/` (no third-party copyrighted images)
+- Persistent "Demo · dữ liệu mẫu" badge; all future-only controls visibly disabled with reasons
+
+**NOT implemented (Phase 04+):**
+- Real source adapters / arbitrary URL fetching / in-app search over the Internet (the demo matcher only compares strings against a fictitious `demo.manga1989.example` fixture)
 - Download queue (chapters, images, retry, concurrency, real progress events)
 - CBZ packaging
 - Library management (no library DB tables)
@@ -218,7 +253,7 @@ To verify DB location during dev, add a temporary `println!("{:?}", app_data_dir
 - Tauri plugins: filesystem, shell, http, dialog, notification, updater
 - Installer signing, auto-update, CI/CD
 
-**No fake UI:** Placeholder pages state "Coming in Phase 03" / "Không có dữ liệu thật"; fixture cards are labeled as fixtures; no control pretends backend functionality exists.
+**No fake UI:** Phase 02 placeholders were replaced by Phase 03 screens that only manipulate clearly-labeled mock state; future-only actions (Read without sample pages, Add source, output formats) are visibly disabled with an explanation, and nothing pretends a real download, file write or export happened.
 
 ---
 
