@@ -7,6 +7,8 @@ import { localLibraryApi } from "./local-library.api";
 import { settingsApi } from "./settings.api";
 import { sourceApi } from "./source.api";
 import { downloadsApi } from "./downloads.api";
+import { libraryApi } from "./library.api";
+import { readerApi } from "./reader.api";
 import {
   mockCatalogService,
   mockDownloadService,
@@ -39,6 +41,8 @@ export const localServices = {
   library: localLibraryApi,
   source: sourceApi,
   downloads: downloadsApi,
+  libraryV2: libraryApi,
+  reader: readerApi,
 };
 
 export const subscribeServices = subscribeMock;

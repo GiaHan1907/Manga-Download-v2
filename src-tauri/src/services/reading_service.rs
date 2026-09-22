@@ -17,9 +17,16 @@ pub async fn save_progress(
     manga_id: &str,
     chapter_id: &str,
     page_index: i64,
+    scroll_offset: Option<f64>,
+    page_total: Option<i64>,
 ) -> Result<ReadingProgressDto, AppError> {
-    if page_index > 10_000 {
-        return Err(AppError::validation("pageIndex vượt giới hạn hợp lệ."));
-    }
-    progress_repo::save_progress(pool, manga_id, chapter_id, page_index).await
+    progress_repo::save_progress(
+        pool,
+        manga_id,
+        chapter_id,
+        page_index,
+        scroll_offset,
+        page_total,
+    )
+    .await
 }

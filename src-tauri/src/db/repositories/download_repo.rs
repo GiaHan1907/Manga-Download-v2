@@ -536,6 +536,7 @@ pub async fn publish_completed(
     task_id: &str,
     output_relpath: &str,
     output_format: &str,
+    local_size_bytes: Option<i64>,
 ) -> Result<Option<TaskRow>, AppError> {
     let mut tx = pool.begin().await?;
     let (chapter_id,): (String,) =
@@ -561,12 +562,13 @@ pub async fn publish_completed(
         return Ok(None);
     }
     sqlx::query(
-        "UPDATE chapters SET local_path = ?2, output_format = ?3, updated_at = ?4 WHERE id = ?1",
+        "UPDATE chapters SET local_path = ?2, output_format = ?3, local_size_bytes = ?5, updated_at = ?4 WHERE id = ?1",
     )
     .bind(&chapter_id)
     .bind(output_relpath)
     .bind(output_format)
     .bind(&ts)
+    .bind(local_size_bytes)
     .execute(&mut *tx)
     .await?;
     let task = task_by_id(&mut tx, task_id).await?;
@@ -609,6 +611,26 @@ pub async fn recover_stale_tasks(pool: &SqlitePool) -> Result<u64, AppError> {
     .await?
     .rows_affected();
     Ok(changed)
+}
+
+/// Test-only: attach a verified artifact to a chapter without a task.
+#[cfg(test)]
+pub async fn attach_artifact_for_test(
+    pool: &SqlitePool,
+    chapter_id: &str,
+    relpath: &str,
+    format: &str,
+) {
+    sqlx::query(
+        "UPDATE chapters SET local_path = ?2, output_format = ?3, updated_at = ?4 WHERE id = ?1",
+    )
+    .bind(chapter_id)
+    .bind(relpath)
+    .bind(format)
+    .bind(now_iso())
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 #[cfg(test)]
@@ -739,7 +761,7 @@ mod tests {
             .unwrap();
         assert_eq!(done, 2, "counter recomputed from page rows");
 
-        let published = publish_completed(&pool, &task.id, "manga-x/c1-t.cbz", "cbz")
+        let published = publish_completed(&pool, &task.id, "manga-x/c1-t.cbz", "cbz", Some(214))
             .await
             .unwrap()
             .unwrap();

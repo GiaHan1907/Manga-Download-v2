@@ -14,6 +14,7 @@ import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useCatalogData } from "../../shared/hooks/useCatalogData";
 import { useServicesVersion } from "../../shared/hooks/useServices";
 import ContinueReading from "./components/ContinueReading";
+import LocalContinueReading from "./components/LocalContinueReading";
 import StatCard from "./components/StatCard";
 
 const statusTone: Record<DownloadStatus, "success" | "warning" | "error" | "neutral"> = {
@@ -75,6 +76,7 @@ export default function HomePage() {
 
   return (
     <div className="page-stack">
+      <LocalContinueReading />
       <section className="panel home-hero">
         <div>
           <h2 className="panel__title">Bảng điều khiển demo</h2>

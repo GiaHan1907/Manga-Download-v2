@@ -184,7 +184,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        download_repo::publish_completed(&pool, &task.id, "title-abc/ch-def-t123.cbz", "cbz")
+        download_repo::publish_completed(&pool, &task.id, "title-abc/ch-def-t123.cbz", "cbz", None)
             .await
             .unwrap();
         assert!(sqlx::query("SELECT 1")

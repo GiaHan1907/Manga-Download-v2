@@ -11,6 +11,13 @@ import type {
   SettingsPatchDto,
 } from "../../types/backend";
 import type { QueueResultDto, DownloadTaskEvent } from "../../types/downloads";
+import type {
+  DownloadedChapterDto,
+  LibraryMangaDto,
+  ReconcileReportDto,
+  ReaderManifestDto,
+  RemoveMangaFilesDto,
+} from "../../types/library";
 import { DOWNLOAD_EVENT } from "../../types/downloads";
 import type {
   RemoteChapterDto,
@@ -71,6 +78,8 @@ export async function saveReadingProgress(args: {
   mangaId: string;
   chapterId: string;
   pageIndex: number;
+  scrollOffset?: number;
+  pageTotal?: number;
 }): Promise<ReadingProgressDto> {
   return invoke<ReadingProgressDto>("app_save_reading_progress", args);
 }
@@ -185,6 +194,59 @@ export async function subscribeDownloadTask(
   return listen<DownloadTaskEvent>(DOWNLOAD_EVENT, (message) => handler(message.payload));
 }
 
+// --- Phase 07: library & offline reader (ids only; pages are (chapter,index)) ---
+
+export async function libraryList(args: {
+  query?: string;
+  sort?: string;
+  filter?: string;
+  limit: number;
+  offset: number;
+}): Promise<PagedResult<LibraryMangaDto>> {
+  return invoke<PagedResult<LibraryMangaDto>>("library_list", args);
+}
+
+export async function libraryDownloadedChapters(mangaId: string): Promise<{
+  chapters: DownloadedChapterDto[];
+}> {
+  return invoke<{ chapters: DownloadedChapterDto[] }>("library_get_downloaded_chapters", { mangaId });
+}
+
+export async function libraryReconcile(): Promise<ReconcileReportDto> {
+  return invoke<ReconcileReportDto>("library_reconcile");
+}
+
+export async function libraryRemoveChapter(chapterId: string): Promise<void> {
+  await invoke<void>("library_remove_chapter", { chapterId });
+}
+
+export async function libraryRemoveMangaFiles(mangaId: string): Promise<RemoveMangaFilesDto> {
+  return invoke<RemoveMangaFilesDto>("library_remove_manga_files", { mangaId });
+}
+
+export async function readerOpenChapter(chapterId: string): Promise<ReaderManifestDto> {
+  return invoke<ReaderManifestDto>("reader_open_chapter", { chapterId });
+}
+
+/// One page per call, binary (Rust `ipc::Response`). Normalizes to Uint8Array
+/// regardless of the transport shape (ArrayBuffer | number[] | Uint8Array).
+export async function readerGetPageBytes(
+  chapterId: string,
+  pageIndex: number,
+): Promise<Uint8Array> {
+  const response = await invoke<ArrayBuffer | Uint8Array | number[]>("reader_get_page_bytes", {
+    chapterId,
+    pageIndex,
+  });
+  if (response instanceof Uint8Array) {
+    return response;
+  }
+  if (response instanceof ArrayBuffer) {
+    return new Uint8Array(response);
+  }
+  return Uint8Array.from(response);
+}
+
 export function normalizeIpcError(error: unknown): AppError {  if (typeof error === "object" && error !== null) {
     const candidate = error as Record<string, unknown>;
     const code = isAppErrorCode(candidate.code) ? candidate.code : "INTERNAL_ERROR";
@@ -217,6 +279,14 @@ const APP_ERROR_CODES: ReadonlySet<string> = new Set<AppErrorCode>([
   "SOURCE_NETWORK",
   "SOURCE_PARSE_ERROR",
   "SOURCE_UPSTREAM",
+  "LIBRARY_ITEM_NOT_FOUND",
+  "LOCAL_FILE_MISSING",
+  "LOCAL_FILE_CORRUPTED",
+  "CBZ_INVALID",
+  "UNSUPPORTED_IMAGE_FORMAT",
+  "PAGE_RESOURCE_NOT_FOUND",
+  "DELETE_FAILED",
+  "STORAGE_OUTSIDE_LIBRARY_ROOT",
 ]);
 
 function isAppErrorCode(value: unknown): value is AppError["code"] {

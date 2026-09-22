@@ -1,7 +1,9 @@
 pub mod discovery;
 pub mod downloads;
 pub mod favorites;
+pub mod library;
 pub mod local_catalog;
+pub mod reader;
 pub mod reading_progress;
 pub mod settings;
 pub mod system;

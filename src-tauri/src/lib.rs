@@ -4,6 +4,7 @@ mod db;
 mod domain;
 mod downloader;
 mod error;
+mod reader;
 mod services;
 mod sources;
 
@@ -59,6 +60,7 @@ pub fn run() {
                 db: pool,
                 registry,
                 downloads,
+                app_data_dir: app_data_dir.clone(),
             });
             Ok(())
         })
@@ -90,7 +92,14 @@ pub fn run() {
             commands::downloads::resume_download,
             commands::downloads::cancel_download,
             commands::downloads::retry_download,
-            commands::downloads::set_download_priority
+            commands::downloads::set_download_priority,
+            commands::library::library_list,
+            commands::library::library_get_downloaded_chapters,
+            commands::library::library_reconcile,
+            commands::library::library_remove_chapter,
+            commands::library::library_remove_manga_files,
+            commands::reader::reader_open_chapter,
+            commands::reader::reader_get_page_bytes
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

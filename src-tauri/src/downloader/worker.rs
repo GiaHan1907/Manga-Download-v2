@@ -357,10 +357,23 @@ async fn attempt_run(
         }
     };
 
-    let published =
-        download_repo::publish_completed(&deps.pool, &task_id, &relpath, &task.target_format)
-            .await?
-            .ok_or(AppError::Conflict)?;
+    // Artifact byte size for Library accounting (best-effort; reconcile can
+    // re-derive it). Folder mode sums the validated page set.
+    let artifact_size: Option<i64> = match task.target_format.as_str() {
+        "folder" => Some(exports.iter().map(|e| e.size_bytes).sum::<i64>()),
+        _ => std::fs::metadata(manga_dir.join(&base))
+            .map(|m| m.len() as i64)
+            .ok(),
+    };
+    let published = download_repo::publish_completed(
+        &deps.pool,
+        &task_id,
+        &relpath,
+        &task.target_format,
+        artifact_size,
+    )
+    .await?
+    .ok_or(AppError::Conflict)?;
     let _ = std::fs::remove_dir_all(&staging);
     let dto = task_repo::to_dto(published);
     let (bytes, speed) = snapshot(live);

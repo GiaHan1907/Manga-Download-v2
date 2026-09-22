@@ -1,4 +1,4 @@
-# IPC Contract — React ↔ Rust (Phase 04 + Phase 05 + Phase 06)
+# IPC Contract — React ↔ Rust (Phase 04 + 05 + 06 + 07)
 
 Mọi lời gọi phía frontend đi qua `src/shared/api/desktop.ts` (duy nhất). Tham số và payload serialized **camelCase**; command Rust khai báo snake_case, Tauri tự map. Lỗi trả về luôn là envelope đã kiểm chứng, không bao giờ raw SQL/path/stack.
 
@@ -6,7 +6,8 @@ Mọi lời gọi phía frontend đi qua `src/shared/api/desktop.ts` (duy nhất
 
 ```json
 { "code": "DATABASE_INIT_FAILED | VALIDATION_ERROR | NOT_FOUND | DB_CONFLICT | UNSUPPORTED_IN_THIS_PHASE | INTERNAL_ERROR
-        | INVALID_URL | UNSUPPORTED_SOURCE | SOURCE_DISABLED | UNSUPPORTED_OPERATION | SOURCE_NOT_FOUND | SOURCE_FORBIDDEN | SOURCE_RATE_LIMITED | SOURCE_NETWORK | SOURCE_PARSE_ERROR | SOURCE_UPSTREAM",
+        | INVALID_URL | UNSUPPORTED_SOURCE | SOURCE_DISABLED | UNSUPPORTED_OPERATION | SOURCE_NOT_FOUND | SOURCE_FORBIDDEN | SOURCE_RATE_LIMITED | SOURCE_NETWORK | SOURCE_PARSE_ERROR | SOURCE_UPSTREAM
+        | LIBRARY_ITEM_NOT_FOUND | LOCAL_FILE_MISSING | LOCAL_FILE_CORRUPTED | CBZ_INVALID | UNSUPPORTED_IMAGE_FORMAT | PAGE_RESOURCE_NOT_FOUND | DELETE_FAILED | STORAGE_OUTSIDE_LIBRARY_ROOT",
   "message": "string — an toàn cho UI",
   "retryable": true }
 ```
@@ -27,7 +28,7 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `app_set_manga_favorite` | `{ mangaId, favorite }` | `boolean` | chỉ manga đã đăng ký; idempotent |
 | `app_list_favorite_mangas` | `{ limit?, offset? }` | `PagedResult<LocalMangaDto>` | newest first |
 | `app_get_reading_progress` | `{ mangaId }` | `ReadingProgressDto \| null` | |
-| `app_save_reading_progress` | `{ mangaId, chapterId, pageIndex }` | `ReadingProgressDto` | validate ownership chapter∈manga trong transaction; `0 ≤ pageIndex ≤ 10000`; write lỗi không phá progress cũ |
+| `app_save_reading_progress` | `{ mangaId, chapterId, pageIndex, scrollOffset?, pageTotal? }` | `ReadingProgressDto` (+`scrollOffset,pageTotal`) | validate ownership chapter∈manga trong MỘT transaction; `0 ≤ pageIndex ≤ 10000`; `scrollOffset∈0..=1`; stamp `mangas.last_read_at` (Phase 07); write lỗi không phá progress cũ |
 | `app_list_local_download_tasks` | `{ status?, limit?, offset? }` | `PagedResult<DownloadTaskDto>` | CHỈ ĐỌC (Phase 06 mới ghi); status sai → `VALIDATION_ERROR` |
 
 **Không tồn tại** command nào nhận đường dẫn file tuyệt đối, SQL, URL tùy ý để fetch, headers từ renderer hay generic insert metadata. `save_discovered_manga` chỉ nhận cặp ID và tự re-fetch từ provider.
@@ -61,6 +62,20 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 **Event** `download-task-updated` → payload `DownloadTaskEvent { task, downloadedBytes, speedBytesPerSecond|null, occurredAt }`: progress gộp ≥250ms/task, chuyển trạng thái tức thì; `task.revision` tăng đơn điệu để UI chặn frame cũ ghi đè frame mới. Frontend subscribe qua `desktop.subscribeDownloadTask()` và **bắt buộc unlisten khi teardown**. `DownloadTaskDto` không bao giờ chứa URL trang/headers/đường dẫn tuyệt đối; `outputRelpath` là đường dẫn tương đối dưới app library root, chỉ hiển thị, không phải input.
 
+## Commands Phase 07 — library & offline reader (id-only, binary per page)
+
+| Command | Input (camelCase) | Output | Ghi chú |
+|---|---|---|---|
+| `library_list` | `{ query?, sort?('lastRead'│'recentDownload'│'title'│'chapters'), filter?('all'│'downloaded'│'partial'│'favorite'), limit(1..100), offset }` | `PagedResult<LibraryMangaDto>` | aggregate 1 query (counts, size, progress, hasMissing) — không N+1; query escape LIKE |
+| `library_get_downloaded_chapters` | `{ mangaId }` | `{ chapters: DownloadedChapterDto[] }` | `artifactOk` = Rust fs-check tại lúc gọi |
+| `library_reconcile` | — | `{ checked, healthy, missing, corrupted }` | phi phá hủy: missing⇒clear cờ offline, corrupted⇒clear cờ + GIỮ file; không bao giờ xóa |
+| `library_remove_chapter` | `{ chapterId }` | — | path lấy từ DB, validate relpath + under library root; **xóa disk trước, DB sau**; fail ⇒ `DELETE_FAILED`, trạng thái nguyên |
+| `library_remove_manga_files` | `{ mangaId }` | `{ removed[], failed[] }` | per-item trung thực; giữ metadata/favorites/progress |
+| `reader_open_chapter` | `{ chapterId }` | `ReaderManifestDto` | chỉ chapter có `local_path`; `LOCAL_FILE_MISSING`/`CBZ_INVALID`/`LOCAL_FILE_CORRUPTED`; manifest KHÔNG chứa path/tên file; kèm prev/Next chương đã tải + startPage resume |
+| `reader_get_page_bytes` | `{ chapterId, pageIndex }` | **binary** (`ipc::Response` → JS `ArrayBuffer`) | 1 trang/lần, cap 20MB; entry archive là basename-only; magic-check; `PAGE_RESOURCE_NOT_FOUND` |
+
+`app_list_local_download_tasks`… (Phase 06 giữ nguyên). Reader page: UI dùng `URL.createObjectURL` blob có thu hồi; CSP `img-src` thêm `blob:` (duyệt trong Phase 07); capabilities không đổi.
+
 ## DTO định nghĩa tại `src/types/backend.ts`
 
 `LocalMangaDto` (kèm `chapterCount`, `favorite`), `LocalChapterDto` (+`downloaded`, `outputFormat` — badge offline do Rust kiểm chứng), `LocalMangaDetailDto`, `ReadingProgressDto`, `DownloadTaskDto`, `AppSettingsDto`, `PagedResult<T>`. Phase 06 thêm `src/types/downloads.ts` (`QueueResultDto`, `DownloadTaskEvent`, bảng transition UI, format helpers) và `localServices.downloads` (`src/services/downloads.api.ts`).
@@ -73,6 +88,8 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 - `localServices.library` (`src/services/local-library.api.ts`) — màn **Local**: Library, Favorites.
 - `localServices.source` (`src/services/source.api.ts`) — **Production discovery** (Phase 05): Discover live tabs, `/remote/...`, Settings → Sources.
+- `localServices.downloads` (`src/services/downloads.api.ts`) — **Production queue** (Phase 06): Downloads manager, batch submit, event `download-task-updated`.
+- `localServices.libraryV2` / `localServices.reader` (`library.api.ts` / `reader.api.ts`) — **Production library + offline reader** (Phase 07): Library/LocalManga/`/read/:chapterId`.
 - `services` (`provider.ts`) — sandbox **Demo**: Manga Detail/Downloads/Reader/Home + tab Demo sandbox (mock fixtures, nhãn Demo).
 - `services.settings` — đã là adapter THẬT (`settings.api.ts`) từ Phase 04.
 - Quy tắc: DB error ≠ empty library; provider error ≠ no results. UI phải phân biệt `ErrorState` (retry) / danh sách `sourceErrors` / `EmptyState`.

@@ -240,34 +240,37 @@ describe("T05 sources management", () => {
 });
 
 describe("T05 Library truthfulness (round-1 finding)", () => {
-  it("labels saved metadata as NOT downloaded", async () => {
+  it("labels saved-but-not-downloaded manga as having no offline content", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === "app_list_local_mangas") {
+      if (cmd === "library_list") {
         return Promise.resolve({
           items: [
             {
               id: "m-1",
-              sourceId: "madara-truyentuoitho-com",
-              sourceMangaId: "ninja-loan-thi",
               title: "Ninja Loạn Thị",
               author: null,
-              description: null,
               status: "ongoing",
-              chapterCount: 2,
               favorite: false,
-              updatedAt: "2026-09-22T00:00:00.000Z",
+              downloadedChapters: 0,
+              totalChapters: 2,
+              localSizeBytes: null,
+              lastReadAt: null,
+              lastDownloadAt: null,
+              progress: null,
+              hasMissing: false,
             },
           ],
           total: 1,
-          limit: 20,
+          limit: 24,
           offset: 0,
         });
       }
       return Promise.resolve([]);
     });
     renderAt("/library");
-    expect(await screen.findByText("Saved — chưa tải (Phase 06)")).toBeDefined();
-    expect(screen.getByText(/KHÔNG phải chương đã tải về/)).toBeDefined();
+    // Saved metadata with zero downloaded chapters must NOT look downloaded.
+    expect(await screen.findByText("Chưa tải chương nào")).toBeDefined();
+    expect(screen.getByText("0/2 chương offline · không rõ tác giả")).toBeDefined();
   });
 });
 

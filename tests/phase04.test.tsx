@@ -31,11 +31,18 @@ beforeEach(() => {
     if (cmd === "app_health_check") {
       return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 2 });
     }
-    if (cmd === "app_list_local_mangas" || cmd === "app_list_favorite_mangas") {
+    if (
+      cmd === "app_list_local_mangas" ||
+      cmd === "app_list_favorite_mangas" ||
+      cmd === "library_list"
+    ) {
       if (!dbAvailable) {
         return Promise.reject({ code: "DATABASE_INIT_FAILED", message: "Không thể khởi tạo cơ sở dữ liệu local.", retryable: true });
       }
-      return Promise.resolve({ items: [], total: 0, limit: 20, offset: 0 });
+      return Promise.resolve({ items: [], total: 0, limit: 24, offset: 0 });
+    }
+    if (cmd === "library_get_downloaded_chapters") {
+      return Promise.resolve({ chapters: [] });
     }
     return Promise.reject(new Error(`Unknown command ${cmd}`));
   });
@@ -181,24 +188,26 @@ describe("S1/S2 review-round-2 boundaries", () => {
       if (cmd === "app_get_info") {
         return Promise.resolve({ name: "Manga Downloader 1989", version: "0.1.0", platform: "windows" });
       }
-      if (cmd === "app_list_local_mangas") {
+      if (cmd === "library_list") {
         return Promise.resolve({
           items: [
             {
               id: "m-1",
-              sourceId: "src-a",
-              sourceMangaId: "a1",
               title: "Manga Đã Đăng Ký",
               author: null,
-              description: null,
               status: "ongoing",
-              chapterCount: 3,
               favorite: false,
-              updatedAt: "2026-09-22T00:00:00.000Z",
+              downloadedChapters: 0,
+              totalChapters: 3,
+              localSizeBytes: null,
+              lastReadAt: null,
+              lastDownloadAt: null,
+              progress: null,
+              hasMissing: false,
             },
           ],
           total: 1,
-          limit: 20,
+          limit: 24,
           offset: 0,
         });
       }

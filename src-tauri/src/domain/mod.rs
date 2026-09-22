@@ -103,6 +103,10 @@ pub struct ReadingProgressDto {
     pub manga_id: String,
     pub chapter_id: String,
     pub page_index: i64,
+    /// Vertical reader restore hint (fraction 0..1 of the page height).
+    pub scroll_offset: Option<f64>,
+    /// Page total captured when the chapter was opened (completion %).
+    pub page_total: Option<i64>,
     pub updated_at: String,
 }
 
@@ -161,6 +165,76 @@ pub struct QueueResultDto {
     pub reused: Vec<DownloadTaskDto>,
     pub errors: Vec<QueueErrorDto>,
     pub queued_at: String,
+}
+
+/// Phase 07 — reader manifest. Deliberately path-free: pages are addressed by
+/// index and served through `reader_get_page_bytes`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaderPageDto {
+    pub index: usize,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaderManifestDto {
+    pub chapter_id: String,
+    pub manga_id: String,
+    pub manga_title: String,
+    pub chapter_title: String,
+    pub format: String,
+    pub page_count: usize,
+    pub pages: Vec<ReaderPageDto>,
+    pub prev_chapter_id: Option<String>,
+    pub next_chapter_id: Option<String>,
+    pub start_page: usize,
+    pub start_scroll_offset: Option<f64>,
+}
+
+/// Phase 07 — library card (aggregated, single query, no N+1).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryProgressDto {
+    pub chapter_id: String,
+    pub page_index: i64,
+    pub page_total: Option<i64>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryMangaDto {
+    pub id: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub status: String,
+    pub favorite: bool,
+    pub downloaded_chapters: i64,
+    pub total_chapters: i64,
+    pub local_size_bytes: Option<i64>,
+    pub last_read_at: Option<String>,
+    pub last_download_at: Option<String>,
+    pub progress: Option<LibraryProgressDto>,
+    /// True when reconciliation previously found a recorded artifact missing.
+    pub has_missing: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconcileReportDto {
+    pub checked: i64,
+    pub healthy: i64,
+    pub missing: i64,
+    pub corrupted: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveMangaFilesDto {
+    pub removed: Vec<String>,
+    pub failed: Vec<String>,
 }
 
 /// Input for settings patch — unknown keys are rejected, values validated in service.

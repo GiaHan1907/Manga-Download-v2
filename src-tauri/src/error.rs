@@ -1,6 +1,56 @@
 use serde::Serialize;
 use thiserror::Error;
 
+/// Phase 07 library/reader outcomes. Codes join the documented wire taxonomy;
+/// messages are static and user-safe (never paths or provider payloads).
+#[derive(Debug, thiserror::Error)]
+pub enum LibraryError {
+    #[error("library item not found")]
+    NotFound,
+    #[error("local file missing")]
+    FileMissing,
+    #[error("local file corrupted")]
+    FileCorrupted,
+    #[error("invalid cbz archive")]
+    CbzInvalid,
+    #[error("unsupported image format")]
+    UnsupportedImage,
+    #[error("page resource not found")]
+    PageNotFound,
+    #[error("delete failed")]
+    DeleteFailed,
+    #[error("path outside the managed library root")]
+    OutsideRoot,
+}
+
+impl LibraryError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            LibraryError::NotFound => "LIBRARY_ITEM_NOT_FOUND",
+            LibraryError::FileMissing => "LOCAL_FILE_MISSING",
+            LibraryError::FileCorrupted => "LOCAL_FILE_CORRUPTED",
+            LibraryError::CbzInvalid => "CBZ_INVALID",
+            LibraryError::UnsupportedImage => "UNSUPPORTED_IMAGE_FORMAT",
+            LibraryError::PageNotFound => "PAGE_RESOURCE_NOT_FOUND",
+            LibraryError::DeleteFailed => "DELETE_FAILED",
+            LibraryError::OutsideRoot => "STORAGE_OUTSIDE_LIBRARY_ROOT",
+        }
+    }
+
+    pub fn safe_message(&self) -> &'static str {
+        match self {
+            LibraryError::NotFound => "Không tìm thấy mục trong thư viện local.",
+            LibraryError::FileMissing => "File đã mất khỏi đĩa — cần tải lại chương này.",
+            LibraryError::FileCorrupted => "File lỗi hoặc không đọc được — cần tải lại.",
+            LibraryError::CbzInvalid => "Archive CBZ không hợp lệ.",
+            LibraryError::UnsupportedImage => "Định dạng ảnh không được hỗ trợ.",
+            LibraryError::PageNotFound => "Không tìm thấy trang trong chương.",
+            LibraryError::DeleteFailed => "Không xóa được file — giữ nguyên trạng thái hiện tại.",
+            LibraryError::OutsideRoot => "Đường dẫn nằm ngoài thư viện được quản lý.",
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("database initialization failed")]
@@ -34,6 +84,9 @@ pub enum AppError {
 
     #[error("provider error")]
     Source(#[from] crate::sources::adapter::SourceError),
+
+    #[error("library error")]
+    Library(#[from] LibraryError),
 }
 
 impl AppError {
@@ -103,6 +156,9 @@ impl AppError {
                         | crate::sources::adapter::SourceError::Upstream
                 ),
             ),
+            AppError::Library(library) => {
+                (library.code(), library.safe_message().to_string(), false)
+            }
         };
         WireError {
             code,

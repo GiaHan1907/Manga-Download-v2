@@ -47,7 +47,10 @@ function installBackendMock() {
         return Promise.resolve({ ...state.settings });
       case "app_list_local_mangas":
       case "app_list_favorite_mangas":
-        return Promise.resolve({ items: [], total: 0, limit: 20, offset: 0 });
+      case "library_list":
+        return Promise.resolve({ items: [], total: 0, limit: 24, offset: 0 });
+      case "library_get_downloaded_chapters":
+        return Promise.resolve({ chapters: [] });
       case "list_supported_sources":
         return Promise.resolve([
           {

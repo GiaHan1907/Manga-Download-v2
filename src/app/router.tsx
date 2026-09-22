@@ -10,6 +10,7 @@ import FavoritesPage from "../features/library/FavoritesPage";
 import LibraryPage from "../features/library/LibraryPage";
 import LocalMangaPage from "../features/library/LocalMangaPage";
 import MangaDetailPage from "../features/manga-detail/MangaDetailPage";
+import ReadPage from "../features/read/ReadPage";
 import ReaderPage from "../features/reader/ReaderPage";
 import SettingsPage from "../features/settings/SettingsPage";
 import SourcesPage from "../features/settings/SourcesPage";
@@ -29,6 +30,7 @@ export function AppRoutes() {
         <Route path="/manga/:mangaId" element={<MangaDetailPage />} />
         <Route path="/remote/:sourceId/:sourceMangaId" element={<RemoteDetailPage />} />
         <Route path="/reader/:mangaId/:chapterId" element={<ReaderPage />} />
+        <Route path="/read/:chapterId" element={<ReadPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
