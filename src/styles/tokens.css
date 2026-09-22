@@ -1,10 +1,68 @@
 :root {
-  --color-background: #101016;
-  --color-sidebar: #171720;
-  --color-surface: #20202C;
-  --color-elevated: #292938;
-  --color-primary: #A78BFA;
-  --color-primary-hover: #8B5CF6;
-  --color-text: #F5F3FF;
-  --color-text-muted: #A1A1B5;
+  color-scheme: dark;
+
+  --background: #101016;
+  --sidebar: #171720;
+  --surface: #20202C;
+  --elevated: #292938;
+  --primary: #A78BFA;
+  --primary-hover: #8B5CF6;
+  --text-primary: #F5F3FF;
+  --text-muted: #A1A1B5;
+  --success: #34D399;
+  --warning: #FBBF24;
+  --error: #F87171;
+
+  --foreground: var(--text-primary);
+  --muted-foreground: var(--text-muted);
+  --surface-foreground: var(--text-primary);
+  --primary-foreground: #181225;
+  --border: rgba(245, 243, 255, 0.1);
+  --border-strong: rgba(245, 243, 255, 0.18);
+  --focus-ring: rgba(167, 139, 250, 0.58);
+  --overlay: rgba(6, 6, 12, 0.72);
+  --selection: rgba(167, 139, 250, 0.35);
+
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.375rem;
+  --font-size-2xl: 1.75rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-pill: 999px;
+
+  --titlebar-height: 3rem;
+  --sidebar-width: 15rem;
+  --sidebar-collapsed-width: 4.5rem;
+  --content-max-width: 80rem;
+  --transition-fast: 150ms ease;
+  --transition-base: 220ms ease;
+
+  --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-text: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms linear;
+    --transition-base: 0ms linear;
+  }
 }

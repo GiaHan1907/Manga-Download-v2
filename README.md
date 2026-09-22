@@ -2,14 +2,14 @@
 
 Local-first desktop app for downloading and reading manga offline. Built with Tauri 2, React, TypeScript, Vite, Rust, and SQLx/SQLite.
 
-> **Phase 01 — Project Foundation & Architecture**  
-> This is the scaffold phase. No business features (URL import, search, download queue, library, offline reader) are implemented yet. Those are planned for Phase 2+.
+> **Phase 01 — Project Foundation & Architecture** ✅ + **Phase 02 — Design System & UI Shell**  
+> Phase 02 adds the Dark Purple design system, custom Windows titlebar, AppShell (sidebar/topbar), typed routing with honest placeholders, and reusable UI primitives. No business features (URL import, search, download queue, library, offline reader) are implemented yet — those come in Phase 03+. See `docs/phase-02/implementation-notes.md`.
 
 ---
 
 ## Stack
 
-- **Frontend:** React 19 + TypeScript + Vite 8
+- **Frontend:** React 19 + TypeScript + Vite 8 + React Router (HashRouter) + Lucide icons
 - **Desktop/Backend:** Tauri 2 + Rust 1.98 (MSVC)
 - **Database:** SQLite via SQLx 0.8 (embedded migrations)
 - **Target:** Windows 10/11 x64
@@ -86,16 +86,16 @@ All gates should exit with code 0. Current status:
 
 | Gate | Status | Notes |
 |---|---|---|
-| `npm ci` | ✅ Pass | 228 packages, 0 vulnerabilities |
+| `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 2/2 tests (loading→success, error state) |
-| `npm run build` | ✅ Pass | Vite 8.3.0, 20 modules → `dist/` |
-| `cargo check` | ✅ Pass | 1 warning (dead_code: `Internal` variant, expected in Phase 1) |
+| `npm run test` | ✅ Pass | 8/8 tests (Phase 01 IPC states + Phase 02 routing/sidebar/404/dialog/windowService) |
+| `npm run build` | ✅ Pass | Vite 8.3.0, 1920 modules → `dist/` (298 kB JS, gzip 93.9 kB) |
+| `cargo check` | ✅ Pass | 1 warning (dead_code: `Internal` variant, expected until business logic) |
 | `cargo clippy` | ✅ Pass | Same 1 warning |
 | `cargo test` | ✅ Pass | 2/2 DB tests (init + idempotency) |
-| `npm run tauri dev` | ✅ Partial | Process starts, DB created at `%APPDATA%\com.manga1989.downloader\manga-downloader-1989.db` (20KB); visual verification (window, colors, IPC data, CSP) requires manual check |
-| `npm run tauri build` | ⏳ Not run | Slow (~10-20 min); optional for Phase 1; verify before release |
+| `npm run tauri dev` | ⏳ Smoke run | Window/UI checks need a human on the desktop session — see `docs/phase-02/implementation-notes.md` §5 |
+| `npm run tauri build` | ⏳ Not run | Slow (~10-20 min); run before release |
 
 ---
 
@@ -116,28 +116,43 @@ manga-downloader-1989/
 ├── vitest.config.ts             # jsdom, tests/**, setup file
 ├── eslint.config.js             # Flat config: typescript-eslint + react-hooks + react-refresh
 ├── index.html                   # Vite entry, mounts #root
+├── docs/
+│   └── phase-02/
+│       └── implementation-notes.md  # Phase 02 audit, UI contract, test results, open issues
 ├── src/
 │   ├── main.tsx                 # React root, imports globals.css
 │   ├── vite-env.d.ts
 │   ├── app/
-│   │   └── App.tsx              # Shell: title + <SystemStatus />
+│   │   ├── App.tsx              # Mounts AppRouter
+│   │   ├── router.tsx           # HashRouter, route map, 404
+│   │   ├── routes.ts            # Typed route contract (single source of truth)
+│   │   └── ErrorBoundary.tsx    # UI crash guard
+│   ├── components/
+│   │   ├── layout/              # AppShell, WindowTitlebar, Sidebar, Topbar, PageContainer
+│   │   └── ui/                  # Button, Input, Dialog, Tabs, Tooltip, Progress,
+│   │                            # StatusBadge, Skeleton, EmptyState, ErrorState,
+│   │                            # MangaCard, ChapterRow, DownloadCard (presentation-only)
 │   ├── features/
-│   │   └── system/
-│   │       └── SystemStatus.tsx # IPC consumer: loading/error/success states
+│   │   ├── system/
+│   │   │   └── SystemStatus.tsx # IPC consumer: loading/error/success states
+│   │   └── placeholders/
+│   │       └── PlaceholderPage.tsx  # Honest "Coming in Phase 03" pages per route
+│   ├── services/
+│   │   └── windowService.ts     # Tauri window API wrapper (minimize/maximize/close/drag)
 │   ├── shared/
 │   │   └── api/
 │   │       ├── contracts.ts     # AppInfo, AppHealth, AppError types
 │   │       └── desktop.ts       # Sole IPC boundary: getAppInfo, getAppHealth, normalizeIpcError
 │   └── styles/
-│       ├── tokens.css           # 8 Dark Purple CSS variables
-│       └── globals.css          # Base reset, imports tokens
+│       ├── tokens.css           # Semantic Dark Purple design tokens (colors, type, spacing, radii)
+│       └── globals.css          # Reset + shell/UI component styles, reduced-motion
 ├── src-tauri/
 │   ├── Cargo.toml               # tauri 2, sqlx 0.8, serde, thiserror
 │   ├── Cargo.lock
 │   ├── build.rs                 # tauri_build::build()
 │   ├── tauri.conf.json          # identifier, CSP, devUrl, frontendDist, window config
 │   ├── capabilities/
-│   │   └── default.json         # Tauri 2 capability: main window, core:default only
+│   │   └── default.json         # main window: core:default + 5 explicit window permissions
 │   ├── icons/
 │   │   └── icon.ico             # 16x16 placeholder (dark purple #101016)
 │   ├── migrations/
@@ -153,8 +168,9 @@ manga-downloader-1989/
 │       └── db/
 │           └── mod.rs           # init_pool: create_dir_all, SqlitePool, embedded migration
 └── tests/
-    ├── setup.ts                 # Test setup (mocks per-file)
-    └── app.test.tsx             # Smoke test: mock invoke, render App, assert states
+    ├── setup.ts                 # Testing Library cleanup; per-file mocks
+    ├── app.test.tsx             # IPC states + routing/sidebar/404/dialog keyboard tests
+    └── windowService.test.ts    # Window command wrapping + rejection fallback
 ```
 
 ---
@@ -172,28 +188,37 @@ To verify DB location during dev, add a temporary `println!("{:?}", app_data_dir
 
 ---
 
-## Phase 1 Scope Limits
+## Phase Scope Limits
 
 **Implemented in Phase 1:**
 - Tauri 2 desktop window (dark purple shell)
 - Two typed IPC commands: `app_get_info`, `app_health_check`
 - SQLite app-data DB with embedded migration (`app_settings` table only)
-- Strict capabilities (no fs/shell/http plugins) and CSP (no wildcards/remote scripts)
+- Strict capabilities and CSP (no wildcards/remote scripts)
 - Lint, typecheck, frontend test, Rust test, Vite build, cargo check/clippy/test
 
-**NOT implemented (Phase 2+):**
+**Implemented in Phase 2:**
+- Dark Purple design system: semantic tokens, typography/spacing/radii, focus rings, reduced-motion
+- Custom Windows titlebar (drag region, double-click maximize, minimize/maximize/close via `windowService`) with 5 explicit core window permissions
+- AppShell: collapsible sidebar with active-route highlight + tooltips, topbar, scrollable content
+- Typed HashRouter routing with honest placeholder pages (Home/Discover/Library/Downloads/Favorites/Settings/Manga Detail/Reader) and 404
+- Reusable UI primitives (Button, Input, Dialog, Tabs, Tooltip, Progress, StatusBadge, Skeleton, EmptyState, ErrorState) and presentation-only domain cards (MangaCard, ChapterRow, DownloadCard) — fixture data only, clearly labeled
+- ErrorBoundary + component/route/window-service tests
+
+**NOT implemented (Phase 03+):**
 - URL import from manga sources
-- In-app search
-- Download queue (chapters, images, retry, concurrency, progress events)
+- In-app search (the topbar search affordance only navigates to the Discover placeholder)
+- Download queue (chapters, images, retry, concurrency, real progress events)
 - CBZ packaging
-- Library management
+- Library management (no library DB tables)
 - Offline reader
 - Manga/chapter/source/download/library DB tables (only `app_settings` exists)
-- Tailwind, shadcn/ui, Radix, Lucide, Motion, React Router, Zustand, TanStack Query
+- Settings persistence (placeholder UI does not write `app_settings`)
+- Tailwind, shadcn/ui, Radix, Motion, Zustand, TanStack Query
 - Tauri plugins: filesystem, shell, http, dialog, notification, updater
 - Installer signing, auto-update, CI/CD
 
-**No fake UI:** The shell displays only app info and system health. There are no buttons/nav/links implying unimplemented features.
+**No fake UI:** Placeholder pages state "Coming in Phase 03" / "Không có dữ liệu thật"; fixture cards are labeled as fixtures; no control pretends backend functionality exists.
 
 ---
 
@@ -218,7 +243,7 @@ Registered commands (exactly two in Phase 1):
 
 ## Security
 
-- **Capabilities:** `src-tauri/capabilities/default.json` grants `core:default` to window `main` only. No `shell:default`, `fs:default`, `http:default`, no plugins, no remote origins.
+- **Capabilities:** `src-tauri/capabilities/default.json` grants `core:default` plus exactly five explicit core window permissions (`allow-minimize`, `allow-toggle-maximize`, `allow-close`, `allow-is-maximized`, `allow-start-dragging`) to window `main` only — needed for the custom titlebar. No `shell:default`, `fs:default`, `http:default`, no plugins, no remote origins.
 - **CSP:** `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost`. No wildcards, no remote scripts. Tauri auto-injects nonces for its own scripts.
 - **DB access:** Only Rust touches SQLite. Frontend sends data via validated command contracts.
 - **No `withGlobalTauri`:** Tauri API scoped to `@tauri-apps/api` imports.

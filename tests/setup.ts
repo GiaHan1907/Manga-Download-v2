@@ -1,1 +1,6 @@
-// Test setup — per-test mocks are defined in each test file.
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => {
+  cleanup();
+});

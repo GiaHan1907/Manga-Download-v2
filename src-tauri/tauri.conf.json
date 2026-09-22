@@ -14,10 +14,12 @@
       {
         "label": "main",
         "title": "Manga Downloader 1989",
-        "width": 1100,
-        "height": 720,
-        "minWidth": 800,
-        "minHeight": 600
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "decorations": false,
+        "resizable": true
       }
     ],
     "security": {
@@ -27,6 +29,6 @@
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
-    "icon": []
+    "icon": ["icons/icon.ico"]
   }
 }
