@@ -9,9 +9,9 @@
 |---|---|---|---|
 | 01 — Foundation | Tauri 2 + React 19 + Vite + SQLx/SQLite app-data, 2 IPC commands, CSP/capability chặt | `docs/phase-01/self-review.md` | ACCEPT (fix: bỏ serde_json unused, withGlobalTauri:false tường minh) |
 | 02 — Design System & UI Shell | 11 tokens Dark Purple, custom titlebar + windowService, AppShell, primitives | `docs/phase-02/self-review.md` | ACCEPT (packaged `tauri build` pass — MSI+NSIS, checksums ghi trong file) |
-| 03 — Core UI Screens (prototype) | 9 màn hình + typed mock services + fixture deterministic + test matrix T03-01→13 | `docs/phase-03/self-review.md` (+ `dd5434c`, `13081ee`) | ACCEPT (fix: dialog focus trap, offline filter, task seq vào MockState) |
+| 03 — Core UI Screens (prototype) | 9 màn hình + typed mock services + fixture deterministic + test matrix T03-01→13 | `docs/phase-03/self-review.md` — 2 vòng: vòng 1 (`dd5434c`, `13081ee`), vòng 2 (`d9f7ee1`: F6 — Discover tôn trọng nguồn đã tắt, test hành vi end-to-end) | ACCEPT (fix: dialog focus trap, offline filter, task seq vào MockState, bộ lọc source ∩ enabled) |
 
-**Gate hiện tại (toàn bộ xanh):** lint · typecheck · vitest 47/47 · vite build · cargo check/clippy/test (1 warning `Internal` dead_code — chủ đích) · tauri dev smoke exit 0 · tauri build artifacts OK.
+**Gate hiện tại (toàn bộ xanh):** lint · typecheck · vitest 48/48 · vite build · cargo check/clippy/test (1 warning `Internal` dead_code — chủ đích) · tauri dev smoke exit 0 · tauri build artifacts OK. Remote `origin/master` đồng bộ tới `d9f7ee1`/`e60b06b`.
 
 ## 2. Phase 03 CHƯA phải là app thật
 
