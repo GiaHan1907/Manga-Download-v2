@@ -1,4 +1,4 @@
-export type SourceCapability = "search" | "resolveUrl" | "details";
+export type SourceCapability = "search" | "resolveUrl" | "details" | "pages";
 
 export type SourceStatus = "ready" | "disabled" | "unavailable";
 

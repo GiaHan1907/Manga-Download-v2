@@ -262,7 +262,7 @@ pub async fn list_mangas(
 
 pub async fn list_chapters(pool: &SqlitePool, manga_id: &str) -> Result<Vec<ChapterDto>, AppError> {
     let rows = sqlx::query(
-        "SELECT id, manga_id, source_chapter_id, title, number, page_count \
+        "SELECT id, manga_id, source_chapter_id, title, number, page_count, local_path, output_format \
          FROM chapters WHERE manga_id = ?1 \
          ORDER BY number IS NULL ASC, number ASC, created_at ASC, id ASC",
     )
@@ -272,6 +272,7 @@ pub async fn list_chapters(pool: &SqlitePool, manga_id: &str) -> Result<Vec<Chap
 
     rows.iter()
         .map(|row| {
+            let local_path: Option<String> = row.try_get("local_path")?;
             Ok(ChapterDto {
                 id: row.try_get("id")?,
                 manga_id: row.try_get("manga_id")?,
@@ -279,6 +280,8 @@ pub async fn list_chapters(pool: &SqlitePool, manga_id: &str) -> Result<Vec<Chap
                 title: row.try_get("title")?,
                 number: row.try_get("number")?,
                 page_count: row.try_get("page_count")?,
+                downloaded: local_path.is_some(),
+                output_format: row.try_get("output_format")?,
             })
         })
         .collect()

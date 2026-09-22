@@ -1,4 +1,5 @@
 pub mod discovery;
+pub mod downloads;
 pub mod favorites;
 pub mod local_catalog;
 pub mod reading_progress;

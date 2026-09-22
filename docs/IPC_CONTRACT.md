@@ -1,4 +1,4 @@
-# IPC Contract — React ↔ Rust (Phase 04 + Phase 05)
+# IPC Contract — React ↔ Rust (Phase 04 + Phase 05 + Phase 06)
 
 Mọi lời gọi phía frontend đi qua `src/shared/api/desktop.ts` (duy nhất). Tham số và payload serialized **camelCase**; command Rust khai báo snake_case, Tauri tự map. Lỗi trả về luôn là envelope đã kiểm chứng, không bao giờ raw SQL/path/stack.
 
@@ -6,7 +6,7 @@ Mọi lời gọi phía frontend đi qua `src/shared/api/desktop.ts` (duy nhất
 
 ```json
 { "code": "DATABASE_INIT_FAILED | VALIDATION_ERROR | NOT_FOUND | DB_CONFLICT | UNSUPPORTED_IN_THIS_PHASE | INTERNAL_ERROR
-        | INVALID_URL | UNSUPPORTED_SOURCE | SOURCE_DISABLED | UNSUPPORTED_OPERATION | SOURCE_NOT_FOUND | SOURCE_RATE_LIMITED | SOURCE_NETWORK | SOURCE_PARSE_ERROR | SOURCE_UPSTREAM",
+        | INVALID_URL | UNSUPPORTED_SOURCE | SOURCE_DISABLED | UNSUPPORTED_OPERATION | SOURCE_NOT_FOUND | SOURCE_FORBIDDEN | SOURCE_RATE_LIMITED | SOURCE_NETWORK | SOURCE_PARSE_ERROR | SOURCE_UPSTREAM",
   "message": "string — an toàn cho UI",
   "retryable": true }
 ```
@@ -46,9 +46,24 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `get_remote_chapters` | `{ sourceId, sourceMangaId }` | `RemoteChapterDto[]` | cùng nguồn dữ liệu với detail; order ổn định |
 | `save_discovered_manga` | `{ sourceId, sourceMangaId }` | `{ mangaId, savedChapterCount, updated }` | re-fetch trusted + MỘT transaction upsert sources→mangas→chapters; không xóa, không đụng favorites/progress |
 
+## Commands Phase 06 — download engine (chapter/task id-only)
+
+| Command | Input (camelCase) | Output | Ghi chú |
+|---|---|---|---|
+| `queue_chapter_downloads` | `{ chapterIds[] (1..100), format?: "cbz"\|"folder", priority?: -10..10 }` | `QueueResultDto { tasks, reused, errors[], queuedAt }` | KHÔNG nhận URL/headers/path. Format mặc định từ Settings (pdf bị từ chối). Dedup: chapter đã có task non-terminal → `reused`. Lỗi từng mục (`NOT_FOUND`/`UNSUPPORTED_OPERATION` khi nguồn thiếu capability `pages`) không fail cả batch. Một transaction |
+| `get_download_task` | `{ taskId }` | `DownloadTaskDto` | snapshot bền vững; `NOT_FOUND` |
+| `pause_download` | `{ taskId }` | `DownloadTaskDto` | queued→paused ngay; đang chạy → flag hợp tác, worker tự chốt `pausing→paused` khi writes dừng; transition sai → `VALIDATION_ERROR` |
+| `resume_download` | `{ taskId }` | `DownloadTaskDto` | chỉ paused→queued |
+| `cancel_download` | `{ taskId }` | `DownloadTaskDto` | queued/paused ngay; worker nhận flag tự chốt cancelled; staging của task bị xóa, **không đụng file đã publish** |
+| `retry_download` | `{ taskId }` | `DownloadTaskDto` | chỉ failed→queued; giữ attempts/backoff đã lưu |
+| `set_download_priority` | `{ taskId, priority }` | `DownloadTaskDto` | chỉ queued/paused/failed |
+| `app_list_local_download_tasks` (mở rộng) | `{ status?, limit?, offset? }` | `PagedResult<DownloadTaskDto>` | status nay nhận cả 10 lifecycle states; DTO thêm `attempts/nextRetryAt/errorMessage/revision/finishedAt/outputRelpath/chapterTitle/mangaTitle` |
+
+**Event** `download-task-updated` → payload `DownloadTaskEvent { task, downloadedBytes, speedBytesPerSecond|null, occurredAt }`: progress gộp ≥250ms/task, chuyển trạng thái tức thì; `task.revision` tăng đơn điệu để UI chặn frame cũ ghi đè frame mới. Frontend subscribe qua `desktop.subscribeDownloadTask()` và **bắt buộc unlisten khi teardown**. `DownloadTaskDto` không bao giờ chứa URL trang/headers/đường dẫn tuyệt đối; `outputRelpath` là đường dẫn tương đối dưới app library root, chỉ hiển thị, không phải input.
+
 ## DTO định nghĩa tại `src/types/backend.ts`
 
-`LocalMangaDto` (kèm `chapterCount`, `favorite`), `LocalChapterDto`, `LocalMangaDetailDto`, `ReadingProgressDto`, `DownloadTaskDto`, `AppSettingsDto`, `PagedResult<T>`.
+`LocalMangaDto` (kèm `chapterCount`, `favorite`), `LocalChapterDto` (+`downloaded`, `outputFormat` — badge offline do Rust kiểm chứng), `LocalMangaDetailDto`, `ReadingProgressDto`, `DownloadTaskDto`, `AppSettingsDto`, `PagedResult<T>`. Phase 06 thêm `src/types/downloads.ts` (`QueueResultDto`, `DownloadTaskEvent`, bảng transition UI, format helpers) và `localServices.downloads` (`src/services/downloads.api.ts`).
 
 ## DTO Phase 05 tại `src/types/source.ts`
 

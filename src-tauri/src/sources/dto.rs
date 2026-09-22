@@ -6,6 +6,9 @@ pub enum Capability {
     Search,
     ResolveUrl,
     Details,
+    /// Adapter can resolve an ordered page manifest and fetch page images.
+    /// UI only offers download controls for sources declaring this capability.
+    Pages,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -75,4 +78,22 @@ pub struct RemoteMangaDetail {
 pub struct RemoteSearchPage {
     pub items: Vec<RemoteMangaSummary>,
     pub has_more: bool,
+}
+
+/// One ordered page in a chapter manifest. The `url` is source-controlled and
+/// internal to Rust only — it is never serialized to the renderer. Image bytes
+/// are fetched by the engine through the owning adapter's `fetch_image`.
+#[derive(Debug, Clone)]
+pub struct PageDescriptor {
+    pub index: usize,
+    pub url: String,
+}
+
+/// Ordered page set for one chapter. Identities are the adapter's stable
+/// chapter id plus page index; a re-resolved manifest must reconcile against
+/// stored checkpoints rather than trusting new list positions blindly.
+#[derive(Debug, Clone)]
+pub struct PageManifest {
+    pub source_chapter_id: String,
+    pub pages: Vec<PageDescriptor>,
 }

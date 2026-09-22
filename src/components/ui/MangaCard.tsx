@@ -1,4 +1,5 @@
 import { BookOpen } from "lucide-react";
+import { Link } from "react-router-dom";
 import StatusBadge from "./StatusBadge";
 
 export type MangaCardProps = {
@@ -6,11 +7,12 @@ export type MangaCardProps = {
   subtitle: string;
   status?: string;
   coverUrl?: string;
+  to?: string;
 };
 
-export default function MangaCard({ title, subtitle, status = "Mẫu giao diện", coverUrl }: MangaCardProps) {
-  return (
-    <article className="manga-card">
+export default function MangaCard({ title, subtitle, status = "Mẫu giao diện", coverUrl, to }: MangaCardProps) {
+  const inner = (
+    <>
       <div className="manga-card__cover">
         {coverUrl ? <img src={coverUrl} alt="" /> : <BookOpen size={32} aria-hidden="true" />}
       </div>
@@ -21,6 +23,14 @@ export default function MangaCard({ title, subtitle, status = "Mẫu giao diện
           <StatusBadge>{status}</StatusBadge>
         </div>
       </div>
-    </article>
+    </>
   );
+  if (to) {
+    return (
+      <Link to={to} className="manga-card manga-card--link">
+        {inner}
+      </Link>
+    );
+  }
+  return <article className="manga-card">{inner}</article>;
 }

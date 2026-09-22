@@ -9,6 +9,10 @@ use url::Url;
 use super::adapter::SourceError;
 
 pub const MAX_BODY_BYTES: u64 = 2 * 1024 * 1024;
+/// Cap for a single page image (legitimately larger than HTML/JSON bodies).
+pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
+/// Upper bound on pages per chapter manifest (malformed listings guard).
+pub const MAX_PAGE_COUNT: usize = 300;
 pub const MAX_REDIRECTS: u32 = 3;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Politeness floor between requests to the same host. Owners of user-added
@@ -25,6 +29,9 @@ pub trait Transport: Send + Sync {
     async fn get_text(&self, url: &str) -> Result<String, SourceError>;
     /// Form POST with XHR headers — used by WordPress/admin-ajax endpoints.
     async fn post_form_json(&self, url: &str, form: &[(&str, &str)]) -> Result<Value, SourceError>;
+    /// Binary GET with a caller-supplied byte cap (page images). Same
+    /// host/redirect/pacing policy as text fetches.
+    async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError>;
 }
 
 #[derive(Clone)]
@@ -168,6 +175,7 @@ impl GuardedHttp {
 
     fn classify_status(status: reqwest::StatusCode, retry_after: Option<String>) -> SourceError {
         match status.as_u16() {
+            401 | 403 => SourceError::PermissionDenied,
             404 => SourceError::NotFound,
             429 => {
                 SourceError::RateLimited(retry_after.unwrap_or_else(|| "retry-after".to_string()))
@@ -178,6 +186,10 @@ impl GuardedHttp {
     }
 
     async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, SourceError> {
+        self.fetch_bytes_bounded(url, MAX_BODY_BYTES).await
+    }
+
+    async fn fetch_bytes_bounded(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
         let mut current = self.validate(url)?;
         for _ in 0..=MAX_REDIRECTS {
             self.pace().await;
@@ -209,12 +221,12 @@ impl GuardedHttp {
                 return Err(Self::classify_status(status, retry_after));
             }
             if let Some(len) = response.content_length() {
-                if len > MAX_BODY_BYTES {
+                if len > max_bytes {
                     return Err(SourceError::Parse);
                 }
             }
             let bytes = response.bytes().await.map_err(|_| SourceError::Network)?;
-            if bytes.len() as u64 > MAX_BODY_BYTES {
+            if bytes.len() as u64 > max_bytes {
                 return Err(SourceError::Parse);
             }
             return Ok(bytes.to_vec());
@@ -268,6 +280,10 @@ impl Transport for GuardedHttp {
             return Err(SourceError::Parse);
         }
         serde_json::from_slice(&bytes).map_err(|_| SourceError::Parse)
+    }
+
+    async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
+        self.fetch_bytes_bounded(url, max_bytes).await
     }
 }
 
@@ -325,6 +341,13 @@ pub mod mock {
             _: &[(&str, &str)],
         ) -> Result<Value, SourceError> {
             serde_json::from_str(&self.pop_raw("POST", url)?).map_err(|_| SourceError::Parse)
+        }
+        async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
+            let body = self.pop_raw("GET-BYTES", url)?;
+            if body.len() as u64 > max_bytes {
+                return Err(SourceError::Parse);
+            }
+            Ok(body.into_bytes())
         }
     }
 }

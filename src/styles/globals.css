@@ -936,6 +936,42 @@ button {
   font-size: var(--font-size-sm);
 }
 
+.manga-card--link {
+  display: flex;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.manga-card--link:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
+
+.queue-result {
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.download-card__error {
+  color: var(--error);
+  font-size: var(--font-size-sm);
+}
+
+.chapter-select-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
 .library-toolbar {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));

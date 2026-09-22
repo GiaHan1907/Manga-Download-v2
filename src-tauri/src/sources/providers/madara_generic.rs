@@ -8,10 +8,10 @@ use url::Url;
 
 use crate::sources::adapter::{SourceAdapter, SourceError};
 use crate::sources::dto::{
-    Capability, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary, RemoteSearchPage, SourceInfo,
-    SourceStatus,
+    Capability, PageDescriptor, PageManifest, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary,
+    RemoteSearchPage, SourceInfo, SourceStatus,
 };
-use crate::sources::http::{GuardedHttp, HttpPolicy, Transport};
+use crate::sources::http::{GuardedHttp, HttpPolicy, Transport, IMAGE_MAX_BYTES, MAX_PAGE_COUNT};
 
 /// Generic WordPress/Madara adapter. Users register any Madara-based site by
 /// name + https base URL; only the fixed public endpoints the site's own
@@ -160,6 +160,7 @@ impl SourceAdapter for MadaraGeneric {
                 Capability::Search,
                 Capability::ResolveUrl,
                 Capability::Details,
+                Capability::Pages,
             ],
             status: SourceStatus::Ready,
             attribution: Some(format!(
@@ -235,6 +236,48 @@ impl SourceAdapter for MadaraGeneric {
             .filter(|candidate| valid_slug(candidate))
             .ok_or(SourceError::MalformedUrl)?;
         Ok(slug)
+    }
+
+    async fn page_manifest(
+        &self,
+        source_manga_id: &str,
+        source_chapter_id: &str,
+    ) -> Result<PageManifest, SourceError> {
+        if !valid_slug(source_manga_id) || !valid_slug(source_chapter_id) {
+            return Err(SourceError::MalformedUrl);
+        }
+        let page_url = format!(
+            "{}manga/{}/{}/",
+            self.base, source_manga_id, source_chapter_id
+        );
+        let html = self.http.get_text(&page_url).await?;
+        let document = Html::parse_document(&html);
+        // Primary dom-hint documented by the site's own theme; the loose
+        // fallback keeps plain Madara forks working. A foreign image host
+        // fails the whole manifest — the allowlist is never widened silently.
+        let strict = Selector::parse(".reading-content img.wp-manga-chapter-img").unwrap();
+        let mut urls: Vec<String> = Vec::new();
+        collect_page_urls(&document, &strict, &self.base, &self.host, &mut urls)?;
+        if urls.is_empty() {
+            let loose = Selector::parse(".reading-content img").unwrap();
+            collect_page_urls(&document, &loose, &self.base, &self.host, &mut urls)?;
+        }
+        if urls.is_empty() || urls.len() > MAX_PAGE_COUNT {
+            return Err(SourceError::Parse);
+        }
+        let pages = urls
+            .into_iter()
+            .enumerate()
+            .map(|(index, url)| PageDescriptor { index, url })
+            .collect();
+        Ok(PageManifest {
+            source_chapter_id: source_chapter_id.to_string(),
+            pages,
+        })
+    }
+
+    async fn fetch_image(&self, url: &str) -> Result<Vec<u8>, SourceError> {
+        self.http.get_bytes(url, IMAGE_MAX_BYTES).await
     }
 
     async fn manga_detail(&self, source_manga_id: &str) -> Result<RemoteMangaDetail, SourceError> {
@@ -350,6 +393,32 @@ impl SourceAdapter for MadaraGeneric {
             available_offline: false,
         })
     }
+}
+
+fn collect_page_urls(
+    document: &Html,
+    selector: &Selector,
+    base: &Url,
+    host: &str,
+    out: &mut Vec<String>,
+) -> Result<(), SourceError> {
+    let mut seen: HashSet<Url> = HashSet::new();
+    for node in document.select(selector) {
+        let raw = ["src", "data-src", "data-lazy-src", "data-original"]
+            .iter()
+            .find_map(|attr| node.value().attr(attr))
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(raw) = raw else { continue };
+        let joined = base.join(raw).map_err(|_| SourceError::Parse)?;
+        if joined.scheme() != "https" || joined.host_str() != Some(host) {
+            return Err(SourceError::Parse);
+        }
+        if seen.insert(joined.clone()) {
+            out.push(joined.to_string());
+        }
+    }
+    Ok(())
 }
 
 fn clean_title(raw: &str) -> String {
@@ -471,5 +540,58 @@ mod tests {
         assert!(MadaraGeneric::live("x", "https://user@pass.example.org").is_err());
         assert!(MadaraGeneric::live("x", "https://localhost:8443").is_err());
         assert!(MadaraGeneric::live("x", "https://example.com").is_ok());
+    }
+
+    const CHAPTER_FIXTURE: &str = r#"<html><body>
+      <div class="reading-content">
+        <img class="wp-manga-chapter-img" src="  /uploads/p1.jpg  "/>
+        <img class="wp-manga-chapter-img" data-src="https://truyentuoitho.com/uploads/p2.jpg"/>
+        <img class="wp-manga-chapter-img" src="https://truyentuoitho.com/uploads/p2.jpg"/>
+      </div></body></html>"#;
+
+    #[tokio::test]
+    async fn page_manifest_is_ordered_absolute_https_and_deduped() {
+        let (provider, transport) = adapter(vec![Ok(CHAPTER_FIXTURE)]);
+        let manifest = provider
+            .page_manifest("ninja-loan-thi", "tap-1")
+            .await
+            .unwrap();
+        assert_eq!(manifest.source_chapter_id, "tap-1");
+        assert_eq!(manifest.pages.len(), 2, "duplicate p2 must collapse");
+        assert_eq!(manifest.pages[0].index, 0);
+        assert_eq!(
+            manifest.pages[0].url, "https://truyentuoitho.com/uploads/p1.jpg",
+            "relative src resolved against base and trimmed"
+        );
+        assert_eq!(
+            manifest.pages[1].url,
+            "https://truyentuoitho.com/uploads/p2.jpg"
+        );
+        let requested = transport.requested.lock().unwrap();
+        assert!(requested[0].1.ends_with("/manga/ninja-loan-thi/tap-1/"));
+    }
+
+    #[tokio::test]
+    async fn page_manifest_rejects_foreign_image_host() {
+        let (provider, _) = adapter(vec![Ok(
+            r#"<div class="reading-content"><img class="wp-manga-chapter-img" src="https://evil.test/x.jpg"/></div>"#,
+        )]);
+        assert!(matches!(
+            provider.page_manifest("m", "tap-1").await,
+            Err(SourceError::Parse)
+        ));
+    }
+
+    #[tokio::test]
+    async fn page_manifest_rejects_bad_slugs_and_empty_listing() {
+        let (provider, _) = adapter(vec![Ok("<html><body>none</body></html>")]);
+        assert!(matches!(
+            provider.page_manifest("m", "../etc").await,
+            Err(SourceError::MalformedUrl)
+        ));
+        assert!(matches!(
+            provider.page_manifest("m", "tap-1").await,
+            Err(SourceError::Parse)
+        ));
     }
 }

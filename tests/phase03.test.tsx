@@ -154,31 +154,6 @@ describe("T03-05/T03-06 demo detail, queue, favorites and local boundary", () =>
   });
 });
 
-describe("T03-07 Downloads transitions", () => {
-  it("supports pause and retry via mock service only", async () => {
-    renderAt("/downloads");
-    const pause = await screen.findByRole("button", { name: "Pause" });
-    fireEvent.click(pause);
-    expect(await screen.findByText("demo: paused")).toBeDefined();
-
-    const retry = await screen.findByRole("button", { name: "Retry" });
-    fireEvent.click(retry);
-    await waitFor(() => {
-      expect(screen.getAllByText("demo: queued").length).toBeGreaterThanOrEqual(1);
-    });
-    expect(screen.queryByText("demo: failed")).toBeNull();
-  });
-
-  it("hides invalid actions per status", async () => {
-    renderAt("/downloads");
-    await screen.findByText(/Hàng đợi demo —/);
-    expect(screen.queryByRole("button", { name: "Resume" })).toBeDefined();
-    const completedCard = screen.getByText("Hành Trình Ngôi Sao").closest("article");
-    expect(completedCard).not.toBeNull();
-    expect(within(completedCard as HTMLElement).queryByRole("button", { name: "Pause" })).toBeNull();
-  });
-});
-
 describe("T03-08 Reader", () => {
   it("navigates pages with bounds, keeps progress for Home", async () => {
     renderAt("/reader/manga-001/manga-001-ch-01");

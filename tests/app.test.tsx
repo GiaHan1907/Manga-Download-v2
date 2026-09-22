@@ -18,6 +18,10 @@ vi.mock("@tauri-apps/api/window", () => ({
   })),
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(() => Promise.resolve(vi.fn())),
+}));
+
 import { invoke } from "@tauri-apps/api/core";
 
 function mockHealthySystem() {
@@ -31,6 +35,9 @@ function mockHealthySystem() {
     }
     if (cmd === "app_health_check") {
       return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 2 });
+    }
+    if (cmd === "app_list_local_download_tasks") {
+      return Promise.resolve({ items: [], total: 0, limit: 100, offset: 0 });
     }
     return Promise.reject(new Error("Unknown command"));
   });
@@ -83,7 +90,7 @@ describe("App shell", () => {
     expect(screen.getByRole("heading", { name: "Downloads" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Downloads" }).className).toContain("sidebar__link--active");
     await waitFor(() => {
-      expect(screen.getByText(/Hàng đợi demo —/)).toBeDefined();
+      expect(screen.getByText(/Hàng đợi tải —/)).toBeDefined();
     });
   });
 

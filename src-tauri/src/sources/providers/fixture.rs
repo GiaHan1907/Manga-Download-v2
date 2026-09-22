@@ -3,8 +3,8 @@ use url::Url;
 
 use crate::sources::adapter::{SourceAdapter, SourceError};
 use crate::sources::dto::{
-    Capability, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary, RemoteSearchPage, SourceInfo,
-    SourceStatus,
+    Capability, PageDescriptor, PageManifest, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary,
+    RemoteSearchPage, SourceInfo, SourceStatus,
 };
 
 /// Deterministic, offline, TEST-ONLY adapter (never in the production
@@ -75,10 +75,65 @@ impl SourceAdapter for FixtureProvider {
                 Capability::Search,
                 Capability::ResolveUrl,
                 Capability::Details,
+                Capability::Pages,
             ],
             status: SourceStatus::Ready,
             attribution: Some("Local deterministic test fixture".to_string()),
         }
+    }
+
+    /// Ordered manifest with a stable page count derived from the catalog.
+    /// Two pages per chapter keeps fixture assertions deterministic.
+    async fn page_manifest(
+        &self,
+        source_manga_id: &str,
+        source_chapter_id: &str,
+    ) -> Result<PageManifest, SourceError> {
+        if source_chapter_id == "fx-no-pages" {
+            return Err(SourceError::NotFound);
+        }
+        let count = if source_chapter_id.ends_with("-c2") {
+            2
+        } else {
+            3
+        };
+        let pages = (0..count)
+            .map(|index| PageDescriptor {
+                index,
+                url: format!(
+                    "https://fixture.manga1989.invalid/pages/{}/{index}.png",
+                    source_chapter_id
+                ),
+            })
+            .collect();
+        let _ = source_manga_id;
+        Ok(PageManifest {
+            source_chapter_id: source_chapter_id.to_string(),
+            pages,
+        })
+    }
+
+    /// Deterministic in-memory image bytes. Pages whose chapter id carries
+    /// `__corrupt` return non-image bytes so the validator failure path is
+    /// exercised without network.
+    async fn fetch_image(&self, url: &str) -> Result<Vec<u8>, SourceError> {
+        if url.contains("__net") {
+            return Err(SourceError::Network);
+        }
+        if url.contains("__corrupt") {
+            // 200 with HTML body — must be rejected by image validation.
+            return Ok(b"<html>not an image</html>".to_vec());
+        }
+        let index = url
+            .rsplit('/')
+            .next()
+            .and_then(|tail| tail.split('.').next())
+            .and_then(|digits| digits.parse::<u8>().ok())
+            .unwrap_or(0);
+        // PNG magic + a deterministic payload sized by the page index.
+        let mut bytes: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        bytes.extend(std::iter::repeat_n(index.wrapping_add(1), 64));
+        Ok(bytes)
     }
 
     fn owns_url(&self, url: &Url) -> bool {

@@ -50,6 +50,12 @@ impl AppError {
     pub(crate) fn wire_code(&self) -> &'static str {
         self.wire().code
     }
+
+    /// Persisted error pair for download tasks (safe taxonomy only).
+    pub fn wire_pair(&self) -> (&'static str, String) {
+        let wire = self.wire();
+        (wire.code, wire.message)
+    }
 }
 
 #[derive(Serialize)]

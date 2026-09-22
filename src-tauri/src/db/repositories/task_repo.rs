@@ -1,11 +1,11 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
+use crate::db::repositories::download_repo::{self, TaskRow};
 use crate::domain::DownloadTaskDto;
 use crate::error::AppError;
 
-/// Read-only in Phase 04: exposes persisted task metadata (usually empty).
-/// Creating/transitioning real tasks belongs to the Phase 06 scheduler — do not
-/// add write commands here before then.
+/// Read-only task metadata for the Downloads surface (Phase 04 contract,
+/// widened by the Phase 06 engine columns).
 pub async fn list_tasks(
     pool: &SqlitePool,
     status: Option<&str>,
@@ -14,29 +14,36 @@ pub async fn list_tasks(
 ) -> Result<(Vec<DownloadTaskDto>, i64), AppError> {
     let valid_status = match status {
         None => None,
-        Some(value @ ("queued" | "paused" | "failed" | "completed" | "cancelled")) => Some(value),
+        Some(value) if download_repo::STATUS_STATES.contains(&value) => Some(value),
         Some(_) => return Err(AppError::validation("Trạng thái tác vụ không hợp lệ.")),
     };
 
     let total = match valid_status {
         Some(value) => {
-            sqlx::query("SELECT COUNT(*) AS count FROM download_tasks WHERE status = ?1")
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM download_tasks WHERE status = ?1")
                 .bind(value)
                 .fetch_one(pool)
                 .await?
-                .try_get::<i64, _>("count")?
         }
-        None => sqlx::query("SELECT COUNT(*) AS count FROM download_tasks")
-            .fetch_one(pool)
-            .await?
-            .try_get::<i64, _>("count")?,
+        None => {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM download_tasks")
+                .fetch_one(pool)
+                .await?
+        }
     };
 
-    let rows = match valid_status {
+    let rows: Vec<TaskRow> = match valid_status {
         Some(value) => {
-            sqlx::query(
-                "SELECT id, chapter_id, status, target_format, priority, completed_pages, total_pages, error_code, created_at, updated_at \
-                 FROM download_tasks WHERE status = ?1 ORDER BY created_at ASC, id ASC LIMIT ?2 OFFSET ?3",
+            sqlx::query_as(
+                "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
+                        t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
+                        t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
+                        t.created_at, t.updated_at \
+                 FROM download_tasks t \
+                 JOIN chapters c ON c.id = t.chapter_id \
+                 JOIN mangas m ON m.id = c.manga_id \
+                 WHERE t.status = ?1 \
+                 ORDER BY t.priority DESC, t.created_at ASC, t.id ASC LIMIT ?2 OFFSET ?3",
             )
             .bind(value)
             .bind(limit)
@@ -45,9 +52,15 @@ pub async fn list_tasks(
             .await?
         }
         None => {
-            sqlx::query(
-                "SELECT id, chapter_id, status, target_format, priority, completed_pages, total_pages, error_code, created_at, updated_at \
-                 FROM download_tasks ORDER BY created_at ASC, id ASC LIMIT ?1 OFFSET ?2",
+            sqlx::query_as(
+                "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
+                        t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
+                        t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
+                        t.created_at, t.updated_at \
+                 FROM download_tasks t \
+                 JOIN chapters c ON c.id = t.chapter_id \
+                 JOIN mangas m ON m.id = c.manga_id \
+                 ORDER BY t.priority DESC, t.created_at ASC, t.id ASC LIMIT ?1 OFFSET ?2",
             )
             .bind(limit)
             .bind(offset)
@@ -56,31 +69,53 @@ pub async fn list_tasks(
         }
     };
 
-    let items = rows
-        .iter()
-        .map(|row| {
-            Ok(DownloadTaskDto {
-                id: row.try_get("id")?,
-                chapter_id: row.try_get("chapter_id")?,
-                status: row.try_get("status")?,
-                target_format: row.try_get("target_format")?,
-                priority: row.try_get("priority")?,
-                completed_pages: row.try_get("completed_pages")?,
-                total_pages: row.try_get("total_pages")?,
-                error_code: row.try_get("error_code")?,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
-            })
-        })
-        .collect::<Result<Vec<_>, AppError>>()?;
+    Ok((rows.into_iter().map(to_dto).collect(), total))
+}
 
-    Ok((items, total))
+pub fn to_dto(row: TaskRow) -> DownloadTaskDto {
+    DownloadTaskDto {
+        id: row.id,
+        chapter_id: row.chapter_id,
+        status: row.status,
+        target_format: row.target_format,
+        priority: row.priority,
+        completed_pages: row.completed_pages,
+        total_pages: row.total_pages,
+        attempts: row.attempts,
+        next_retry_at: row.next_retry_at,
+        error_code: row.error_code,
+        error_message: row.error_message,
+        revision: row.revision,
+        finished_at: row.finished_at,
+        output_relpath: row.output_relpath,
+        chapter_title: row.chapter_title,
+        manga_title: row.manga_title,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+impl From<TaskRow> for DownloadTaskDto {
+    fn from(row: TaskRow) -> Self {
+        to_dto(row)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::repositories::manga_repo::{ensure_source, upsert_chapter, upsert_manga};
+
+    async fn seed_chapter(pool: &SqlitePool) -> String {
+        ensure_source(pool, "src-a", "Source A").await.unwrap();
+        let (manga_id, _) = upsert_manga(pool, "src-a", "m1", "T", None, None, "ongoing")
+            .await
+            .unwrap();
+        let (chapter_id, _) = upsert_chapter(pool, &manga_id, "c-1", "C1", None, None)
+            .await
+            .unwrap();
+        chapter_id
+    }
 
     #[tokio::test]
     async fn t04_09_tasks_list_empty_and_status_filter_validated() {
@@ -90,8 +125,9 @@ mod tests {
         assert_eq!(total, 0);
 
         assert!(list_tasks(&pool, Some("queued"), 20, 0).await.is_ok());
+        assert!(list_tasks(&pool, Some("downloading"), 20, 0).await.is_ok());
         assert!(matches!(
-            list_tasks(&pool, Some("downloading"), 20, 0)
+            list_tasks(&pool, Some("not-a-status"), 20, 0)
                 .await
                 .unwrap_err(),
             AppError::Validation(_)
@@ -101,28 +137,21 @@ mod tests {
     #[tokio::test]
     async fn fk_restrict_prevents_deleting_chapter_with_task_row() {
         let (_dir, pool) = crate::db::test_pool().await;
-        ensure_source(&pool, "src-a", "Source A").await.unwrap();
-        let (manga_id, _) = upsert_manga(&pool, "src-a", "m1", "T", None, None, "ongoing")
+        let chapter_id = seed_chapter(&pool).await;
+
+        let outcome =
+            download_repo::queue_batch(&pool, std::slice::from_ref(&chapter_id), "cbz", 0)
+                .await
+                .unwrap();
+        assert_eq!(outcome.created.len(), 1);
+
+        let manga_id: (String,) = sqlx::query_as("SELECT manga_id FROM chapters WHERE id = ?1")
+            .bind(&chapter_id)
+            .fetch_one(&pool)
             .await
             .unwrap();
-        let (chapter_id, _) = upsert_chapter(&pool, &manga_id, "c-1", "C1", None, None)
-            .await
-            .unwrap();
-
-        // Raw insert only for constraint testing; Phase 04 has no task-writing API.
-        let ts = crate::domain::now_iso();
-        sqlx::query(
-            "INSERT INTO download_tasks (id, chapter_id, status, target_format, priority, completed_pages, total_pages, created_at, updated_at) \
-             VALUES ('task-x', ?1, 'queued', 'cbz', 0, 0, 0, ?2, ?2)",
-        )
-        .bind(&chapter_id)
-        .bind(&ts)
-        .execute(&pool)
-        .await
-        .unwrap();
-
         let error = sqlx::query("DELETE FROM mangas WHERE id = ?1")
-            .bind(&manga_id)
+            .bind(&manga_id.0)
             .execute(&pool)
             .await;
         assert!(

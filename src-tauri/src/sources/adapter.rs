@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use url::Url;
 
-use super::dto::{RemoteMangaDetail, RemoteSearchPage, SourceInfo};
+use super::dto::{PageManifest, RemoteMangaDetail, RemoteSearchPage, SourceInfo};
 
 /// Distinguishable provider outcomes; commands map these to the AppError
 /// envelope so the UI can tell URL problems from source state from transport
@@ -15,12 +15,14 @@ pub enum SourceError {
     #[error("source is disabled or unknown")]
     SourceDisabled,
     /// Part of the documented taxonomy; raised when UI asks an adapter for a
-    /// capability it does not declare (UI pre-gates, so not constructed yet).
-    #[allow(dead_code)]
+    /// capability it does not declare.
     #[error("operation not supported by this source")]
     UnsupportedOperation,
     #[error("content not found at source")]
     NotFound,
+    /// 401/403-class rejection: never auto-retried, never bypassed.
+    #[error("source denied access")]
+    PermissionDenied,
     #[error("source rate limited: {0}")]
     RateLimited(String),
     #[error("source unreachable or timed out")]
@@ -39,6 +41,7 @@ impl SourceError {
             SourceError::SourceDisabled => "SOURCE_DISABLED",
             SourceError::UnsupportedOperation => "UNSUPPORTED_OPERATION",
             SourceError::NotFound => "SOURCE_NOT_FOUND",
+            SourceError::PermissionDenied => "SOURCE_FORBIDDEN",
             SourceError::RateLimited(_) => "SOURCE_RATE_LIMITED",
             SourceError::Network => "SOURCE_NETWORK",
             SourceError::Parse => "SOURCE_PARSE_ERROR",
@@ -54,6 +57,9 @@ impl SourceError {
             SourceError::SourceDisabled => "Nguồn này đang tắt trong Settings → Sources.",
             SourceError::UnsupportedOperation => "Nguồn không hỗ trợ thao tác này.",
             SourceError::NotFound => "Không tìm thấy nội dung trên nguồn (có thể link đã hết hạn).",
+            SourceError::PermissionDenied => {
+                "Nguồn từ chối truy cập (yêu cầu đăng nhập, trả phí hoặc chặn client)."
+            }
             SourceError::RateLimited(_) => "Nguồn đang giới hạn lượt truy vấn — thử lại sau.",
             SourceError::Network => "Không kết nối được nguồn (mạng/chặn theo khu vực).",
             SourceError::Parse => "Phản hồi từ nguồn không đúng định dạng mong đợi.",
@@ -72,4 +78,19 @@ pub trait SourceAdapter: Send + Sync {
     /// Extracts the stable manga id from a URL this adapter already owns.
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError>;
     async fn manga_detail(&self, source_manga_id: &str) -> Result<RemoteMangaDetail, SourceError>;
+    /// Ordered page manifest for one chapter. Adapters override only when the
+    /// source lawfully exposes page images; the default refuses so an
+    /// unvetted capability can never be live by accident.
+    async fn page_manifest(
+        &self,
+        _source_manga_id: &str,
+        _source_chapter_id: &str,
+    ) -> Result<PageManifest, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
+    /// Fetches one page image through the adapter's own guarded transport.
+    /// The url must come from a manifest this adapter produced.
+    async fn fetch_image(&self, _url: &str) -> Result<Vec<u8>, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
 }

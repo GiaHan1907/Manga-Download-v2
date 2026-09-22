@@ -90,6 +90,7 @@ export default function LibraryPage() {
             {page.data.items.map((manga) => (
               <div key={manga.id} className="library-item">
                 <MangaCard
+                  to={`/library/${manga.id}`}
                   title={manga.title}
                   subtitle={`${manga.chapterCount} chương đã đăng ký · ${manga.author ?? "không rõ tác giả"}`}
                   status={manga.status}

@@ -46,6 +46,7 @@ pub async fn test_pool() -> (tempfile::TempDir, SqlitePool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::{ConnectOptions, Connection};
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -126,5 +127,105 @@ mod tests {
         let pool2 = init_pool(dir.path()).await.unwrap();
         assert_eq!(first, schema_version(&pool2).await.unwrap());
         assert!(first >= 2, "domain migration must be applied");
+    }
+
+    /// T06-01: a Phase 05-shaped database (0001→0003 applied, rows written,
+    /// then 0004 rebuild applied) keeps catalog, favorites and progress and
+    /// only widens the task lifecycle. Built by replaying the migration files
+    /// verbatim so the rebuild recipe is tested, not just its intent.
+    #[tokio::test]
+    async fn t06_01_phase05_upgrade_preserves_rows_and_widens_lifecycle() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("upgrade.db");
+        let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .connect()
+            .await
+            .unwrap();
+        for file in [
+            "migrations/0001_init.sql",
+            "migrations/0002_domain.sql",
+            "migrations/0003_source_config.sql",
+        ] {
+            let sql = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file),
+            )
+            .unwrap();
+            sqlx::raw_sql(&sql).execute(&mut conn).await.unwrap();
+        }
+        // Phase 05-shaped data: source, manga, chapter, favorite, progress.
+        let ts = crate::domain::now_iso();
+        sqlx::raw_sql(
+            "INSERT INTO sources (id, display_name, enabled, adapter, base_url, created_at, updated_at) \
+             VALUES ('madara-a.example-com','A',1,'madara','https://a.example.com/','t','t'); \
+             INSERT INTO mangas (id, source_id, source_manga_id, title, status, created_at, updated_at) \
+             VALUES ('mg-1','madara-a.example-com','slug','Title','ongoing','t','t'); \
+             INSERT INTO chapters (id, manga_id, source_chapter_id, title, number, page_count, created_at, updated_at) \
+             VALUES ('ch-1','mg-1','tap-1','C1',1,NULL,'t','t'); \
+             INSERT INTO favorites (manga_id, created_at) VALUES ('mg-1','t'); \
+             INSERT INTO reading_progress (manga_id, chapter_id, page_index, updated_at) VALUES ('mg-1','ch-1',4,'t'); \
+             INSERT INTO download_tasks (id, chapter_id, status, target_format, priority, completed_pages, total_pages, created_at, updated_at) \
+             VALUES ('tk-1','ch-1','queued','cbz',0,0,0,'t','t');",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        let migration_0004 = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("migrations/0004_download_engine.sql"),
+        )
+        .unwrap();
+        sqlx::raw_sql(&migration_0004)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        // Everything survived the rebuild.
+        let (favorites,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM favorites")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(favorites, 1);
+        let (progress,): (i64,) =
+            sqlx::query_as("SELECT page_index FROM reading_progress WHERE manga_id='mg-1'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(progress, 4);
+        let (status,): (String,) =
+            sqlx::query_as("SELECT status FROM download_tasks WHERE id='tk-1'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(status, "queued");
+
+        // The widened CHECK now accepts active states, still rejects junk.
+        sqlx::raw_sql("UPDATE download_tasks SET status = 'downloading' WHERE id='tk-1';")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(
+            sqlx::raw_sql("UPDATE download_tasks SET status = 'nonsense' WHERE id='tk-1';")
+                .execute(&mut conn)
+                .await
+                .is_err()
+        );
+        // FK cascade path intact: pages can still attach to the rebuilt table.
+        sqlx::raw_sql(&format!(
+            "INSERT INTO download_pages (task_id, page_index, status, created_at, updated_at) \
+             VALUES ('tk-1', 0, 'pending', '{ts}', '{ts}');"
+        ))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        // Deleting the manga must still be RESTRICTed by the surviving task.
+        assert!(sqlx::raw_sql("DELETE FROM mangas WHERE id='mg-1';")
+            .execute(&mut conn)
+            .await
+            .is_err());
+        conn.close().await.unwrap();
     }
 }

@@ -28,6 +28,8 @@ export type LocalChapterDto = {
   title: string;
   number: number | null;
   pageCount: number | null;
+  downloaded: boolean;
+  outputFormat: "cbz" | "folder" | null;
 };
 
 export type LocalMangaDetailDto = LocalMangaDto & {
@@ -44,12 +46,30 @@ export type ReadingProgressDto = {
 export type DownloadTaskDto = {
   id: string;
   chapterId: string;
-  status: "queued" | "paused" | "failed" | "completed" | "cancelled";
+  status:
+    | "queued"
+    | "resolving"
+    | "downloading"
+    | "pausing"
+    | "paused"
+    | "verifying"
+    | "exporting"
+    | "completed"
+    | "failed"
+    | "cancelled";
   targetFormat: "cbz" | "folder" | "pdf";
   priority: number;
   completedPages: number;
   totalPages: number;
+  attempts: number;
+  nextRetryAt: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
+  revision: number;
+  finishedAt: string | null;
+  outputRelpath: string | null;
+  chapterTitle: string | null;
+  mangaTitle: string | null;
   createdAt: string;
   updatedAt: string;
 };

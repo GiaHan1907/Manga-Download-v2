@@ -6,6 +6,7 @@ import type { SettingsService } from "./settings.service";
 import { localLibraryApi } from "./local-library.api";
 import { settingsApi } from "./settings.api";
 import { sourceApi } from "./source.api";
+import { downloadsApi } from "./downloads.api";
 import {
   mockCatalogService,
   mockDownloadService,
@@ -37,6 +38,7 @@ export const services: AppServices = {
 export const localServices = {
   library: localLibraryApi,
   source: sourceApi,
+  downloads: downloadsApi,
 };
 
 export const subscribeServices = subscribeMock;

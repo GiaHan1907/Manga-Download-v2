@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
   AppSettingsDto,
@@ -9,6 +10,8 @@ import type {
   ReadingProgressDto,
   SettingsPatchDto,
 } from "../../types/backend";
+import type { QueueResultDto, DownloadTaskEvent } from "../../types/downloads";
+import { DOWNLOAD_EVENT } from "../../types/downloads";
 import type {
   RemoteChapterDto,
   RemoteMangaDetailDto,
@@ -137,6 +140,51 @@ export async function saveDiscoveredManga(args: {
   return invoke<SaveResultDto>("save_discovered_manga", args);
 }
 
+// --- Phase 06: download engine (chapter ids + actions only; no URLs/paths) ---
+
+export async function queueChapterDownloads(args: {
+  chapterIds: string[];
+  format?: string;
+  priority?: number;
+}): Promise<QueueResultDto> {
+  return invoke<QueueResultDto>("queue_chapter_downloads", args);
+}
+
+export async function getDownloadTask(taskId: string): Promise<DownloadTaskDto> {
+  return invoke<DownloadTaskDto>("get_download_task", { taskId });
+}
+
+export async function pauseDownload(taskId: string): Promise<DownloadTaskDto> {
+  return invoke<DownloadTaskDto>("pause_download", { taskId });
+}
+
+export async function resumeDownload(taskId: string): Promise<DownloadTaskDto> {
+  return invoke<DownloadTaskDto>("resume_download", { taskId });
+}
+
+export async function cancelDownload(taskId: string): Promise<DownloadTaskDto> {
+  return invoke<DownloadTaskDto>("cancel_download", { taskId });
+}
+
+export async function retryDownload(taskId: string): Promise<DownloadTaskDto> {
+  return invoke<DownloadTaskDto>("retry_download", { taskId });
+}
+
+export async function setDownloadPriority(args: {
+  taskId: string;
+  priority: number;
+}): Promise<DownloadTaskDto> {
+  return invoke<DownloadTaskDto>("set_download_priority", args);
+}
+
+/// Subscribe to coalesced task updates. Returns an unsubscribe function that
+/// MUST be called on teardown (design §8.2 listener cleanup).
+export async function subscribeDownloadTask(
+  handler: (event: DownloadTaskEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<DownloadTaskEvent>(DOWNLOAD_EVENT, (message) => handler(message.payload));
+}
+
 export function normalizeIpcError(error: unknown): AppError {  if (typeof error === "object" && error !== null) {
     const candidate = error as Record<string, unknown>;
     const code = isAppErrorCode(candidate.code) ? candidate.code : "INTERNAL_ERROR";
@@ -164,6 +212,7 @@ const APP_ERROR_CODES: ReadonlySet<string> = new Set<AppErrorCode>([
   "SOURCE_DISABLED",
   "UNSUPPORTED_OPERATION",
   "SOURCE_NOT_FOUND",
+  "SOURCE_FORBIDDEN",
   "SOURCE_RATE_LIMITED",
   "SOURCE_NETWORK",
   "SOURCE_PARSE_ERROR",
