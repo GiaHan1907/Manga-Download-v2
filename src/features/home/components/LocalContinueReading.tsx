@@ -38,6 +38,11 @@ export default function LocalContinueReading() {
               <Button to={`/library/${manga.id}`} variant="secondary">
                 Mở truyện
               </Button>
+              {manga.progress && (
+                <Button to={`/read/${manga.progress.chapterId}`} variant="primary">
+                  Đọc tiếp
+                </Button>
+              )}
             </li>
           );
         })}

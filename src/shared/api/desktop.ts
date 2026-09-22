@@ -247,7 +247,8 @@ export async function readerGetPageBytes(
   return Uint8Array.from(response);
 }
 
-export function normalizeIpcError(error: unknown): AppError {  if (typeof error === "object" && error !== null) {
+export function normalizeIpcError(error: unknown): AppError {
+  if (typeof error === "object" && error !== null) {
     const candidate = error as Record<string, unknown>;
     const code = isAppErrorCode(candidate.code) ? candidate.code : "INTERNAL_ERROR";
     const message =

@@ -13,7 +13,12 @@ type Props = {
   onRetry: (index: number) => void;
   onForward: () => void;
   onBackward: () => void;
-  onScrollPage?: (page: number) => void;
+  /** Vertical mode reports the topmost visible page AND the fraction (0..1)
+   *  the viewport is scrolled into it — used for approximate resume. */
+  onScrollPage?: (page: number, fraction: number) => void;
+  /** One-shot: fraction stored with the resume position, applied after the
+   *  programmatic scroll to the resumed page. */
+  consumeResumeFraction?: () => number | null;
 };
 
 function PageSlot({
@@ -64,37 +69,68 @@ function PageSlot({
 }
 
 export default function ReaderModes(props: Props) {
-  const { manifest, page, mode, direction, zoom, urls, errors, onRetry, onForward, onBackward, onScrollPage } = props;
+  const { manifest, page, mode, direction, zoom, urls, errors, onRetry, onForward, onBackward, onScrollPage, consumeResumeFraction } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Page most recently derived from user scrolling — the programmatic-scroll
+  // effect must not fight it (that would snap the view on every scroll tick).
+  const scrollReported = useRef<number | null>(null);
 
-  // Vertical: report the topmost visible page for progress persistence.
+  // Vertical: report topmost visible page + fraction scrolled into it.
+  function reportScroll() {
+    const container = scrollRef.current;
+    if (!container || !onScrollPage) {
+      return;
+    }
+    const nodes = Array.from(container.querySelectorAll<HTMLElement>("[data-page]"));
+    let current: HTMLElement | null = null;
+    for (const node of nodes) {
+      if (node.offsetTop <= container.scrollTop + 1) {
+        current = node;
+      } else {
+        break;
+      }
+    }
+    if (!current) {
+      return;
+    }
+    const reported = Number(current.dataset.page ?? 0);
+    const fraction = Math.min(
+      1,
+      Math.max(0, (container.scrollTop - current.offsetTop) / (current.clientHeight || 1)),
+    );
+    scrollReported.current = reported;
+    onScrollPage(reported, fraction);
+  }
+
+  // Programmatic navigation (keys, pager buttons, resume): scroll the page
+  // into view. Scroll-reported pages are skipped — the user is already there.
   useEffect(() => {
-    if (mode !== "vertical" || !onScrollPage) {
+    if (mode !== "vertical") {
+      return;
+    }
+    if (scrollReported.current === page) {
       return;
     }
     const container = scrollRef.current;
-    if (!container || typeof IntersectionObserver === "undefined") {
+    const element = container?.querySelector<HTMLElement>(`[data-page="${page}"]`);
+    if (!container || !element || typeof element.scrollIntoView !== "function") {
       return;
     }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => Number(a.target.getAttribute("data-page") ?? 0) - Number(b.target.getAttribute("data-page") ?? 0));
-        const first = visible[0];
-        if (first) {
-          onScrollPage(Number(first.target.getAttribute("data-page") ?? 0));
-        }
-      },
-      { root: container, threshold: 0.1 },
-    );
-    container.querySelectorAll("[data-page]").forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
-  }, [mode, onScrollPage, manifest.chapterId]);
+    element.scrollIntoView({ block: "start" });
+    const fraction = consumeResumeFraction?.();
+    if (fraction) {
+      container.scrollTop += fraction * (element.clientHeight || 0);
+    }
+  }, [page, mode, consumeResumeFraction]);
 
   if (mode === "vertical") {
     return (
-      <div ref={scrollRef} className="reader-viewport reader-viewport--vertical" data-testid="reader-vertical">
+      <div
+        ref={scrollRef}
+        className="reader-viewport reader-viewport--vertical"
+        data-testid="reader-vertical"
+        onScroll={reportScroll}
+      >
         <div className="reader-column" style={{ width: `min(100%, ${Math.round(zoom * 720)}px)` }}>
           {manifest.pages.map((info) => (
             <div key={info.index} data-page={info.index} className="reader-page" style={{ marginBottom: "var(--space-2)" }}>

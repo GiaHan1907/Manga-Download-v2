@@ -8,10 +8,10 @@ Mọi test tự động dùng SQLite tạm + artifact CBZ/folder **thật** sinh
 | Lệnh | Kết quả |
 |---|---|
 | `npm run typecheck` / `npm run lint` / `npm run build` | **PASS** |
-| `npm test` (vitest) | **PASS — 75/75** (9 files, +10 test Phase 07) |
+| `npm test` (vitest) | **PASS — 76/76** (9 files, +11 test Phase 07; 3 vòng review thêm test resume/đổi chapter) |
 | `cargo fmt --all -- --check` | **PASS** |
 | `cargo clippy --all-targets -- -D warnings` | **PASS (0 warning)** |
-| `cargo test` | **PASS — 100/100** (mới phase này: 9 test `t07_*` backend + 6 unit `reader::*`/`sniff`) |
+| `cargo test` | **PASS — 101/101** (mới phase này: 9 test `t07_*` backend + 7 unit `reader::*`/`sniff`/`image_folder`) |
 | `npm run tauri dev` (smoke) | **PASS** — app chạy ~35s ổn định, **DB upgrade schema 4→5 sạch**, không panic; đóng app chủ động |
 | `npm run tauri build` | **NOT RUN** (gate đóng gói còn treo từ Phase 04) |
 
@@ -42,5 +42,6 @@ Mọi test tự động dùng SQLite tạm + artifact CBZ/folder **thật** sinh
 ## Trung thực
 
 - Kích thước ảnh/zoom/fullscreen đã verify ở mức DOM unit + code path, **chưa** đo trên WebView2 thật (thuộc manual).
+- Cơ chế scroll-sync vertical (trang chạm đỉnh → page+fraction; programmatic scroll khi navigate) đã code + lint + unit pass, nhưng jsdom không có layout nên phần tính `offsetTop/fraction` **chưa có tự động test** — cần mục manual T07 trên Windows thật.
 - CBZ **Stored-only** theo contract app-writer; archive deflate từ nguồn ngoài → `CBZ_INVALID` (defer inflate, ghi handoff).
 - Live download (T06-24b) vẫn PENDING-MANUAL — flow §3 đầu-cuối chỉ khép kín khi user chạy live một lần.

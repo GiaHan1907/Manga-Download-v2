@@ -1344,6 +1344,8 @@ button {
 .reader-viewport--vertical {
   align-items: flex-start;
   justify-content: center;
+  /* Scroll math: page offsetTop must be relative to this scroll container. */
+  position: relative;
 }
 .reader-column {
   display: grid;

@@ -25,8 +25,33 @@ Review đối chiếu plan `PHASE_07` (§8–§16) trên diff chưa commit. Phâ
 
 ## Vòng 2/3 — gates sau mỗi lần sửa
 
-7 gates + `tauri dev` smoke được chạy lại sau toàn bộ fix: typecheck/lint/build/vitest **75/75** · fmt/clippy/cargo **100/100** (9 test `t07_*` + 6 unit `reader::*`) · DB thật nâng schema 4→5 sạch. Kết quả chi tiết + mục NOT RUN: `test-results.md`.
+7 gates + `tauri dev` smoke được chạy lại sau toàn bộ fix. Kết quả chi tiết + mục NOT RUN: `test-results.md`.
+
+---
+
+# Review 3 vòng (theo chỉ đạo user, sau commit `a6eccfc`)
+
+## Review vòng 1 — backend (BLOCKING đã sửa)
+
+- **R1-F1 — `image_folder::read_page` không cap kích thước.** CBZ chặn `MAX_PAGE_BYTES` khi đọc entry, nhưng folder mode `fs::read` toàn bộ file không giới hạn — một file ảnh cỡ lớn (thủ công/sync) sẽ bị nạp hết vào memory rồi mới reject. Sửa: guard `is_safe_entry_name` (defense-in-depth, thay guard thủ công) + check `metadata().len() > MAX_PAGE_BYTES` **trước khi đọc byte**, trả `LOCAL_FILE_CORRUPTED`. Test mới: `image_folder::tests::read_page_caps_size_and_rejects_unsafe_names` (cargo 101/101).
+- Đã xác minh lại (không phải bug): `reading_progress` có `manga_id PRIMARY KEY` → 4 scalar subselect trong `library_list` luôn đọc cùng một row, không thể ghép lẫn hai bản ghi.
+
+## Review vòng 2 — frontend + IPC (BLOCKING đã sửa)
+
+- **R2-F1 — Đổi chapter qua `/read/:chapterId` giữ state cũ.** React Router tái dùng cùng component khi param đổi: `page`, cờ resume `initialized` và zoom rò từ chương trước → mở chương mới hiện sai trang và không resume. Sửa: tách `ReadPage` → `<ReaderSession key={chapterId}>`; mọi state per-chapter remount sạch. Test mới trong `phase07.test.tsx`: resume `3/3` theo `startPage`, rồi "Chương tiếp" phải về `1/5` (không phải `3/5`).
+- **R2-F2 — Vertical mode: điều hướng bàn phím/pager không cuộn theo trang; scroll position không bao giờ được lưu.** Plan §Reader Mode A yêu cầu "restore approximate scroll position" — `scroll_offset` có đủ ở DB/IPC nhưng UI không bao giờ ghi/đọc. Sửa: `ReaderModes` thay IntersectionObserver bằng scroll handler tính `(page, fraction)` từ `offsetTop` trang đang chạm đỉnh viewport (CSS `.reader-viewport--vertical` thêm `position:relative`); effect programmatic-scroll cuộn tới trang khi page đổi **không** do user scroll (ref `scrollReported`), áp `startScrollOffset` một lần khi resume (`consumeResumeFraction`); `useReaderProgress` gửi `scrollOffset` (chỉ khi fraction còn khớp page đang ghi).
+- **R2-F3 — Filter "Yêu thích" giấu truyện chưa tải.** Backend ghép thêm `AND downloaded_chapters > 0` trong khi plan định nghĩa filter là favorites; label UI không đề cập điều kiện tải. Sửa: filter favorite = đúng ngữ nghĩa favorites (`t07_list_...` vẫn PASS).
+- Trivial: gỡ lỗi định dạng dính dòng ở `normalizeIpcError` (`desktop.ts`).
+
+## Review vòng 3 — adversarial (BLOCKING đã sửa)
+
+- **R3-F1 — Race kẹt trang vĩnh viễn trong `usePageImages`.** Cờ `cancelled` theo effect-run làm promise đang bay bị bỏ kết quả (không cache, không clear `pending`), còn `pending` lại không nằm trong deps effect → trang đã đánh dấu pending không bao giờ được fetch lại ở window mới; lật trang nhanh để lại placeholder loading vô hạn. Sửa: thay `cancelled`+`pending`-state bằng `inflight` **ref-set** — kết quả in-flight luôn vào cache khi chương vẫn khớp (`chapterRef`), window mới thấy `inflight` thì chờ chứ không đá trùng; hết trạng thái kẹt.
+- **R3-F2 — `toggleFavorite` ở LocalMangaPage không catch** → unhandled rejection + im lặng khi IPC lỗi. Sửa: bắt lỗi, hiển thị qua `actionError` (pattern sẵn có của trang).
+
+## Gates sau 3 vòng
+
+typecheck/lint/build PASS · vitest **76/76** (thêm test resume/đổi chapter) · fmt/clippy PASS · cargo **101/101** (thêm test cap folder page) · `tauri dev` smoke xem `test-results.md`.
 
 ## Kết luận
 
-3 BLOCKING đã sửa kèm test khóa hành vi. **ACCEPT**, với các caveat NOT RUN/LIVE đã khai thẳng thắn ở `test-results.md` §Trung thực.
+3 BLOCKING giai đoạn implement + R1-F1 + R2-F1/F2/F3 + R3-F1/F2 đã sửa kèm test hoặc đường kiểm soát. **ACCEPT sau 3 vòng review.**

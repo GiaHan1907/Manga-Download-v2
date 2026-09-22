@@ -43,7 +43,7 @@ pub async fn list_mangas(
         "all" => "",
         "downloaded" => "AND downloaded_chapters > 0",
         "partial" => "AND downloaded_chapters > 0 AND downloaded_chapters < total_chapters",
-        "favorite" => "AND EXISTS (SELECT 1 FROM favorites f WHERE f.manga_id = m.id) AND downloaded_chapters > 0",
+        "favorite" => "AND EXISTS (SELECT 1 FROM favorites f WHERE f.manga_id = m.id)",
         other => {
             return Err(AppError::validation(format!(
                 "Bộ lọc không hợp lệ ({other})."

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
 import type { ReaderManifestDto } from "../../types/library";
 import { localServices } from "../../services/provider";
 
@@ -11,6 +12,7 @@ const DEBOUNCE_MS = 800;
 export function useReaderProgress(
   manifest: { state: string; data?: ReaderManifestDto },
   page: number,
+  scrollInfo: RefObject<{ page: number; fraction: number } | null>,
 ) {
   const timer = useRef<number | null>(null);
   const latest = useRef<{ manifest: ReaderManifestDto; page: number } | null>(null);
@@ -32,8 +34,18 @@ export function useReaderProgress(
     }
     const { mangaId, chapterId: cid, pageCount } = manifest.data;
     timer.current = window.setTimeout(() => {
+      // The scroll fraction is only valid while it still describes the page
+      // being written; a stale measurement must never leak into progress.
+      const measured = scrollInfo.current;
+      const scrollOffset = measured && measured.page === page ? measured.fraction : undefined;
       void localServices.reader
-        .saveProgress({ mangaId, chapterId: cid, pageIndex: page, pageTotal: pageCount })
+        .saveProgress({
+          mangaId,
+          chapterId: cid,
+          pageIndex: page,
+          pageTotal: pageCount,
+          scrollOffset,
+        })
         .catch(() => undefined);
     }, DEBOUNCE_MS);
     return () => {
@@ -41,7 +53,7 @@ export function useReaderProgress(
         window.clearTimeout(timer.current);
       }
     };
-  }, [manifest, page]);
+  }, [manifest, page, scrollInfo]);
 
   // Immediate flush on chapter change or unmount (reader close).
   useEffect(
@@ -50,15 +62,19 @@ export function useReaderProgress(
       if (!snapshot) {
         return;
       }
+      const measured = scrollInfo.current;
+      const scrollOffset =
+        measured && measured.page === snapshot.page ? measured.fraction : undefined;
       void localServices.reader
         .saveProgress({
           mangaId: snapshot.manifest.mangaId,
           chapterId: snapshot.manifest.chapterId,
           pageIndex: snapshot.page,
           pageTotal: snapshot.manifest.pageCount,
+          scrollOffset,
         })
         .catch(() => undefined);
     },
-    [chapterId],
+    [chapterId, scrollInfo],
   );
 }

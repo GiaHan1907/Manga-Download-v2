@@ -42,8 +42,15 @@ function guessMime(bytes: Uint8Array): string {
   return "image/webp";
 }
 
+/// Navigating between /read/:chapterId routes reuses the element, so the
+/// session is keyed by chapter: every piece of per-chapter view state (page,
+/// zoom, resume flag, blob cache) remounts clean instead of leaking stale.
 export default function ReadPage() {
   const { chapterId = "" } = useParams();
+  return <ReaderSession key={chapterId} chapterId={chapterId} />;
+}
+
+function ReaderSession({ chapterId }: { chapterId: string }) {
   const navigate = useNavigate();
   const manifest = useAsyncData<ReaderManifestDto>(
     () => localServices.reader.openChapter(chapterId),
@@ -59,6 +66,9 @@ export default function ReadPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
   const initialized = useRef(false);
+  // Last scroll-derived position (vertical mode) for progress persistence.
+  const scrollInfo = useRef<{ page: number; fraction: number } | null>(null);
+  const pendingResumeFraction = useRef<number | null>(null);
 
   // Defaults from real Settings (Phase 04) once; user can override per session.
   useEffect(() => {
@@ -95,20 +105,36 @@ export default function ReadPage() {
   const pageCount = manifest.state === "success" ? manifest.data.pageCount : 0;
   const mangaId = manifest.state === "success" ? manifest.data.mangaId : "";
   const startPage = manifest.state === "success" ? manifest.data.startPage : 0;
+  const startScrollOffset = manifest.state === "success" ? manifest.data.startScrollOffset : null;
   const { urls, errors, retry } = usePageImages(chapterId, page, mode, pageCount, fetchPage);
 
   // Once the manifest resolves, jump to the stored resume position.
   useEffect(() => {
     if (manifest.state === "success" && !initialized.current) {
       initialized.current = true;
+      if (startPage > 0 && startScrollOffset) {
+        pendingResumeFraction.current = startScrollOffset;
+      }
       setPage(clampPage(startPage, pageCount || 1));
     }
-  }, [manifest.state, startPage, pageCount]);
+  }, [manifest.state, startPage, startScrollOffset, pageCount]);
 
   const goTo = useCallback(
     (candidate: number) => setPage(clampPage(candidate, pageCount || 1)),
     [pageCount],
   );
+  const handleScrollPage = useCallback(
+    (candidate: number, fraction: number) => {
+      scrollInfo.current = { page: candidate, fraction };
+      goTo(candidate);
+    },
+    [goTo],
+  );
+  const consumeResumeFraction = useCallback(() => {
+    const value = pendingResumeFraction.current;
+    pendingResumeFraction.current = null;
+    return value;
+  }, []);
   const stepForward = useCallback(() => {
     setPage((current) => (pageCount ? nextPage(current, pageCount) : current));
   }, [pageCount]);
@@ -116,7 +142,7 @@ export default function ReadPage() {
     setPage((current) => (pageCount ? prevPage(current) : current));
   }, [pageCount]);
 
-  useReaderProgress(manifest, page);
+  useReaderProgress(manifest, page, scrollInfo);
 
   // Keyboard: RTL swaps left/right visual navigation (tested explicitly).
   useEffect(() => {
@@ -285,7 +311,8 @@ export default function ReadPage() {
         onRetry={retry}
         onForward={stepForward}
         onBackward={stepBack}
-        onScrollPage={goTo}
+        onScrollPage={handleScrollPage}
+        consumeResumeFraction={consumeResumeFraction}
       />
 
       <nav className="reader-pager" aria-label="Điều hướng trang">

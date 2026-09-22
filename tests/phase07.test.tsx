@@ -40,36 +40,38 @@ function pngBytes(): Uint8Array {
   return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x1a, 0x0a, 0x00, 1, 2, 3]);
 }
 
+function mockCommands(cmd: string): Promise<unknown> {
+  switch (cmd) {
+    case "app_get_info":
+      return Promise.resolve({ name: "x", version: "0.1.0", platform: "windows" });
+    case "app_get_settings":
+      return Promise.resolve({
+        defaultReaderMode: "single",
+        defaultReadingDirection: "rtl",
+        chapterConcurrency: 2,
+        imageConcurrency: 4,
+        outputFormat: "cbz",
+      });
+    case "reader_open_chapter":
+      return Promise.resolve(manifest);
+    case "reader_get_page_bytes":
+      return Promise.resolve(pngBytes());
+    case "app_save_reading_progress":
+      return Promise.resolve({
+        mangaId: "mg-1",
+        chapterId: "ch-1",
+        pageIndex: 0,
+        scrollOffset: null,
+        pageTotal: 3,
+        updatedAt: "2026-09-22T00:00:00.000Z",
+      });
+    default:
+      return Promise.reject(new Error(`unexpected command ${cmd}`));
+  }
+}
+
 function mockBackend() {
-  vi.mocked(invoke).mockImplementation((cmd: string) => {
-    switch (cmd) {
-      case "app_get_info":
-        return Promise.resolve({ name: "x", version: "0.1.0", platform: "windows" });
-      case "app_get_settings":
-        return Promise.resolve({
-          defaultReaderMode: "single",
-          defaultReadingDirection: "rtl",
-          chapterConcurrency: 2,
-          imageConcurrency: 4,
-          outputFormat: "cbz",
-        });
-      case "reader_open_chapter":
-        return Promise.resolve(manifest);
-      case "reader_get_page_bytes":
-        return Promise.resolve(pngBytes());
-      case "app_save_reading_progress":
-        return Promise.resolve({
-          mangaId: "mg-1",
-          chapterId: "ch-1",
-          pageIndex: 0,
-          scrollOffset: null,
-          pageTotal: 3,
-          updatedAt: "2026-09-22T00:00:00.000Z",
-        });
-      default:
-        return Promise.reject(new Error(`unexpected command ${cmd}`));
-    }
-  });
+  vi.mocked(invoke).mockImplementation((cmd: string) => mockCommands(cmd));
 }
 
 function renderAt(path: string) {
@@ -120,6 +122,34 @@ describe("T07 offline reader UI (single mode, real manifest)", () => {
     expect(await screen.findByTestId("reader-vertical")).toBeDefined();
     // Mode switch keeps the logical page.
     expect(screen.getByText("1/3")).toBeDefined();
+  });
+
+  it("restores the resume position and resets the page when switching chapters", async () => {
+    const ch2 = {
+      ...manifest,
+      chapterId: "ch-2",
+      chapterTitle: "Chương 2",
+      pageCount: 5,
+      pages: [0, 1, 2, 3, 4].map((index) => ({ index, width: 40, height: 60 })),
+      prevChapterId: "ch-1",
+      nextChapterId: null,
+      startPage: 0,
+    };
+    vi.mocked(invoke).mockImplementation((cmd: string, payload?: unknown) => {
+      if (cmd === "reader_open_chapter") {
+        const chapterId = (payload as { chapterId?: string } | undefined)?.chapterId;
+        return Promise.resolve(chapterId === "ch-2" ? ch2 : { ...manifest, startPage: 2 });
+      }
+      return mockCommands(cmd);
+    });
+    renderAt("/read/ch-1");
+    // ch-1 stores progress at page index 2 → resumes on "3/3", not page 1.
+    expect(await screen.findByText("3/3")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Chương tiếp" }));
+    // Same component, new chapter: stale page 3 must NOT leak into a 5-page
+    // chapter that has its own (empty) resume position.
+    expect(await screen.findByText("1/5")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Chương trước" })).toBeDefined();
   });
 
   it("controlled error when the artifact cannot be opened", async () => {

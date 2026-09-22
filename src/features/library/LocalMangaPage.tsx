@@ -117,9 +117,14 @@ export default function LocalMangaPage() {
 
   async function toggleFavorite() {
     setFavoriteBusy(true);
+    setActionError(null);
     try {
       await localServices.library.setFavorite(detail.id, !detail.favorite);
       setNonce((value) => value + 1);
+    } catch (error) {
+      setActionError(
+        `Không cập nhật được yêu thích: ${error instanceof Error ? error.message : "lỗi IPC"}`,
+      );
     } finally {
       setFavoriteBusy(false);
     }
