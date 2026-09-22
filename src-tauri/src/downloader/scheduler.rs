@@ -87,7 +87,10 @@ impl Coordinator {
             Ok(settings) => settings,
             Err(_) => return,
         };
-        let capacity = settings.chapter_concurrency.clamp(1, MAX_CHAPTER_WORKERS) as usize;
+        let capacity = settings
+            .chapter_concurrency
+            .clamp(1, MAX_CHAPTER_WORKERS)
+            .min(crate::downloader::MAX_TRACKED_TASKS as i64) as usize;
         loop {
             let free = {
                 let active = self.active.lock().unwrap();
@@ -101,6 +104,8 @@ impl Coordinator {
                 Err(_) => return,
             };
             let Some(task) = claimed else { return };
+            // dispatch already gated capacity, so spawn_worker cannot reject:
+            // a claimed task always gets a worker (no `resolving` zombie).
             self.spawn_worker(task, settings.image_concurrency);
         }
     }
@@ -110,9 +115,6 @@ impl Coordinator {
         let pause = Arc::new(AtomicBool::new(false));
         {
             let mut active = self.active.lock().unwrap();
-            if active.len() >= crate::downloader::MAX_TRACKED_TASKS {
-                return;
-            }
             active.insert(
                 task.id.clone(),
                 ActiveWorker {

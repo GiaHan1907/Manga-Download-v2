@@ -52,6 +52,9 @@ export function allowedDownloadActions(status: DownloadTaskDto["status"]): ("pau
     case "exporting":
       return ["pause", "cancel"];
     case "pausing":
+      // Worker acknowledgement pending — resume would race the pause commit;
+      // the backend only accepts resume from `paused`.
+      return ["cancel"];
     case "paused":
       return ["resume", "cancel"];
     case "failed":

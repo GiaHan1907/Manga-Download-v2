@@ -382,16 +382,15 @@ pub async fn ensure_page_rows(
         .bind(&ts)
         .execute(&mut *tx)
         .await?;
-    // Manifest shrank between attempts: drop never-started surplus rows so
-    // checkpoints mirror exactly the current page set (stored pages are
-    // kept; re-export reconciliation handles identity drift).
-    sqlx::query(
-        "DELETE FROM download_pages WHERE task_id = ?1 AND page_index >= ?2 AND status = 'pending'",
-    )
-    .bind(task_id)
-    .bind(total_pages as i64)
-    .execute(&mut *tx)
-    .await?;
+    // Manifest shrank between attempts: drop ALL surplus rows so checkpoints
+    // mirror exactly the current page set. Staged files of dropped rows are
+    // task-owned scratch (removed with the staging dir at completion/cancel);
+    // keeping them would make verification permanently fail on every retry.
+    sqlx::query("DELETE FROM download_pages WHERE task_id = ?1 AND page_index >= ?2")
+        .bind(task_id)
+        .bind(total_pages as i64)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -790,7 +789,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shrinking_manifest_prunes_surplus_pending_pages() {
+    async fn shrinking_manifest_prunes_surplus_pages_of_any_state() {
         let (_dir, pool) = crate::db::test_pool().await;
         let chapter = seed_chapter(&pool, "c1").await;
         let task = queue_batch(&pool, &[chapter], "cbz", 0)
@@ -799,19 +798,16 @@ mod tests {
             .created[0]
             .clone();
         ensure_page_rows(&pool, &task.id, 5).await.unwrap();
-        // Mark page 4 stored (verified) then re-resolve a shorter manifest.
         mark_page_stored(&pool, &task.id, 4, "000004.png", 10, "cs")
             .await
             .unwrap();
         ensure_page_rows(&pool, &task.id, 3).await.unwrap();
         let rows = list_pages(&pool, &task.id).await.unwrap();
-        // Pending 3,5 must be pruned; the stored page 4 must survive.
-        assert!(rows
-            .iter()
-            .any(|r| r.page_index == 4 && r.status == "stored"));
-        assert!(!rows
-            .iter()
-            .any(|r| r.page_index >= 3 && r.status == "pending"));
+        // ALL surplus rows (pending AND stored) are dropped: with positional
+        // identity a shrunk manifest no longer includes page 4, and a
+        // leftover stored row would fail verification on every retry.
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| r.page_index < 3));
         let total = get_task(&pool, &task.id).await.unwrap().unwrap();
         assert_eq!(total.total_pages, 3);
     }

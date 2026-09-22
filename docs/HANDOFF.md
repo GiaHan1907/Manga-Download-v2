@@ -39,7 +39,7 @@
 - [ ] `npm run tauri build` lại từ code Phase 06 (gate trước release; chưa chạy từ Phase 04).
 - [ ] Phase 05 live pending: bấm thử Discover live + Import URL với `truyentuoitho.com` trên máy user (WAF site reset request dồn — client đã pace ≥3s); MangaDex vẫn BLOCKED ở mạng dev.
 - [ ] **Phase 06 live pending (T06-24b):** tải thật 1 chapter → CBZ trên Windows với nguồn Madara cùng host allowlist; nếu host ảnh khác host site → engine chặn, cần source-policy review.
-- [ ] **Phase 06 wire-off:** gắn `Coordinator::shutdown()` vào `tauri::RunEvent::ExitRequested` (hiện dựa vào recovery khi restart — đã test T06-21).
+- [ ] Xác nhận **đóng app bằng nút X** dừng worker sạch (shutdown đã nối `RunEvent::ExitRequested`; cần test trên bản `tauri build`) — phục vụ packaging gate.
 - [ ] Icon app thật (thay placeholder 16×16): `npx tauri icon <png>` trước khi release.
 - [ ] Cân nhắc self-host font Inter (CSP `'self'` cấm CDN).
 - [ ] `AppError::Internal` (Rust) giờ đã dùng ở các đường panic-safe của download engine.

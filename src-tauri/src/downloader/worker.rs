@@ -253,7 +253,16 @@ async fn attempt_run(
         while let Some(result) = set.join_next().await {
             match result {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => return Err(error),
+                Ok(Err(error)) => {
+                    // User cancel outranks failure classification: a page
+                    // that observed the cancel flag must land as `cancelled`,
+                    // never as a spurious `failed`.
+                    if deps.flags.cancel.load(Ordering::Relaxed) {
+                        transfer::discard_part_files(&staging)?;
+                        return stop_as_cancelled(deps, &task_id).await;
+                    }
+                    return Err(error);
+                }
                 Err(join_error) if join_error.is_cancelled() => {
                     return stop_as_cancelled(deps, &task_id).await;
                 }
@@ -275,9 +284,27 @@ async fn attempt_run(
             "Kiểm tra trang thất bại — thiếu trang đã xác minh.",
         ));
     }
+    // Defense-in-depth: only manifest-range pages may be exported (a stale
+    // surplus checkpoint must never smuggle an extra page into the archive).
+    let stored_now = download_repo::list_pages(&deps.pool, &task_id).await?;
+    if stored_now
+        .iter()
+        .any(|p| p.page_index >= total_pages as i64)
+    {
+        return Err(AppError::validation(
+            "Checkpoint trang vượt danh sách hiện hành — cần tải lại.",
+        ));
+    }
 
     // 5. exporting: build beside the final location, verify, atomically
     //    publish, and only then commit completion in the DB.
+    // Honor a cancel that arrived during verify/export BEFORE writing any
+    // artifact (cancel from any non-terminal state, design §6.1); no file is
+    // published yet, so staging cleanup is safe.
+    if deps.flags.cancel.load(Ordering::Relaxed) {
+        transfer::discard_part_files(&staging)?;
+        return stop_as_cancelled(deps, &task_id).await;
+    }
     if advance(deps, &task_id, &["verifying"], "exporting", live)
         .await
         .is_none()

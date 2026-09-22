@@ -22,7 +22,7 @@ Kết quả mong đợi: **65 vitest / 84 cargo test / clippy 0 warning**. Mọi
   - MangaDex: không có capability `pages` → UI ẩn nút tải. Đúng thiết kế.
   - Nút "mở file/thư mục": chưa có (cần capability `opener`; bất biến hiện hành cấm fs/shell từ renderer).
   - `npm run tauri build` (MSI/NSIS): **NOT RUN** từ sau Phase 04 → gate mở trước release.
-  - App-shutdown hook `Coordinator::shutdown()` đã có nhưng **chưa** gắn vào `RunEvent::ExitRequested`; an toàn vì restart-recovery đã kiểm chứng (T06-21).
+  - App-shutdown `Coordinator::shutdown()` **đã nối** vào `RunEvent::ExitRequested` trong `lib.rs` (`.build().run(handler)`); restart-recovery vẫn là backstop cho hard crash (T06-21). Hành vi bấm X trên bản `tauri build` chưa xác nhận thủ công (packaging gate còn mở).
 
 ## 3. Cách test live thủ công (đề xuất)
 

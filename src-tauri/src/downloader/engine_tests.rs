@@ -303,6 +303,39 @@ async fn cancel_before_work_stops_cleanly() {
 }
 
 #[tokio::test]
+async fn cancel_observed_midflight_lands_cancelled_not_failed() {
+    // Regression (review round 3): a cancel that a page-fetch observes must
+    // surface as `cancelled`, never a spurious `failed`/INTERNAL.
+    let mut script = Script::new(3);
+    script.pause_during_fetch = true; // hold fetches on a gate
+    let world = World::new(script).await;
+    let chapter_id = world.seed_chapter("ch-cancel-mid").await;
+    world.queue(&chapter_id, "cbz").await;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let gate = world.script.gate.clone();
+    let fetches = world.script.fetches.clone();
+    let cancel_flag = cancel.clone();
+    let waiter = tokio::spawn(async move {
+        for _ in 0..2500 {
+            if fetches.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        cancel_flag.store(true, Ordering::SeqCst); // cancel while a fetch is in flight
+        gate.store(true, Ordering::SeqCst); // release held fetches
+    });
+    let dto = world
+        .run_once(Arc::new(AtomicBool::new(false)), cancel)
+        .await
+        .unwrap();
+    waiter.await.unwrap();
+    assert_eq!(dto.status, "cancelled", "must be cancelled, not failed");
+    assert_ne!(dto.error_code.as_deref(), Some("INTERNAL_ERROR"));
+}
+
+#[tokio::test]
 async fn pause_midflight_then_resume_skips_stored_pages() {
     let mut script = Script::new(4);
     script.pause_during_fetch = true;
