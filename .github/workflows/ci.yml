@@ -1,0 +1,58 @@
+name: CI
+
+# Ordinary quality gates for every push/PR. Deliberately has NO release
+# secrets, NO signing, NO publish permissions (plan §8 / P10-06 rule:
+# untrusted PR jobs must never gain publication capability). A failing gate
+# below blocks the release workflow because release-windows.yml re-runs the
+# same sequence on the tagged commit.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gates-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Frozen frontend install (lockfile authoritative)
+        run: npm ci
+      - name: Single-version invariant
+        run: node scripts/check-version.mjs
+      - name: Lint + typecheck
+        run: |
+          npm run lint
+          npm run typecheck
+      - name: Frontend tests
+        run: npm run test
+      - name: Production frontend build
+        run: npm run build
+      - name: Rust fmt + clippy + tests (windows-latest ships MSVC + stable Rust)
+        working-directory: src-tauri
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+      - name: Native Windows x64 release build (NSIS staging artifact)
+        run: npm run tauri build -- --bundles nsis
+      - name: Record artifact hashes
+        shell: pwsh
+        run: |
+          Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object {
+            "{0}  {1}  {2}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Length, $_.Name
+          } | Tee-Object -FilePath artifact-hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-windows-x64-unsigned
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            artifact-hashes.txt
+          if-no-files-found: error
