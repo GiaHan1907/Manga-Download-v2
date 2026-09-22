@@ -35,8 +35,14 @@
 | `npm run test` | 0 | 51 passed / 5 files |
 | `npm run build` | 0 | 352.91 kB JS, gzip 109.27 kB |
 | `npm run tauri dev` smoke | xem §2 | |
-| `npm run tauri build` | chưa chạy lại trong vòng này | đã pass ở review Phase 02; code Rust đã đổi → **cần chạy lại trước release** |
+| `npm run tauri build` | chưa chạy lại | đã pass ở review Phase 02; Rust đã đổi nhiều → **gate bắt buộc trước release**, đề xuất chạy ngay khi user cho phép |
 
-## 2. Windows dev smoke (Phase 04)
+## 2. Windows dev smoke (Phase 04) — PASS
 
-(đang chờ — phiên smoke chạy nền, kết quả ghi tiếp ở đây)
+`npm run tauri dev` (2026-09-22): rebuild tự động theo code mới, exe chạy, đóng cửa sổ exit code **0**, log không panic/error. Bằng chứng trên DB THẬT của user (nâng cấp từ Phase 01, không reset):
+
+- `_sqlx_migrations` chứa bản ghi migration `0002_domain.sql` → upgrade path live hoạt động (T04-02 thực địa).
+- 7 bảng domain (`sources, mangas, chapters, download_tasks, download_pages, reading_progress, favorites`) đều hiện diện trong file DB.
+- `storage_service::prepare` tạo thật `covers/` và `cache/` trong app-data dir.
+
+Còn chờ mắt người (manual, như các phase trước): thao tác Settings save → restart app → giá trị còn nguyên trên UI; phân biệt empty vs error khi DB khóa; các mức display scaling.

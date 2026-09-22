@@ -25,6 +25,10 @@
 | R5 | "DB locked/unavailable" phía Rust chưa mô phỏng mức repository (busy_timeout mới là mitigation, chưa có test va chạm 2 process) | ADVISORY | Hành vi mức UI đã test (retry/recover); ghi vào known-limitations, cân nhắc test 2-connection khi làm Phase 06 |
 | R6 | `npm run tauri build` chưa chạy lại sau khi code Rust đổi | BLOCKING cho **release**, không phải cho phase gate | Kế hoạch: chạy lại trước khi đóng release (đã ghi test-results §1) |
 
+## Bằng chứng smoke live (bổ sung sau vòng 1)
+
+tauri dev exit 0; migration 0002 áp dụng thành công lên DB user đã tồn tại (nâng cấp thật, không reset); `covers/`+`cache/` được tạo. Xem `test-results.md` §2.
+
 ## Kết luận vòng 1
 
 Không còn BLOCKING mở trong phạm vi phase (R6 thuộc gate release). DoD §8 của brief: tất cả mục đạt với bằng chứng ở `test-results.md`; 2 deviations có giải trình: (1) không thêm React Query/Zustand — dùng `useAsyncData` + `useSyncExternalStore` sẵn có theo rule "existing conventions take precedence" của chính brief; (2) `docs/ARCHITECTURE.md` + `docs/IPC_CONTRACT.md` được **tạo mới** trong phase này vì chưa tồn tại.
