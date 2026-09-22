@@ -118,7 +118,7 @@ State khả biến: `tasks[]`, `favorites: string[]`, `libraryAdded: string[]`, 
 | Rust check | `cargo check` | pass — unchanged Phase 01/02 (1 dead_code warning `Internal`) |
 | Rust tests | `cargo test` | pass — 2/2 DB tests (regression intact) |
 | `npm run tauri dev` smoke | recorded §7.1 | pass — clean launch + exit 0, no runtime errors |
-| `npm run tauri build` | not run | slow; run before release |
+| `npm run tauri build` | pass (run 2026-09-22 trong review Phase 02) | MSI + NSIS sinh ra, exit 0 — xem `docs/phase-02/self-review.md` F1 |
 
 ## 7. Test matrix T03 → evidence (automated where possible)
 
@@ -159,7 +159,7 @@ Swap = replace `services` object in `provider.ts`; screens unchanged. Reset help
 1. Fixtures are session-only; reload resets state (expected for prototype).
 2. Reader images are original neutral SVGs — real content requires Phase 04 assets.
 3. Real Windows visual checks (scaling 125/150/200%, 1024×700 no-clip, reduced-motion) need a desktop session; not captured headless.
-4. `npm run tauri build` not run here — required before release.
+4. ~~`npm run tauri build` not run~~ — đã chạy thành công ngày 2026-09-22 (exit 0, MSI+NSIS); còn lại: chạy thử bản cài đặt release trên máy user.
 5. Playwright not configured → E2E journey covered by RTL integration test instead.
 6. Icon remains Phase 02 16×16 placeholder (release item).
 

@@ -21,7 +21,7 @@
 
 | # | Finding | Phân loại | Xử lý |
 |---|---|---|---|
-| F1 | DoD "Window actions are functional in **packaged**/dev Windows builds" — dev ✅, nhưng `npm run tauri build` (packaged) chưa chạy | BLOCKING (mở, đã khai báo `not run`) | Không fix được bằng code — là gate môi trường. **Bắt buộc chạy trước khi đóng Phase 02 về mặt phát hành**; đề xuất chạy ngay bây giờ hoặc chốt lịch trước release |
+| F1 | DoD "Window actions are functional in **packaged**/dev Windows builds" | ~~BLOCKING (mở)~~ | ✅ **ĐÃ ĐÓNG (2026-09-22):** `npm run tauri build` exit 0. Artifacts: `bundle/msi/Manga Downloader 1989_0.1.0_x64_en-US.msi` (4,153,344 B, SHA-256 `a8930362…316d9c`) và `bundle/nsis/Manga Downloader 1989_0.1.0_x64-setup.exe` (2,918,595 B, SHA-256 `fb23d6ed…3f67c6`). Lưu ý trung thực: build package đã verify; **chạy thử bản cài đặt** (install → mở exe → window controls trên bản release) vẫn cần một lần trên máy user |
 | F2 | Inter chỉ được *khai báo*, chưa bundle/self-host; máy không có Inter sẽ rơi về system-ui (vẫn hiển thị đúng tiếng Việt/Nhật) | ADVISORY | Giữ — brief cho phép "robust system fallbacks"; ghi chú upgrade self-host nếu cần đồng nhất font |
 | F3 | Double-click maximize: handler JS trên drag region; nếu Tauri cũng xử lý native, hai lần toggle có thể triệt tiêu nhau | ADVISORY | Cần test thủ công 1 lần trên desktop (hành vi: double-click vùng titlebar trống) |
 | F4 | Screenshot 1440×900 / 1024×700 / scale 125–200% chưa chụp (notes §5 đã ghi `not captured`) | ADVISORY | Cần desktop session; checklist từng mục đã liệt kê |
@@ -29,4 +29,4 @@
 
 ## 3. Kết luận
 
-**ACCEPT với 1 gate mở (F1):** toàn bộ yêu cầu code/config của Phase 02 đạt bằng chứng; duy nhất `npm run tauri build` (packaged smoke) chưa chạy và đã được khai báo trung thực là `not run` ngay từ handoff gốc. F3/F4 thuộc nhóm xác nhận mắt người trên desktop.
+**ACCEPT.** Toàn bộ yêu cầu code/config của Phase 02 đạt bằng chứng; gate packaged build (F1) đã đóng — `npm run tauri build` exit 0 với 2 artifacts + checksum ở trên. F3/F4 còn lại thuộc nhóm xác nhận mắt người trên desktop (double-click maximize, screenshot các mức scaling, chạy thử bản cài đặt).

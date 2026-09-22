@@ -96,7 +96,7 @@ All gates should exit with code 0. Current status:
 | `cargo clippy` | ✅ Pass | Same 1 warning |
 | `cargo test` | ✅ Pass | 2/2 DB tests (regression intact — Phase 03 changed no Rust) |
 | `npm run tauri dev` | ✅ Smoke | Phase 03 prototype runs in the Tauri window (compile + clean launch recorded in `docs/phase-03/implementation-notes.md` §7.1). Visual checks: drag/resize/scaling — human confirmation recommended |
-| `npm run tauri build` | ⏳ Not run | Slow (~10-20 min); run before release |
+| `npm run tauri build` | ✅ Pass (2026-09-22) | Exit 0; artifacts MSI + NSIS trong `src-tauri/target/release/bundle/` (checksums ghi ở `docs/phase-02/self-review.md` F1). Chạy thử bản cài đặt: chờ user xác nhận |
 
 ---
 
