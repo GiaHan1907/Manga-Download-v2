@@ -46,5 +46,5 @@
 | T10-39 | Codex Reviewer ACCEPT đúng commit/manifest | **BLOCKED** | chờ reviewer/user — trạng thái hiện: RC chờ review |
 | T10-40 | Publish sau owner approval, verify remote hash | **BLOCKED** | Chưa có destination được duyệt + chưa có quyền; agent không push/tag/publish |
 
-**Tổng:** PASS 20 (6 trong đó PASS-level config/fixture có ghi chú) · PARTIAL 3 · NOT RUN 8 · N/A 3 · BLOCKED 4 (T10-18/29/39/40) · FAIL 0.
+**Tổng (đếm từ chính 40 dòng trên):** PASS 25 — trong đó 8 PASS có điều kiện ghi rõ mức config/fixture/doc mà runtime tương ứng còn NOT RUN (T10-01, 17, 19, 21, 23, 33, 34, 35) · PARTIAL 2 (T10-06, T10-14) · NOT RUN 6 (T10-13, 15, 16, 24, 25, 26) · N/A 3 (T10-22, 31, 32) · BLOCKED 4 (T10-18, 29, 39, 40) · **FAIL 0**.
 **Kết luận state machine:** `RC_TESTED` (build-level) — chưa `CODEX_REVIEW_ACCEPTED`, chưa `AUTHORIZED_RELEASE`. Xuất bản công khai bị chặn hợp lệ bởi T10-39/T10-40.

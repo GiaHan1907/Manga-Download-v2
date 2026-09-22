@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+# Action pinning: major tags are used here because no owner-approved pin
+# list exists yet. Before ANY public distribution, the Release Engineer
+# should re-pin these actions to full commit SHAs (plan §8).
+
 jobs:
   gates-windows:
     runs-on: windows-latest

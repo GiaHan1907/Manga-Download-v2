@@ -62,11 +62,11 @@ Hai workflow, cả hai `permissions: contents: read`; PR job không secret/khôn
 
 ## 12. Test matrix
 
-`RELEASE_TEST_MATRIX.md`: PASS 20 · PARTIAL 3 · NOT RUN 8 · N/A 3 · BLOCKED 4 · FAIL 0.
+`RELEASE_TEST_MATRIX.md`: **PASS 25** (8 PASS có điều kiện config/fixture/doc, runtime tương ứng NOT RUN được ghi ngay trong dòng đó) · **PARTIAL 2** · **NOT RUN 6** · **N/A 3** · **BLOCKED 4** · **FAIL 0** (tổng 40, đếm từ các dòng của ma trận — bản tóm tắt cũ 20/3/8/3/4 sai số học, đã sửa ở review vòng 2).
 
 ## 13. Security / license / known issues
 
-Không Critical/High mở; K-1..K-12 trong `KNOWN_ISSUES.md`; license audit chi tiết cho phân phối công khai là việc của publish gate (ghi chú runbook), hiện mới xác minh stack attribution.
+Không Critical/High **defect** mở. Phân biệt rõ: **K-3 (HIGH) là verification gap** — installer/live-journey chưa ai chạy trên máy sạch — và chính nó là lý do T10-13..18/24..26 vẫn NOT RUN/BLOCKED; nó chặn ACCEPT/publish, không phải bug đã biết bị che. K-1..K-12 trong `KNOWN_ISSUES.md`; license audit chi tiết cho phân phối công khai là việc của publish gate (ghi chú runbook), hiện mới xác minh stack attribution.
 
 ## 14. Codex Reviewer verdict
 
@@ -87,3 +87,10 @@ Không Critical/High mở; K-1..K-12 trong `KNOWN_ISSUES.md`; license audit chi 
 3. **T10-39/40** — Reviewer ACCEPT + owner approval + Release Engineer publish + verify remote hash.
 4. Nếu phân phối công khai: quyết định cert (K-1), license audit, cân nhắc updater plan riêng.
 5. Maintenance: mỗi release chạy `check:version`, rebuild + re-hash + cập nhật manifest; checklist VM tối thiểu mục 1-4, 9-11.
+
+## 18. Review 3 vòng (sau commit RC `d272dd6`)
+
+- **Vòng 1 (config/scripts/CI):** `check-version.mjs` chuyển từ `URL.pathname` (vỡ với path có khoảng trắng/Unicode do percent-encoding) sang `fileURLToPath`; manifest release workflow sửa để lấy version từ `tauri.conf.json` (dispatch không còn ghi nhầm tag="master"); chú thích re-pin actions theo plan §8 vào cả 2 workflow; icon determinism chứng minh (regen 2 lần cùng SHA-256). Gates xanh.
+- **Vòng 2 (docs-vs-chính-nó):** **BLOCKING — summary ma trận T10 sai số học lần 2** (ghi 20/3/8/3/4 = 38 ≠ 40; đếm thật: 25 PASS trong đó 8 có điều kiện · 2 PARTIAL · 6 NOT RUN · 3 N/A · 4 BLOCKED · 0 FAIL) — sửa 3 tài liệu; đối thuẫn K-3 "High" vs câu "không Critical/High mở" được diễn đạt lại (K-3 là verification gap chặn ACCEPT, không phải defect bị che); typo runbook.
+- **Vòng 3 (adversarial):** re-hash installer trên đĩa = khớp manifest từng byte (4,480,762 B / `6090b532…f97a6`); drift test chạy lại với exit code trung thực (1 khi lệch, 0 khi khôi phục — capture lỗi tiên nghiệm bằng pipe đã bị che exit code, sửa trong evidence); quét secrets: workflows 0 tham chiếu secret, repo 0 file key/cert. Toàn bộ bằng chứng: `evidence/rc-verification-2026-09-23.txt`.
+- **Kết luận:** 0 BLOCKING code/runtime tồn tại; mọi finding thuộc loại portability-docs-honesty và đã sửa. Gates chốt sau 3 vòng: vitest 81/81 · cargo 123/123 · fmt/clippy · typecheck/lint/build · `check:version` OK. Trạng thái giữ nguyên: **RC_TESTED — PUBLICATION BLOCKED**.

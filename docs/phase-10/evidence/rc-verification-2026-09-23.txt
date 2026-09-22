@@ -1,0 +1,26 @@
+# RC verification evidence — Phase 10 review 3 vong, 2026-09-23
+
+## Installer bytes vs ARTIFACT_MANIFEST
+size=4480762
+sha256=6090b532758b3006f8fa0fe5969e00c752cbea6d14e2732e38239efb9d7f97a6
+manifest: sha256=6090b532758b3006f8fa0fe5969e00c752cbea6d14e2732e38239efb9d7f97a6 size=4480762  => KHOP
+
+## T10-05 version-drift capture (exit-code honest)
+## T10-05 drift capture (rerun, exit-code honest)
+drifted output: package.json: 1.0.1
+tauri.conf.json: 1.0.0
+Cargo.toml: 1.0.0
+Cargo.lock: 1.0.0
+VERSION DRIFT — release gate failed
+exit_code_with_drift=1
+OK — single version 1.0.0
+exit_code_restored=0
+
+## secrets scan: workflows tham chieu secrets./*signing* = 0; file .pem/.key/.p12/.pfx tracked = 0
+.github/workflows/ci.yml:0 .github/workflows/release-windows.yml:0 
+0
+
+## exe metadata
+1.0.0
+
+## icon determinism: regenerate assets/app-icon-1024.png -> sha256 dc270643a63d730a3380d578109361001a17e6c25ba332625235f22a90e4bc98 (bat doi, 2 lan chay)

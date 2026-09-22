@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // P10-02 version invariant: ONE authoritative version reflected in npm,
 // Tauri and Rust metadata. The release pipeline fails loudly on drift.
-const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const root = fileURLToPath(new URL("..", import.meta.url));
 const read = (p) => readFileSync(root + p, "utf8");
 
 const pkg = JSON.parse(read("package.json")).version;

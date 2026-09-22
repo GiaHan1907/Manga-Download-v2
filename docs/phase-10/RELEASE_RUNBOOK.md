@@ -37,7 +37,7 @@ Không có auto-update (tắt có chủ đích — `SECURITY_SIGNING_UPDATER.md`
 
 - **Backup đúng cách:** đóng hẳn app (process thoát — checkpoint đã durable) → copy toàn bộ `%APPDATA%\com.manga1989.downloader` (DB + `library\`). Không copy DB khi app đang ghi.
 - **Restore:** đóng app → ghi đè thư mục backup → mở lại; schema cũ hơn sẽ tự migrate forward.
-- **Cài thất bán/hỏng giữa chừng:** gỡ từ Settings → Apps, cài lại bằng file đã verify hash; dữ liệu người dùng không bị hai bước này đụng tới.
+- **Cài thất bại/hỏng giữa chừng:** gỡ từ Settings → Apps, cài lại bằng file đã verify hash; dữ liệu người dùng không bị hai bước này đụng tới.
 - **Thiếu WebView2 (máy offline):** cài Runtime từ Microsoft trước, hoặc cân nhắc build `webviewInstallMode: offlineInstaller` khi có yêu cầu phân phối offline thật (hiện chưa phải deliverable).
 - **App không khởi động sau upgrade:** thu thập log stderr (`manga-downloader-1989.exe` từ console), kiểm DB integrity qua lần mở kế tiếp (migrations + `PRAGMA foreign_keys` đã bật per-connection); khôi phục từ backup là đường được hỗ trợ.
 
