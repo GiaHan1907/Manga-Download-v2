@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import Button from "./Button";
 
 export type DialogProps = {
@@ -11,20 +11,49 @@ export type DialogProps = {
   onClose: () => void;
 };
 
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export default function Dialog({ open, title, description, children, footer, onClose }: DialogProps) {
+  const panelRef = useRef<HTMLElement>(null);
+
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panelRef.current?.focus();
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) {
+        return;
+      }
+      const focusables = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusables.length === 0) {
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const inside = panelRef.current.contains(active);
+      if (event.shiftKey && (!inside || active === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last)) {
+        event.preventDefault();
+        first.focus();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previous?.focus();
+    };
   }, [onClose, open]);
 
   if (!open) {
@@ -34,9 +63,11 @@ export default function Dialog({ open, title, description, children, footer, onC
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <section
+        ref={panelRef}
         className="dialog"
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         aria-labelledby="dialog-title"
         aria-describedby={description ? "dialog-description" : undefined}
         onMouseDown={(event) => event.stopPropagation()}

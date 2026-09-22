@@ -28,6 +28,7 @@ export default function LibraryPage() {
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("");
   const [status, setStatus] = useState("");
+  const [offline, setOffline] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [removing, setRemoving] = useState<LibraryEntry | null>(null);
 
@@ -54,13 +55,14 @@ export default function LibraryPage() {
       (entry) =>
         (!q || entry.summary.title.toLowerCase().includes(q)) &&
         (!genre || entry.summary.genres.includes(genre)) &&
-        (!status || entry.summary.status === status),
+        (!status || entry.summary.status === status) &&
+        (!offline || String(entry.detail.chapters.some((chapter) => chapter.hasSamplePages)) === offline),
     );
     if (sortMode === "title") {
       return [...list].sort((a, b) => a.summary.title.localeCompare(b.summary.title, "vi"));
     }
     return [...list].reverse();
-  }, [entries, query, genre, status, sortMode]);
+  }, [entries, query, genre, status, offline, sortMode]);
 
   if (entries.state === "loading") {
     return (
@@ -97,6 +99,14 @@ export default function LibraryPage() {
           </select>
         </label>
         <label className="input-field">
+          <span className="input-field__label">Available offline (mẫu)</span>
+          <select className="input" value={offline} onChange={(event) => setOffline(event.target.value)}>
+            <option value="">Tất cả</option>
+            <option value="true">Có trang mẫu local</option>
+            <option value="false">Chưa có trang mẫu</option>
+          </select>
+        </label>
+        <label className="input-field">
           <span className="input-field__label">Sắp xếp</span>
           <select className="input" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
             <option value="recent">Thêm gần đây</option>
@@ -117,7 +127,7 @@ export default function LibraryPage() {
         <EmptyState
           title="Library demo trống"
           description="Không mục nào khớp bộ lọc, hoặc bạn đã gỡ hết mục khỏi thư viện mẫu."
-          action={<Button onClick={() => { setQuery(""); setGenre(""); setStatus(""); }}>Xóa bộ lọc</Button>}
+          action={<Button onClick={() => { setQuery(""); setGenre(""); setStatus(""); setOffline(""); }}>Xóa bộ lọc</Button>}
         />
       ) : (
         <div className={view === "grid" ? "card-grid" : "library-list"}>

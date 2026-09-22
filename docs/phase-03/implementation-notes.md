@@ -154,7 +154,7 @@ State khả biến: `tasks[]`, `favorites: string[]`, `libraryAdded: string[]`, 
 
 Swap = replace `services` object in `provider.ts`; screens unchanged. Reset helper `resetMockState` becomes test-only.
 
-## 9. Open issues / limitations
+## 9. Vấn đề còn tồn tại / giới hạn
 
 1. Fixtures are session-only; reload resets state (expected for prototype).
 2. Reader images are original neutral SVGs — real content requires Phase 04 assets.
@@ -162,3 +162,18 @@ Swap = replace `services` object in `provider.ts`; screens unchanged. Reset help
 4. `npm run tauri build` not run here — required before release.
 5. Playwright not configured → E2E journey covered by RTL integration test instead.
 6. Icon remains Phase 02 16×16 placeholder (release item).
+
+## 10. Self-review theo brief (thay bước Codex Reviewer — user đồng ý 2026-09-22)
+
+Review đối chiếu từng mục §2, §3, §7, §9 của `PHASE_03_MANGA_DOWNLOADER_1989.md` với code thực tế sau commit `ba6696f`:
+
+| # | Phát hiện | Phân loại | Xử lý |
+|---|---|---|---|
+| R1 | Dialog thiếu modal focus management (§2.9 yêu cầu): không chuyển focus vào dialog, không Tab-trap, không hoàn tác focus | BLOCKING | ✅ Đã sửa: `Dialog.tsx` focus panel khi mở, bẫy Tab hai chiều, Escape/đóng trả focus về phần tử trước; test mới `dialog moves focus in, traps Tab and restores focus on close` |
+| R2 | Library thiếu filter `available offline` (§3.4 liệt kê rõ) | BLOCKING | ✅ Đã sửa: cờ suy ra từ fixture field thật (`chapters.some(hasSamplePages)`), nhãn "có trang mẫu local"; test mới `offline filter keeps only manga with bundled sample pages` |
+| R3 | §2.3 screens import trực tiếp fixtures? | Kiểm tra: `grep` = 0 kết quả trong `src/features`; service boundary sạch | pass |
+| R4 | §2.4/§2.10 random/time/network? | Kiểm tra: không `Math.random`, không clock, không `fetch`/`XMLHttpRequest` trong `src/` | pass |
+| R5 | Reader "prefetch adjacent pages" | ADVISORY | Không làm — brief ghi "if useful"; prototype không cần |
+| R6 | `createdAt` của task mới cùng timestamp cố định → sort "mới nhất" suy biến thành thứ tự chèn | ADVISORY | Chấp nhận, đã ghi chú deterministic; không ảnh hưởng transition |
+
+Kết quả sau fix: vitest **46/46** (thêm 2 test), lint/typecheck/build pass, Rust không đổi. Quyết định workflow mới (tự review, bỏ bước Codex Reviewer) do user chỉ đạo 2026-09-22; file `AGENTS.md` vẫn giữ nguyên trên đĩa, chỉ không áp dụng bước reviewer.

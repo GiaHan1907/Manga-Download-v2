@@ -122,6 +122,35 @@ describe("T03-05/T03-06 detail selection, queue, favorites sync", () => {
       expect(screen.queryAllByRole("button", { name: /Gỡ .* khỏi thư viện mẫu/ }).length).toBe(3);
     });
   });
+
+  it("dialog moves focus in, traps Tab and restores focus on close", async () => {
+    renderAt("/library");
+    const removeButton = (await screen.findAllByRole("button", { name: /Gỡ .* khỏi thư viện mẫu/ }))[0];
+    removeButton.focus();
+    fireEvent.click(removeButton);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => {
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    });
+
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(removeButton);
+  });
+
+  it("offline filter keeps only manga with bundled sample pages", async () => {
+    renderAt("/library");
+    const offlineSelect = await screen.findByLabelText(/Available offline/);
+    fireEvent.change(offlineSelect, { target: { value: "true" } });
+    await waitFor(() => {
+      expect(screen.getByText("Hành Trình Ngôi Sao")).toBeDefined();
+      expect(screen.queryByText("Vị Giác Cuối Cùng")).toBeNull();
+      expect(screen.queryByText("Chuyến Tàu Cuối Ngày")).toBeNull();
+    });
+  });
 });
 
 describe("T03-07 Downloads transitions", () => {
