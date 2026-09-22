@@ -2,6 +2,8 @@
 
 Local-first desktop app for downloading and reading manga offline. Built with Tauri 2, React, TypeScript, Vite, Rust, and SQLx/SQLite.
 
+> **Bắt đầu từ đây (đặc biệt cho AI/dev tiếp theo):** đọc [`docs/HANDOFF.md`](docs/HANDOFF.md) — trạng thái, bất biến kiến trúc, việc còn tồn. Brief và plan các phase trong `docs/briefs/`, `docs/plans/`; self-review từng phase trong `docs/phase-*/`.
+
 > **Phase 01 — Foundation** ✅ · **Phase 02 — Design System & UI Shell** ✅ · **Phase 03 — Core UI Screens (Interactive Prototype)** ✅  
 > Phase 03 adds all product screens (Home, Discover/URL import, Manga Detail, Library, Favorites, Downloads, Sample Reader, Settings/Sources) on top of the Phase 02 shell, backed by **typed mock services with deterministic fixture data**. This is a prototype: no real search, downloading, CBZ export, or file storage. See `docs/phase-03/`.
 
