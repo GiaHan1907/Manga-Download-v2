@@ -124,3 +124,62 @@ describe("normalizeIpcError contract", () => {
     expect(normalizeIpcError("plain string").message).toBe("plain string");
   });
 });
+
+describe("S1/S2 review-round-2 boundaries", () => {
+  it("Manga Detail favorite is explicitly labeled demo with boundary note (§2.8)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "app_get_info") {
+        return Promise.resolve({ name: "Manga Downloader 1989", version: "0.1.0", platform: "windows" });
+      }
+      if (cmd === "app_health_check") {
+        return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 2 });
+      }
+      return Promise.reject(new Error("Unknown command"));
+    });
+
+    renderAt("/manga/manga-001");
+    const star = await screen.findByRole("button", { name: /êu thích \(demo\)/ });
+    expect(star).toBeDefined();
+    expect(await screen.findByText(/tab Favorites chỉ hiển thị dữ liệu local thật/)).toBeDefined();
+  });
+
+  it("Library favorite surfaces IPC failure instead of silent success (§P04-06)", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "app_get_info") {
+        return Promise.resolve({ name: "Manga Downloader 1989", version: "0.1.0", platform: "windows" });
+      }
+      if (cmd === "app_list_local_mangas") {
+        return Promise.resolve({
+          items: [
+            {
+              id: "m-1",
+              sourceId: "src-a",
+              sourceMangaId: "a1",
+              title: "Manga Đã Đăng Ký",
+              author: null,
+              description: null,
+              status: "ongoing",
+              chapterCount: 3,
+              favorite: false,
+              updatedAt: "2026-09-22T00:00:00.000Z",
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+        });
+      }
+      if (cmd === "app_set_manga_favorite") {
+        return Promise.reject({ code: "NOT_FOUND", message: "Bản ghi không tồn tại.", retryable: false });
+      }
+      return Promise.reject(new Error("Unknown command"));
+    });
+
+    renderAt("/library");
+    const star = await screen.findByRole("button", { name: "Yêu thích Manga Đã Đăng Ký" });
+    fireEvent.click(star);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Bản ghi không tồn tại.");
+    expect(await screen.findByText("Manga Đã Đăng Ký")).toBeDefined();
+  });
+});

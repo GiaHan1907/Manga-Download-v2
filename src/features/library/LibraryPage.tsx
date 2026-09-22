@@ -21,6 +21,7 @@ export default function LibraryPage() {
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(query, 300);
 
   const page = useAsyncData(
@@ -97,10 +98,14 @@ export default function LibraryPage() {
                     variant={manga.favorite ? "primary" : "ghost"}
                     aria-pressed={manga.favorite}
                     aria-label={`${manga.favorite ? "Bỏ yêu thích" : "Yêu thích"} ${manga.title}`}
-                    onClick={() => {
-                      void localServices.library
-                        .setFavorite(manga.id, !manga.favorite)
-                        .then(() => setRetryNonce((value) => value + 1));
+                    onClick={async () => {
+                      setActionError(null);
+                      try {
+                        await localServices.library.setFavorite(manga.id, !manga.favorite);
+                        setRetryNonce((value) => value + 1);
+                      } catch (error) {
+                        setActionError(`${manga.title}: ${normalizeIpcError(error).message}`);
+                      }
                     }}
                   >
                     <Star size={14} aria-hidden="true" />
@@ -133,6 +138,12 @@ export default function LibraryPage() {
             </div>
           </div>
         </>
+      )}
+
+      {actionError && (
+        <p className="queue-error" role="alert">
+          Không cập nhật được favorite — {actionError}
+        </p>
       )}
     </div>
   );

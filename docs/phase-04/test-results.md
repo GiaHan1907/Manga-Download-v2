@@ -18,7 +18,7 @@
 | T04-10 | DB lỗi → ErrorState recoverable, không thành empty | `phase04.test.tsx` retry recovery test (DB fail → alert → retry → empty thật) | pass |
 | T04-11 | Phân trang bounded deterministic; page size sai reject | `t04_11_pagination_is_bounded_and_deterministic` (+ escape LIKE); `oversized_query_and_malformed_ids_rejected` | pass |
 | T04-12 | DTO/Serde contract camelCase 2 phía | `serialized_keys_are_camel_case`, `wire_shape_is_camel_case_and_sanitized`, `error_codes_are_stable`; `src/types/backend.ts` mirror; `normalizeIpcError` contract test | pass |
-| T04-13 | Regression Phase 01–03 | vitest 51/51 (toàn bộ phase03 matrix cập nhật còn chạy); cargo test 23/23; dev smoke dưới | pass (smoke chờ mục §2) |
+| T04-13 | Regression Phase 01–03 | vitest 53/53 (toàn bộ phase03 matrix cập nhật còn chạy); cargo test 23/23; dev smoke dưới | pass (smoke chờ mục §2) |
 | T04-14 | Audit bảo mật | `git diff` capabilities/tauri.conf: **không đổi** từ Phase 02 (chỉ thêm `withGlobalTauri:false` ở review P01); app commands không cần permission; grep không fetch/SQL raw/path command; DB path chỉ từ app_data API | pass |
 | T04-15 | Gates + Windows smoke | bảng命令 dưới | pass / smoke pending |
 

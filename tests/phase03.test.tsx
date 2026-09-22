@@ -130,7 +130,7 @@ describe("T03-05/T03-06 demo detail, queue, favorites and local boundary", () =>
 
   it("demo favorite toggles in demo sandbox; Favorites page is Local-only (Phase 04 boundary)", async () => {
     renderAt("/manga/manga-003");
-    const star = await screen.findByRole("button", { name: "Yêu thích" });
+    const star = await screen.findByRole("button", { name: /Yêu thích \(demo\)/ });
     fireEvent.click(star);
     await waitFor(() => expect(star.getAttribute("aria-pressed")).toBe("true"));
 

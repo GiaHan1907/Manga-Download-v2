@@ -106,11 +106,14 @@ export default function MangaDetailPage() {
               onClick={() => void services.library.toggleFavorite(manga.id)}
             >
               <Star size={16} aria-hidden="true" />
-              {extra.state === "success" && extra.data.favorite ? "Đang yêu thích" : "Yêu thích"}
+              {extra.state === "success" && extra.data.favorite ? "Đang yêu thích (demo)" : "Yêu thích (demo)"}
             </Button>
           </div>
           <p className="muted">
             {manga.author} · nguồn demo: {manga.sourceId} ({manga.sourceMangaId})
+          </p>
+          <p className="muted">
+            Trang này thuộc sandbox demo: ★ chỉ đổi trạng thái mock của phiên, không xuống database — tab Favorites chỉ hiển thị dữ liệu local thật.
           </p>
           <div className="chip-row">
             <StatusBadge tone="neutral">{manga.status}</StatusBadge>
