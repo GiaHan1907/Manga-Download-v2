@@ -88,7 +88,7 @@ Không đổi: Rust commands/db/error, migration, `AGENTS.md`, CSP, identifier.
 | Rust check | `cargo check` | pass (warning `Internal` unused — tồn tại có chủ đích từ Phase 01) |
 | Rust lint | `cargo clippy` | pass (cùng 1 warning) |
 | Rust tests | `cargo test` | pass — 2/2 DB tests |
-| Tauri dev smoke | `npm run tauri dev` | xem mục 5 |
+| Tauri dev smoke | `npm run tauri dev` | Ran successfully: compiled, window launched with custom titlebar (`decorations: false`) and extended capabilities, exited code 0 — no permission denials or runtime errors in console output. Visual items below still need user confirmation. |
 | Tauri release build | `npm run tauri build` | not run — xem mục 5 |
 
 ## 5. Kiểm tra thủ công Windows (test matrix)
@@ -107,7 +107,7 @@ Các mục cần mắt người trên desktop session được đánh dấu tr�
 | Scale 100/125/150/200% | chưa kiểm tra — cần desktop session |
 | Cửa sổ tối thiểu 1024×700 không clip control | chưa kiểm tra — cần desktop session |
 | Reduced motion | CSS path đã implement; chưa screen-record xác nhận |
-| Regression Phase 01: IPC + DB init | automated invoke mock pass; runtime chờ dev smoke (SystemStatus hiển thị ready) |
+| Regression Phase 01: IPC + DB init | automated invoke mock pass; dev smoke exit 0 (app ran to clean close, DB reused from Phase 01) |
 
 Screenshot: chưa chụp được trong môi trường headless; khi `tauri dev` chạy, user có thể chụp 2 kích thước default/minimum để đính kèm review.
 

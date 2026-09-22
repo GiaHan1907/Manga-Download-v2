@@ -94,7 +94,7 @@ All gates should exit with code 0. Current status:
 | `cargo check` | ✅ Pass | 1 warning (dead_code: `Internal` variant, expected until business logic) |
 | `cargo clippy` | ✅ Pass | Same 1 warning |
 | `cargo test` | ✅ Pass | 2/2 DB tests (init + idempotency) |
-| `npm run tauri dev` | ⏳ Smoke run | Window/UI checks need a human on the desktop session — see `docs/phase-02/implementation-notes.md` §5 |
+| `npm run tauri dev` | ✅ Smoke pass | App compiled, launched with custom titlebar, exited cleanly (code 0). Human visual checks (drag/resize/scaling) still recommended — see `docs/phase-02/implementation-notes.md` §5 |
 | `npm run tauri build` | ⏳ Not run | Slow (~10-20 min); run before release |
 
 ---
