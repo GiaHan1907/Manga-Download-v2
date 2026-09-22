@@ -40,3 +40,11 @@
 - [x] `docs/phase-03/implementation-notes.md` + docs/README/screen-checklist
 
 **Kết luận: ACCEPT sau khi sửa F1.** Blocker duy nhất là determinism của task id; các mục còn lại là advisory/manual đã khai báo.
+
+## 4. Vòng review 2 (fresh eyes, cùng ngày — soi acceptance §3 bằng hành vi, không chỉ state)
+
+| # | Finding | Phân loại | Xử lý |
+|---|---|---|---|
+| F6 | `SearchPanel` của Discover gọi `search(query, selectedSources)` với rỗng = "không lọc" → **manga của nguồn đã tắt vẫn hiện trong Discover**, vi phạm acceptance §3.7 "toggling source affects Discover". Test vòng 1 chỉ kiểm `listSources()` đổi state, không kiểm kết quả thật — bài học: test phải assertion trên hành vi end-to-end | BLOCKING | ✅ `DiscoverPage.tsx`: effective filter = selection ∩ enabled, mặc định là danh sách enabled; tất cả nguồn tắt → 0 kết quả. Test hồi quy `disabling a source removes its manga from Discover results (§3.7)`. Gates: 48/48, lint/typecheck pass |
+
+**Kết luận vòng 2: ACCEPT** — không còn BLOCKING mở. Các mục F2–F5 giữ nguyên phân loại advisory/manual.

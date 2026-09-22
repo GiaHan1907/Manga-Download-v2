@@ -236,4 +236,22 @@ describe("T03-08 Settings and Sources", () => {
     const addSource = screen.getByRole("button", { name: /Thêm nguồn/ });
     expect((addSource as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("disabling a source removes its manga from Discover results (§3.7)", async () => {
+    renderAt("/settings/sources");
+    const rows = await screen.findAllByRole("button", { name: "Tắt nguồn" });
+    const betaToggle = rows[1];
+    const betaLabel = betaToggle.closest(".source-row")?.textContent ?? "";
+    expect(betaLabel).toContain("Beta");
+    fireEvent.click(betaToggle);
+
+    fireEvent.click(screen.getByRole("link", { name: "Discover" }));
+    const input = await screen.findByPlaceholderText(/Nhập tên, tác giả/);
+
+    fireEvent.change(input, { target: { value: "kỷ nguyên" } });
+    expect(await screen.findByText("Không có kết quả mẫu")).toBeDefined();
+
+    fireEvent.change(input, { target: { value: "hanh trinh" } });
+    expect(await screen.findByText("Hành Trình Ngôi Sao")).toBeDefined();
+  });
 });

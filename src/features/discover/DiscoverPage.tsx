@@ -22,8 +22,16 @@ function SearchPanel({ sources }: { sources: CatalogSource[] }) {
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const debouncedQuery = useDebouncedValue(query, 300);
 
+  const enabledSourceIds = sources.filter((source) => source.enabled).map((source) => source.id);
+  const effectiveSourceIds = (
+    selectedSources.length > 0 ? selectedSources : enabledSourceIds
+  ).filter((id) => enabledSourceIds.includes(id));
+
   const results = useAsyncData<MangaSummary[]>(
-    () => services.catalog.search(debouncedQuery, selectedSources),
+    () =>
+      effectiveSourceIds.length === 0
+        ? Promise.resolve([])
+        : services.catalog.search(debouncedQuery, effectiveSourceIds),
     [debouncedQuery, selectedSources, version],
   );
 
