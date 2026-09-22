@@ -59,6 +59,6 @@
 | T09-51 | PARTIAL | Keyboard: palette test (↑↓ Enter Esc), reader phím (phase07), dialog focus trap (phase04), visible focus CSS; fullscreen/escape thật = NOT RUN | reduced-motion: chưa implement — ghi issue R-6 |
 | T09-52 | PASS | Full suite trên candidate: vitest 81/81, cargo 123/123, clippy/fmt/build sạch, tauri build EXIT=0, release exe chạy — xem mục Kết luận | Không Critical/High mở (see SECURITY_REVIEW §2, RISK_REGISTER) |
 
-**Tổng:** PASS/PASS(code) 40 · PARTIAL 4 · NOT RUN 1 · BLOCKED-by-design 1 · (một số PASS có ghi chú manual-kèm). Không có FAIL mở.
+**Tổng:** PASS/PASS(code) 45 · PARTIAL 5 · NOT RUN 1 · BLOCKED-by-design 1 · (một số PASS có ghi chú manual-kèm). Không có FAIL mở.
 
 **Live sources:** không chạy live journey nào trong Phase 09 — mọi E2E dùng fixture/mocked invoke theo rule §2.5; T06-24b/T08-36 vẫn PENDING-MANUAL.

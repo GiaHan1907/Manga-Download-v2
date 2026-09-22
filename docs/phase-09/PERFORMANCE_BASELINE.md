@@ -2,6 +2,8 @@
 
 **Môi trường đo:** Windows 11 Pro x64 Build 26200, runner dev (2 CPU reported), SSD chưa xác nhận model, **debug build** (`cargo test` không `--release` — worst-case cố ý), Node v24.18.0. Mỗi phép đo median-of-3 (query) hoặc single-run (kHI chi phí ổn định). Test nằm trong suite thường: `perf.rs` — chạy lại được bằng `cargo test t09_perf -- --nocapture`.
 
+**Reproduce/variance:** re-run ở review vòng 3 (cùng máy, cùng build): open 21.42 ms, list 8.3 ms, search 4.1 ms, checkpoint 4.31 ms/write — mọi số dưới 25% lệch so với capture đầu; các ngưỡng tripwire cách số đo ≥4×, không edge-case.
+
 ## Số đo (capture 2026-09-23, commit candidate P09)
 
 | Phép đo | Kết quả | Ngưỡng plan §P09-07 | Đánh giá |

@@ -35,7 +35,7 @@ Baseline: `71c5ba8` (Phase 08 + review 3 vòng, working tree này = Phase 09 can
 
 ## 5. QA Matrix summary
 
-**PASS/PASS(code): 40** · **PARTIAL: 4** (T09-18 20-task, T09-23 disk-full OS-level, T09-47 RAM dài hơi, T09-51 fullscreen/reduced-motion) · **NOT RUN: 1** (T09-49 display matrix) · **BLOCKED-by-design: 1** (T09-32 đổi root). Không FAIL. Chi tiết: `QA_MATRIX.md`.
+**PASS/PASS(code): 45** · **PARTIAL: 5** (T09-18 20-task, T09-23 disk-full OS-level, T09-47 RAM dài hơi, T09-48 20-task end-to-end, T09-51 fullscreen/reduced-motion) · **NOT RUN: 1** (T09-49 display matrix) · **BLOCKED-by-design: 1** (T09-32 đổi root). Không FAIL. Chi tiết: `QA_MATRIX.md`.
 
 ## 6. Commands / OS / toolchain / evidence
 
@@ -72,3 +72,10 @@ R-1 live journey BLOCKED (cần user) — **đây là blocker duy nhất còn l�
 ## 13. Codex Reviewer decision
 
 (để Reviewer điền: ACCEPT/REJECT + findings phân loại.)
+
+## 14. Review 3 vòng (làm sau handoff ban đầu, commit này gồm luôn)
+
+- **Vòng 1 (test correctness):** đối chiếu `RawZip` builder với từng offset thực của parser (central method@10/size@20/namelen@28/offset@42, EOCD count@10/len@12/offs@16) — baseline test `t09_handcrafted...` chứng minh builder đúng nên mọi rejection là của guard, không phải artifact; http tests không tautological (hàm thật, resolver thật, đo thời gian thật). **Không BLOCKING.**
+- **Vòng 2 (docs vs code):** toàn bộ 17 tên test được trích dẫn trong docs tồn tại trong code (verify grep); nhưng **số học ma trận sai ở 3 docs** (ghi 40 PASS/4 PARTIAL; thực đếm được 45 PASS/PASS(code) + 5 PARTIAL + 1 NOT RUN + 1 BLOCKED) → đã sửa QA_MATRIX, PHASE_09_HANDOFF §5, docs/HANDOFF.md. **1 BLOCKING (doc-truthfulness).**
+- **Vòng 3 (adversarial/evidence):** mục "perf numbers" trong `evidence/gate-outputs` rỗng (grep sai pattern) → regenerate file với output `--nocapture` thật + ghi chú variance re-run (<25%) vào PERFORMANCE_BASELINE. **1 BLOCKING (evidence completeness).**
+- Gates sau mỗi vòng; chốt: vitest 81/81 · cargo 123/123 · fmt/clippy sạch (`evidence/gate-outputs-2026-09-23.txt`).

@@ -1,16 +1,17 @@
-# Gate outputs (verbatim tails) — Phase 09 candidate, 2026-09-23
+# Gate outputs (verbatim) — Phase 09 candidate, sau review 3 vòng, 2026-09-23
 
-## cargo test
-test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.57s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+## cargo test (full)
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.74s
 
 ## vitest
 [2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
 [2m      Tests [22m [1m[32m81 passed[39m[22m[90m (81)[39m
 
-## clippy/fmt
+## fmt/clippy
 FMT_OK
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.58s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.57s
 
-## perf numbers
+## perf re-run (--nocapture, vòng 3 review) — số baseline trong PERFORMANCE_BASELINE.md là capture đầu; variance dưới 25%
+PERF cbz: built 300 pages (50422 bytes) in 337 ms | open = 21.42 ms | page read = 0.13 ms
+PERF library: seed 1k×10 = 8288 ms | list median = 8.3 ms | search median = 4.1 ms
+PERF checkpoint: 2000 single-row updates = 8616 ms (4.31 ms/write) — per-update durable commit by design; fsync dominates
