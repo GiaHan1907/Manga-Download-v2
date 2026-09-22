@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, AppHealth, AppInfo } from "./contracts";
+import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
   AppSettingsDto,
   DownloadTaskDto,
@@ -9,6 +9,13 @@ import type {
   ReadingProgressDto,
   SettingsPatchDto,
 } from "../../types/backend";
+import type {
+  RemoteChapterDto,
+  RemoteMangaDetailDto,
+  SaveResultDto,
+  SearchResultDto,
+  SourceViewDto,
+} from "../../types/source";
 
 export async function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_get_info");
@@ -73,8 +80,64 @@ export async function listLocalDownloadTasks(args: {
   return invoke<PagedResult<DownloadTaskDto>>("app_list_local_download_tasks", args);
 }
 
-export function normalizeIpcError(error: unknown): AppError {
-  if (typeof error === "object" && error !== null) {
+// --- Phase 05: source engine & discovery (narrow, registry-backed commands) ---
+
+export async function listSupportedSources(): Promise<SourceViewDto[]> {
+  return invoke<SourceViewDto[]>("list_supported_sources");
+}
+
+export async function addMangaSource(args: {
+  displayName: string;
+  baseUrl: string;
+}): Promise<SourceViewDto> {
+  return invoke<SourceViewDto>("add_manga_source", args);
+}
+
+export async function removeMangaSource(sourceId: string): Promise<void> {
+  return invoke<void>("remove_manga_source", { sourceId });
+}
+
+export async function setSourceEnabled(args: {
+  sourceId: string;
+  enabled: boolean;
+}): Promise<boolean> {
+  return invoke<boolean>("set_source_enabled", args);
+}
+
+export async function searchManga(args: {
+  query: string;
+  sourceIds?: string[];
+  page?: number;
+}): Promise<SearchResultDto> {
+  return invoke<SearchResultDto>("search_manga", args);
+}
+
+export async function resolveMangaUrl(url: string): Promise<RemoteMangaDetailDto> {
+  return invoke<RemoteMangaDetailDto>("resolve_manga_url", { url });
+}
+
+export async function getRemoteMangaDetails(args: {
+  sourceId: string;
+  sourceMangaId: string;
+}): Promise<RemoteMangaDetailDto> {
+  return invoke<RemoteMangaDetailDto>("get_remote_manga_details", args);
+}
+
+export async function getRemoteChapters(args: {
+  sourceId: string;
+  sourceMangaId: string;
+}): Promise<RemoteChapterDto[]> {
+  return invoke<RemoteChapterDto[]>("get_remote_chapters", args);
+}
+
+export async function saveDiscoveredManga(args: {
+  sourceId: string;
+  sourceMangaId: string;
+}): Promise<SaveResultDto> {
+  return invoke<SaveResultDto>("save_discovered_manga", args);
+}
+
+export function normalizeIpcError(error: unknown): AppError {  if (typeof error === "object" && error !== null) {
     const candidate = error as Record<string, unknown>;
     const code = isAppErrorCode(candidate.code) ? candidate.code : "INTERNAL_ERROR";
     const message =
@@ -89,13 +152,24 @@ export function normalizeIpcError(error: unknown): AppError {
   };
 }
 
+const APP_ERROR_CODES: ReadonlySet<string> = new Set<AppErrorCode>([
+  "DATABASE_INIT_FAILED",
+  "VALIDATION_ERROR",
+  "NOT_FOUND",
+  "DB_CONFLICT",
+  "UNSUPPORTED_IN_THIS_PHASE",
+  "INTERNAL_ERROR",
+  "INVALID_URL",
+  "UNSUPPORTED_SOURCE",
+  "SOURCE_DISABLED",
+  "UNSUPPORTED_OPERATION",
+  "SOURCE_NOT_FOUND",
+  "SOURCE_RATE_LIMITED",
+  "SOURCE_NETWORK",
+  "SOURCE_PARSE_ERROR",
+  "SOURCE_UPSTREAM",
+]);
+
 function isAppErrorCode(value: unknown): value is AppError["code"] {
-  return (
-    value === "DATABASE_INIT_FAILED" ||
-    value === "VALIDATION_ERROR" ||
-    value === "NOT_FOUND" ||
-    value === "DB_CONFLICT" ||
-    value === "UNSUPPORTED_IN_THIS_PHASE" ||
-    value === "INTERNAL_ERROR"
-  );
+  return typeof value === "string" && APP_ERROR_CODES.has(value);
 }

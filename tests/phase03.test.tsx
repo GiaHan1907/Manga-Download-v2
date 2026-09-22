@@ -48,6 +48,21 @@ function installBackendMock() {
       case "app_list_local_mangas":
       case "app_list_favorite_mangas":
         return Promise.resolve({ items: [], total: 0, limit: 20, offset: 0 });
+      case "list_supported_sources":
+        return Promise.resolve([
+          {
+            id: "mangadex",
+            displayName: "MangaDex",
+            capabilities: ["search", "resolveUrl", "details"],
+            status: "ready",
+            attribution: null,
+            enabled: true,
+            builtin: true,
+            baseUrl: null,
+          },
+        ]);
+      case "set_source_enabled":
+        return Promise.resolve(true);
       default:
         return Promise.reject(new Error(`Unknown command ${cmd}`));
     }
@@ -93,7 +108,7 @@ describe("T03-01/T03-02 Home demo journey", () => {
 
 describe("T03-03/T03-04 Discover search and demo import", () => {
   it("debounced search filters fixtures and supports empty state", async () => {
-    renderAt("/discover");
+    renderAt("/discover?tab=demo");
     const input = await screen.findByPlaceholderText(/Nhập tên, tác giả/);
     fireEvent.change(input, { target: { value: "giấy" } });
     expect(await screen.findByText("Kỷ Nguyên Giấy")).toBeDefined();
@@ -103,7 +118,7 @@ describe("T03-03/T03-04 Discover search and demo import", () => {
   });
 
   it("resolves the sample demo URL and rejects others", async () => {
-    renderAt("/discover?tab=url");
+    renderAt("/discover?tab=demo-url");
     const input = await screen.findByPlaceholderText(/demo\.manga1989/);
     fireEvent.change(input, { target: { value: "https://example.org/x" } });
     fireEvent.click(screen.getByRole("button", { name: "Kiểm tra URL" }));
@@ -239,6 +254,7 @@ describe("T03-08/T04 Settings and Sources", () => {
     fireEvent.click(betaToggle);
 
     fireEvent.click(screen.getByRole("link", { name: "Discover" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Demo sandbox" }));
     const input = await screen.findByPlaceholderText(/Nhập tên, tác giả/);
 
     fireEvent.change(input, { target: { value: "kỷ nguyên" } });

@@ -37,7 +37,8 @@ export default function LibraryPage() {
             Library <StatusBadge tone="success">Local — dữ liệu thật (SQLite)</StatusBadge>
           </p>
           <p className="muted">
-            Danh sách sẽ có bản ghi khi Phase 05 đăng ký manga từ nguồn; Phase 04 không tự thêm dữ liệu.
+            Bản ghi xuất hiện khi bạn lưu metadata từ Discover (nguồn thật) — &quot;Đã lưu&quot; nghĩa là
+            metadata trong SQLite, KHÔNG phải chương đã tải về.
           </p>
         </div>
         <Input
@@ -93,6 +94,10 @@ export default function LibraryPage() {
                   subtitle={`${manga.chapterCount} chương đã đăng ký · ${manga.author ?? "không rõ tác giả"}`}
                   status={manga.status}
                 />
+                <p className="muted library-item__offline">
+                  <StatusBadge tone="warning">Saved — chưa tải (Phase 06)</StatusBadge>{" "}
+                  availableOffline: false
+                </p>
                 <div className="library-item__actions">
                   <Button
                     variant={manga.favorite ? "primary" : "ghost"}
@@ -111,7 +116,7 @@ export default function LibraryPage() {
                     <Star size={14} aria-hidden="true" />
                     {manga.favorite ? "Đang yêu thích" : "Yêu thích"}
                   </Button>
-                  <Tooltip content="Manga Detail/Reader cho dữ liệu local nối từ Phase 05–07.">
+                  <Tooltip content="Detail/Reader cho bản ghi local chỉ hoạt động từ Phase 06–07 khi có file thật.">
                     <Button disabled aria-label={`Mở ${manga.title} — chưa khả dụng`}>
                       Mở Detail
                     </Button>

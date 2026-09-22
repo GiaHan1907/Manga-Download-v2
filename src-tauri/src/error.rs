@@ -31,6 +31,9 @@ pub enum AppError {
     #[allow(dead_code)]
     #[error("internal error")]
     Internal,
+
+    #[error("provider error")]
+    Source(#[from] crate::sources::adapter::SourceError),
 }
 
 impl AppError {
@@ -40,6 +43,12 @@ impl AppError {
 
     pub fn not_found<T: Into<String>>(entity: T) -> Self {
         AppError::NotFound(entity.into())
+    }
+
+    /// Wire code exposed to the UI; test-only accessor for error-mapping tests.
+    #[cfg(test)]
+    pub(crate) fn wire_code(&self) -> &'static str {
+        self.wire().code
     }
 }
 
@@ -77,6 +86,16 @@ impl AppError {
                 "INTERNAL_ERROR",
                 "Lỗi nội bộ không xác định.".to_string(),
                 false,
+            ),
+            AppError::Source(source) => (
+                source.code(),
+                source.safe_message().to_string(),
+                matches!(
+                    source,
+                    crate::sources::adapter::SourceError::Network
+                        | crate::sources::adapter::SourceError::RateLimited(_)
+                        | crate::sources::adapter::SourceError::Upstream
+                ),
             ),
         };
         WireError {

@@ -10,3 +10,6 @@ src-tauri/gen/
 *.tsbuildinfo
 .env
 .env.local
+
+# temporary artifacts (smoke logs, DB copies)
+.scratch/

@@ -1162,6 +1162,17 @@ button {
   flex-wrap: wrap;
 }
 
+.source-errors {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
 @keyframes skeleton {
   from {
     background-position: 200% 0;

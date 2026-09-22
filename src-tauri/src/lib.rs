@@ -4,6 +4,7 @@ mod db;
 mod domain;
 mod error;
 mod services;
+mod sources;
 
 use app_state::AppState;
 use tauri::Manager;
@@ -18,10 +19,25 @@ pub fn run() {
             if let Err(error) = services::storage_service::prepare(&app_data_dir) {
                 eprintln!("storage preparation skipped: {error}");
             }
-            app.manage(AppState { db: pool });
+            let rows =
+                tauri::async_runtime::block_on(db::repositories::source_repo::list_sources(&pool))?;
+            let registry = sources::registry::SourceRegistry::from_rows(&rows);
+            app.manage(AppState {
+                db: pool,
+                registry: std::sync::Arc::new(std::sync::Mutex::new(registry)),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::discovery::list_supported_sources,
+            commands::discovery::add_manga_source,
+            commands::discovery::remove_manga_source,
+            commands::discovery::set_source_enabled,
+            commands::discovery::search_manga,
+            commands::discovery::resolve_manga_url,
+            commands::discovery::get_remote_manga_details,
+            commands::discovery::get_remote_chapters,
+            commands::discovery::save_discovered_manga,
             commands::system::app_get_info,
             commands::system::app_health_check,
             commands::settings::app_get_settings,

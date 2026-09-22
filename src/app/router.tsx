@@ -3,6 +3,7 @@ import AppShell from "../components/layout/AppShell";
 import ErrorState from "../components/ui/ErrorState";
 import Button from "../components/ui/Button";
 import DiscoverPage from "../features/discover/DiscoverPage";
+import RemoteDetailPage from "../features/discover/RemoteDetailPage";
 import DownloadsPage from "../features/downloads/DownloadsPage";
 import HomePage from "../features/home/HomePage";
 import FavoritesPage from "../features/library/FavoritesPage";
@@ -24,6 +25,7 @@ export function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/sources" element={<SourcesPage />} />
         <Route path="/manga/:mangaId" element={<MangaDetailPage />} />
+        <Route path="/remote/:sourceId/:sourceMangaId" element={<RemoteDetailPage />} />
         <Route path="/reader/:mangaId/:chapterId" element={<ReaderPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

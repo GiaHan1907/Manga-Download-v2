@@ -1,0 +1,710 @@
+use serde::Serialize;
+use sqlx::{Connection, SqlitePool};
+use url::Url;
+
+use crate::db::repositories::source_repo;
+use crate::domain::{now_iso, validate_id, validate_text_len};
+use crate::error::AppError;
+use crate::sources::adapter::{SourceAdapter, SourceError};
+use crate::sources::dto::{RemoteMangaDetail, SourceInfo};
+use crate::sources::registry::SourceRegistry;
+use crate::sources::resolver::resolve_owned_url;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceView {
+    #[serde(flatten)]
+    pub info: SourceInfo,
+    pub enabled: bool,
+    pub builtin: bool,
+    pub base_url: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchSourceError {
+    pub source_id: String,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub items: Vec<crate::sources::dto::RemoteMangaSummary>,
+    pub source_errors: Vec<SearchSourceError>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDetail {
+    #[serde(flatten)]
+    pub detail: RemoteMangaDetail,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveResult {
+    pub manga_id: String,
+    pub saved_chapter_count: i64,
+    pub updated: bool,
+}
+
+fn enabled_map(rows: &[source_repo::SourceRow]) -> std::collections::HashMap<String, bool> {
+    rows.iter()
+        .map(|row| (row.id.clone(), row.enabled))
+        .collect()
+}
+
+pub async fn list_sources_view(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+) -> Result<Vec<SourceView>, AppError> {
+    let rows = source_repo::list_sources(pool).await?;
+    let enabled = enabled_map(&rows);
+    let row_by_id: std::collections::HashMap<_, _> =
+        rows.iter().map(|r| (r.id.clone(), r)).collect();
+    Ok(registry
+        .adapters()
+        .iter()
+        .map(|adapter| {
+            let info = adapter.info();
+            let builtin = info.id == "mangadex";
+            SourceView {
+                enabled: *enabled.get(&info.id).unwrap_or(&true),
+                builtin,
+                base_url: if builtin {
+                    None
+                } else {
+                    row_by_id.get(&info.id).and_then(|r| r.base_url.clone())
+                },
+                info,
+            }
+        })
+        .collect())
+}
+
+pub async fn add_manga_source(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    display_name: &str,
+    base_url: &str,
+) -> Result<SourceView, AppError> {
+    let display_name = display_name.trim();
+    validate_text_len(display_name, 80, "Tên nguồn")?;
+    if display_name.is_empty() {
+        return Err(AppError::validation("Tên nguồn không được để trống."));
+    }
+    let adapter =
+        crate::sources::providers::madara_generic::MadaraGeneric::live(display_name, base_url)
+            .map_err(AppError::Source)?;
+    let candidate = adapter.info();
+    if registry.get(&candidate.id).is_some() {
+        return Err(AppError::Conflict);
+    }
+    source_repo::upsert_source(
+        pool,
+        &candidate.id,
+        display_name,
+        "madara",
+        Some(base_url.trim()),
+    )
+    .await?;
+    let rows = source_repo::list_sources(pool).await?;
+    let row = rows
+        .iter()
+        .find(|r| r.id == candidate.id)
+        .ok_or(AppError::Internal)?;
+    Ok(SourceView {
+        info: candidate,
+        enabled: row.enabled,
+        builtin: false,
+        base_url: row.base_url.clone(),
+    })
+}
+
+/// Fresh registry from current DB rows — used after add/remove.
+pub async fn registry_from_pool(pool: &SqlitePool) -> Result<SourceRegistry, AppError> {
+    Ok(SourceRegistry::from_rows(
+        &source_repo::list_sources(pool).await?,
+    ))
+}
+
+pub async fn remove_manga_source(pool: &SqlitePool, source_id: &str) -> Result<(), AppError> {
+    validate_id(source_id, "sourceId")?;
+    if source_id == "mangadex" {
+        return Err(AppError::Unsupported);
+    }
+    source_repo::delete_source(pool, source_id).await
+}
+
+pub async fn set_source_enabled(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+    enabled: bool,
+) -> Result<bool, AppError> {
+    validate_id(source_id, "sourceId")?;
+    if registry.get(source_id).is_none() {
+        return Err(AppError::not_found("source"));
+    }
+    if source_id != "mangadex" {
+        source_repo::set_enabled(pool, source_id, enabled).await?;
+        return Ok(enabled);
+    }
+    // Built-ins have a row created on first toggle.
+    source_repo::upsert_source(pool, source_id, "MangaDex", "mangadex", None).await?;
+    source_repo::set_enabled(pool, source_id, enabled).await?;
+    Ok(enabled)
+}
+
+fn require_enabled(
+    registry: &SourceRegistry,
+    rows: &[source_repo::SourceRow],
+    source_id: &str,
+) -> Result<std::sync::Arc<dyn SourceAdapter>, AppError> {
+    if rows.iter().any(|row| row.id == source_id && !row.enabled) {
+        return Err(AppError::Source(SourceError::SourceDisabled));
+    }
+    registry
+        .get(source_id)
+        .ok_or_else(|| AppError::validation("sourceId không thuộc danh sách nguồn đã đăng ký."))
+}
+
+pub async fn search(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    query: &str,
+    source_ids: Option<Vec<String>>,
+    page: u32,
+) -> Result<SearchResult, AppError> {
+    let query = query.trim();
+    if query.is_empty() || query.chars().count() > 200 {
+        return Err(AppError::validation(
+            "Câu tìm kiếm phải từ 1 đến 200 ký tự.",
+        ));
+    }
+    if page == 0 || page > 50 {
+        return Err(AppError::validation(
+            "Trang tìm kiếm phải trong khoảng 1..=50.",
+        ));
+    }
+    let rows = source_repo::list_sources(pool).await?;
+    let mut items = Vec::new();
+    let mut source_errors = Vec::new();
+    let mut has_more = false;
+
+    match source_ids.filter(|ids| !ids.is_empty()) {
+        None => {
+            for adapter in registry.adapters() {
+                let id = adapter.info().id;
+                if rows.iter().any(|row| row.id == id && !row.enabled) {
+                    continue;
+                }
+                collect(
+                    adapter.as_ref(),
+                    query,
+                    page,
+                    &mut items,
+                    &mut source_errors,
+                    &mut has_more,
+                )
+                .await;
+            }
+        }
+        Some(ids) => {
+            let requested: Vec<String> = ids.into_iter().take(10).collect();
+            for id in requested {
+                match require_enabled(registry, &rows, &id) {
+                    Ok(adapter) => {
+                        collect(
+                            adapter.as_ref(),
+                            query,
+                            page,
+                            &mut items,
+                            &mut source_errors,
+                            &mut has_more,
+                        )
+                        .await
+                    }
+                    Err(error) => {
+                        let (code, message) = match &error {
+                            AppError::Source(source) => (source.code(), source.safe_message()),
+                            AppError::Validation(message) => ("VALIDATION_ERROR", message.as_str()),
+                            _ => ("INTERNAL_ERROR", "Lỗi nội bộ không xác định."),
+                        };
+                        source_errors.push(SearchSourceError {
+                            source_id: id,
+                            code: code.to_string(),
+                            message: message.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if !items.is_empty() {
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|item| seen.insert((item.source_id.clone(), item.source_manga_id.clone())));
+    }
+
+    Ok(SearchResult {
+        items,
+        source_errors,
+        has_more,
+    })
+}
+
+async fn collect(
+    adapter: &dyn SourceAdapter,
+    query: &str,
+    page: u32,
+    items: &mut Vec<crate::sources::dto::RemoteMangaSummary>,
+    source_errors: &mut Vec<SearchSourceError>,
+    has_more: &mut bool,
+) {
+    let id = adapter.info().id;
+    match adapter.search(query, page).await {
+        Ok(page_result) => {
+            *has_more |= page_result.has_more;
+            items.extend(page_result.items);
+        }
+        Err(error) => source_errors.push(SearchSourceError {
+            source_id: id,
+            code: error.code().to_string(),
+            message: error.safe_message().to_string(),
+        }),
+    }
+}
+
+pub async fn resolve_url(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    raw_url: &str,
+) -> Result<RemoteDetail, AppError> {
+    let rows = source_repo::list_sources(pool).await?;
+    let (adapter, parsed): (std::sync::Arc<dyn SourceAdapter>, Url) =
+        resolve_owned_url(registry, raw_url).map_err(AppError::Source)?;
+    if rows
+        .iter()
+        .any(|row| row.id == adapter.info().id && !row.enabled)
+    {
+        return Err(AppError::Source(SourceError::SourceDisabled));
+    }
+    let source_id = adapter.info().id;
+    let slug = adapter
+        .resolve_url(&parsed)
+        .await
+        .map_err(AppError::Source)?;
+    fetch_detail(&source_id, adapter.as_ref(), pool, &slug).await
+}
+
+pub async fn remote_detail(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+    source_manga_id: &str,
+) -> Result<RemoteDetail, AppError> {
+    validate_id(source_id, "sourceId")?;
+    validate_text_len(source_manga_id, 140, "sourceMangaId")?;
+    let rows = source_repo::list_sources(pool).await?;
+    let adapter = require_enabled(registry, &rows, source_id)?;
+    fetch_detail(source_id, adapter.as_ref(), pool, source_manga_id).await
+}
+
+async fn fetch_detail(
+    source_id: &str,
+    adapter: &dyn SourceAdapter,
+    pool: &SqlitePool,
+    source_manga_id: &str,
+) -> Result<RemoteDetail, AppError> {
+    let mut detail = adapter
+        .manga_detail(source_manga_id)
+        .await
+        .map_err(AppError::Source)?;
+    detail.summary.source_id = source_id.to_string();
+    let saved: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM mangas WHERE source_id = ?1 AND source_manga_id = ?2")
+            .bind(source_id)
+            .bind(source_manga_id)
+            .fetch_optional(pool)
+            .await?;
+    detail.saved_manga_id = saved.map(|row| row.0);
+    Ok(RemoteDetail { detail })
+}
+
+/// Explicit save: re-fetch from the trusted provider (never trusts renderer
+/// metadata), then one transaction upserting source/manga/chapters.
+pub async fn save(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+    source_manga_id: &str,
+) -> Result<SaveResult, AppError> {
+    let RemoteDetail { detail } = remote_detail(registry, pool, source_id, source_manga_id).await?;
+    let mut conn = pool.acquire().await?;
+    let mut tx = conn.begin().await?;
+
+    let ts = now_iso();
+    // mangas.source_id is an FK; built-in sources may have no row until first save.
+    sqlx::query(
+        "INSERT INTO sources (id, display_name, enabled, created_at, updated_at)
+         VALUES (?1, ?2, 1, ?3, ?3) ON CONFLICT(id) DO NOTHING",
+    )
+    .bind(source_id)
+    .bind(&detail.summary.source_display_name)
+    .bind(&ts)
+    .execute(&mut *tx)
+    .await?;
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM mangas WHERE source_id = ?1 AND source_manga_id = ?2")
+            .bind(source_id)
+            .bind(source_manga_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let updated = existing.is_some();
+    let manga_id = match existing {
+        Some((id,)) => {
+            sqlx::query(
+                "UPDATE mangas SET title=?2, description=?3, status=?4, cover_key=?5, updated_at=?6 WHERE id=?1",
+            )
+            .bind(&id)
+            .bind(&detail.summary.title)
+            .bind(&detail.description)
+            .bind(&detail.summary.status)
+            .bind(&detail.summary.cover_key)
+            .bind(&ts)
+            .execute(&mut *tx)
+            .await?;
+            id
+        }
+        None => {
+            let id = crate::domain::new_id();
+            sqlx::query(
+                "INSERT INTO mangas (id, source_id, source_manga_id, title, author, description, status, cover_key, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)",
+            )
+            .bind(&id)
+            .bind(source_id)
+            .bind(source_manga_id)
+            .bind(&detail.summary.title)
+            .bind(&None::<String>)
+            .bind(&detail.description)
+            .bind(&detail.summary.status)
+            .bind(&detail.summary.cover_key)
+            .bind(&ts)
+            .execute(&mut *tx)
+            .await?;
+            id
+        }
+    };
+
+    let mut saved_chapters = 0_i64;
+    for chapter in &detail.chapters {
+        let existing_chapter: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM chapters WHERE manga_id = ?1 AND source_chapter_id = ?2",
+        )
+        .bind(&manga_id)
+        .bind(&chapter.source_chapter_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match existing_chapter {
+            Some((id,)) => {
+                sqlx::query("UPDATE chapters SET title=?2, number=?3, updated_at=?4 WHERE id=?1")
+                    .bind(&id)
+                    .bind(&chapter.title)
+                    .bind(chapter.number)
+                    .bind(&ts)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            None => {
+                let id = crate::domain::new_id();
+                sqlx::query(
+                    "INSERT INTO chapters (id, manga_id, source_chapter_id, title, number, page_count, created_at, updated_at)
+                     VALUES (?1,?2,?3,?4,?5,NULL,?6,?6)",
+                )
+                .bind(&id)
+                .bind(&manga_id)
+                .bind(&chapter.source_chapter_id)
+                .bind(&chapter.title)
+                .bind(chapter.number)
+                .bind(&ts)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        saved_chapters += 1;
+    }
+
+    tx.commit().await?;
+    Ok(SaveResult {
+        manga_id,
+        saved_chapter_count: saved_chapters,
+        updated,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::repositories::source_repo;
+    use crate::sources::providers::fixture::FixtureProvider;
+    use std::sync::Arc;
+
+    fn fixture_registry() -> SourceRegistry {
+        SourceRegistry::with_adapters(vec![Arc::new(FixtureProvider)])
+    }
+
+    async fn count(pool: &SqlitePool, table: &str) -> i64 {
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        let (value,): (i64,) = sqlx::query_as(&sql).fetch_one(pool).await.unwrap();
+        value
+    }
+
+    #[tokio::test]
+    async fn t05_02_source_view_defaults_to_enabled_and_flags_builtin() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let views = list_sources_view(&fixture_registry(), &pool).await.unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].info.id, "fixture");
+        assert!(views[0].enabled, "no DB row must default to enabled");
+        assert!(!views[0].builtin);
+
+        let builtins = list_sources_view(&SourceRegistry::from_rows(&[]), &pool)
+            .await
+            .unwrap();
+        assert_eq!(builtins.len(), 1);
+        assert_eq!(builtins[0].info.id, "mangadex");
+        assert!(builtins[0].builtin);
+    }
+
+    #[tokio::test]
+    async fn t05_04_search_isolates_provider_errors_and_rejects_unknown_ids() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+
+        let ok = search(&registry, &pool, "Đêm", None, 1).await.unwrap();
+        assert_eq!(ok.items.len(), 1);
+        assert!(ok.source_errors.is_empty());
+
+        let failed = search(&registry, &pool, "__net", None, 1).await.unwrap();
+        assert!(failed.items.is_empty());
+        assert_eq!(failed.source_errors.len(), 1);
+        assert_eq!(failed.source_errors[0].code, "SOURCE_NETWORK");
+
+        let unknown = search(&registry, &pool, "Đêm", Some(vec!["ghost".to_string()]), 1)
+            .await
+            .unwrap();
+        assert_eq!(unknown.source_errors.len(), 1);
+        assert_eq!(unknown.source_errors[0].code, "VALIDATION_ERROR");
+
+        source_repo::upsert_source(&pool, "fixture", "Fixture Provider", "fixture", None)
+            .await
+            .unwrap();
+        source_repo::set_enabled(&pool, "fixture", false)
+            .await
+            .unwrap();
+        let disabled = search(
+            &registry,
+            &pool,
+            "Đêm",
+            Some(vec!["fixture".to_string()]),
+            1,
+        )
+        .await
+        .unwrap();
+        assert!(disabled.items.is_empty());
+        assert_eq!(disabled.source_errors[0].code, "SOURCE_DISABLED");
+        // Disabled sources are silently skipped in "All sources" mode.
+        let all = search(&registry, &pool, "Đêm", None, 1).await.unwrap();
+        assert!(all.items.is_empty() && all.source_errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn t05_13_14_save_is_idempotent_and_refreshes_without_duplicates() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+
+        let first = save(&registry, &pool, "fixture", "fx-01").await.unwrap();
+        assert!(!first.updated);
+        assert_eq!(first.saved_chapter_count, 2);
+        assert_eq!(count(&pool, "mangas").await, 1);
+        assert_eq!(count(&pool, "chapters").await, 2);
+        assert_eq!(count(&pool, "sources").await, 1, "FK row registered");
+
+        let second = save(&registry, &pool, "fixture", "fx-01").await.unwrap();
+        assert_eq!(second.manga_id, first.manga_id, "stable internal id");
+        assert!(second.updated);
+        assert_eq!(count(&pool, "mangas").await, 1);
+        assert_eq!(count(&pool, "chapters").await, 2, "no duplicate chapters");
+    }
+
+    #[tokio::test]
+    async fn t05_15_save_preserves_favorites_and_reading_progress() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+        let saved = save(&registry, &pool, "fixture", "fx-02").await.unwrap();
+
+        let (chapter_id,): (String,) = sqlx::query_as(
+            "SELECT id FROM chapters WHERE manga_id = ?1 ORDER BY number ASC LIMIT 1",
+        )
+        .bind(&saved.manga_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO favorites (manga_id, created_at) VALUES (?1, ?2)")
+            .bind(&saved.manga_id)
+            .bind(now_iso())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO reading_progress (manga_id, chapter_id, page_index, updated_at) VALUES (?1, ?2, 7, ?3)",
+        )
+        .bind(&saved.manga_id)
+        .bind(&chapter_id)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        save(&registry, &pool, "fixture", "fx-02").await.unwrap();
+
+        let (favorite,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM favorites WHERE manga_id = ?1")
+                .bind(&saved.manga_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(favorite, 1);
+        let (page_index,): (i64,) =
+            sqlx::query_as("SELECT page_index FROM reading_progress WHERE manga_id = ?1")
+                .bind(&saved.manga_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(page_index, 7, "metadata refresh must not reset progress");
+    }
+
+    #[tokio::test]
+    async fn t05_16_constraint_violation_rolls_back_entirely() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+        // fx-invalid-status returns a status outside the schema CHECK list.
+        let result = save(&registry, &pool, "fixture", "fx-invalid-status").await;
+        assert!(result.is_err());
+        assert_eq!(count(&pool, "mangas").await, 0);
+        assert_eq!(count(&pool, "chapters").await, 0);
+        assert_eq!(
+            count(&pool, "sources").await,
+            0,
+            "source row from the same transaction must be rolled back too"
+        );
+    }
+
+    #[tokio::test]
+    async fn t05_17_saved_metadata_survives_reopen() {
+        let (dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+        let saved = save(&registry, &pool, "fixture", "fx-03").await.unwrap();
+        drop(pool);
+
+        let reopened = crate::db::init_pool(dir.path()).await.unwrap();
+        let (title,): (String,) = sqlx::query_as("SELECT title FROM mangas WHERE id = ?1")
+            .bind(&saved.manga_id)
+            .fetch_one(&reopened)
+            .await
+            .unwrap();
+        assert_eq!(title, "Signal Cũ Không Ghi Đè");
+        assert_eq!(count(&reopened, "chapters").await, 2);
+    }
+
+    #[tokio::test]
+    async fn resolve_url_previews_and_links_saved_manga() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+
+        let preview = resolve_url(
+            &registry,
+            &pool,
+            "https://fixture.manga1989.invalid/manga/fx-01",
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview.detail.summary.source_manga_id, "fx-01");
+        assert_eq!(preview.detail.saved_manga_id, None);
+
+        let saved = save(&registry, &pool, "fixture", "fx-01").await.unwrap();
+        let relinked = resolve_url(
+            &registry,
+            &pool,
+            "https://fixture.manga1989.invalid/manga/fx-01/",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            relinked.detail.saved_manga_id.as_deref(),
+            Some(saved.manga_id.as_str())
+        );
+
+        let unsupported = resolve_url(&registry, &pool, "https://not-registered.test/manga/x")
+            .await
+            .unwrap_err();
+        assert_eq!(unsupported.wire_code(), "UNSUPPORTED_SOURCE");
+        let malformed = resolve_url(&registry, &pool, "khong phai url")
+            .await
+            .unwrap_err();
+        assert_eq!(malformed.wire_code(), "INVALID_URL");
+    }
+
+    #[tokio::test]
+    async fn source_registry_rebuilds_after_add_toggle_and_remove() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+
+        let view = add_manga_source(&registry, &pool, "Example Site", "https://example.com/")
+            .await
+            .unwrap();
+        assert_eq!(view.info.id, "madara-example-com");
+        assert!(!view.builtin);
+
+        // Duplicate host registration is rejected once the registry knows it.
+        let refreshed = registry_from_pool(&pool).await.unwrap();
+        let again =
+            add_manga_source(&refreshed, &pool, "Example Site", "https://example.com/").await;
+        assert!(matches!(again, Err(AppError::Conflict)));
+
+        let rebuilt = registry_from_pool(&pool).await.unwrap();
+        let ids: Vec<String> = rebuilt
+            .adapters()
+            .iter()
+            .map(|adapter| adapter.info().id)
+            .collect();
+        assert!(ids.contains(&"mangadex".to_string()));
+        assert!(ids.contains(&"madara-example-com".to_string()));
+
+        set_source_enabled(&rebuilt, &pool, "madara-example-com", false)
+            .await
+            .unwrap();
+        let views = list_sources_view(&rebuilt, &pool).await.unwrap();
+        let disabled = views
+            .iter()
+            .find(|v| v.info.id == "madara-example-com")
+            .unwrap();
+        assert!(!disabled.enabled);
+        assert_eq!(disabled.base_url.as_deref(), Some("https://example.com/"));
+
+        remove_manga_source(&pool, "madara-example-com")
+            .await
+            .unwrap();
+        let after_remove = registry_from_pool(&pool).await.unwrap();
+        assert_eq!(after_remove.adapters().len(), 1);
+        assert!(matches!(
+            remove_manga_source(&pool, "mangadex").await,
+            Err(AppError::Unsupported)
+        ));
+    }
+}

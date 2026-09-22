@@ -11,13 +11,15 @@
 | 02 — Design System & UI Shell | 11 tokens Dark Purple, custom titlebar + windowService, AppShell, primitives | `docs/phase-02/self-review.md` | ACCEPT (packaged `tauri build` pass — MSI+NSIS, checksums ghi trong file) |
 | 04 — Database & Backend Core | Migration `0002_domain.sql`, Rust domain/services/repositories, 10 typed IPC commands; Settings/Library/Favorites = SQLite thật, phần còn lại sandbox demo có nhãn | `docs/phase-04/self-review.md` | ACCEPT (vòng 1; contract: `docs/IPC_CONTRACT.md`) |
 | 03 — Core UI Screens (prototype) | 9 màn hình + typed mock services + fixture deterministic + test matrix T03-01→13 | `docs/phase-03/self-review.md` — 2 vòng: vòng 1 (`dd5434c`, `13081ee`), vòng 2 (`d9f7ee1`: F6 — Discover tôn trọng nguồn đã tắt, test hành vi end-to-end) | ACCEPT (fix: dialog focus trap, offline filter, task seq vào MockState, bộ lọc source ∩ enabled) |
+| 05 — Source Engine & Manga Discovery | Rust `SourceAdapter`/`SourceRegistry` động + `GuardedHttp` (SSRF/redirect/pace), provider MangaDex + Madara generic do người dùng đăng ký (gate ủy quyền đã bỏ theo chỉ đạo user 2026-09-22 — xem `docs/phase-05/source-decision.md`), 9 IPC discovery commands, migration `0003_source_config`, Discover tab thật + `/remote/:sourceId/:sourceMangaId` + Sources add/remove/toggle; **không tải file nào** | `docs/phase-05/test-results.md` (T05-01..20) + self-review | round 1+2 (`docs/phase-05/self-review.md`) — sửa BLOCKING: FK sources trong save, madara slug/trailing slash, badge "Saved — chưa tải", test redirect + XSS | vòng 1+2 PASS; MangaDex live BLOCKED (mạng), TTT live pending manual |
 
-**Gate hiện tại (toàn bộ xanh):** lint · typecheck · vitest 48/48 · vite build · cargo check/clippy/test (1 warning `Internal` dead_code — chủ đích) · tauri dev smoke exit 0 · tauri build artifacts OK. Remote `origin/master` đồng bộ tới `d9f7ee1`/`e60b06b`.
+**Gate hiện tại (toàn bộ xanh, 2026-09-22):** lint · typecheck · vitest 62/62 · vite build · cargo fmt/check/clippy(-D warnings)/test 45/45 · tauri dev smoke exit 0 + DB thật lên schema 3. `tauri build` packaging: NOT RUN từ Phase 04 tới giờ — gate bắt buộc trước release.
 
-## 2. Phase 03 CHƯA phải là app thật
+## 2. Trạng thái "thật" từng phần (sau Phase 05)
 
-- Toàn bộ dữ liệu là **mock fixture** (`src/services/mock/`), state mất khi reload. Không search/download/CBZ/reader thật, không bảng DB nghiệp vụ (chỉ `app_settings`).
-- **Điểm swap:** `src/services/provider.ts` — `settings` và `localServices.library` đã là IPC thật (Phase 04); catalog/downloads/reader vẫn mock chờ Phase 05–07. Mapping: `docs/phase-03/implementation-notes.md` §8 + `docs/IPC_CONTRACT.md`.
+- **Thật (Rust + SQLite):** Settings, Library/Favorites local, toàn bộ discovery Phase 05 (`localServices.source`: search/URL import/remote preview/save metadata, registry nguồn).
+- **Vẫn là demo:** Downloads queue, Reader, Manga Detail demo tab, favorites ★ trong Manga Detail demo (`src/services/mock/`), state mất khi reload. Không có download/CBZ/reader thật.
+- **Điểm swap còn lại:** downloads/reader → Phase 06–07 qua cùng `provider.ts`. Mapping: `docs/phase-03/implementation-notes.md` §8 + `docs/IPC_CONTRACT.md`.
 
 ## 3. Bất biến kiến trúc (không được phá)
 
@@ -28,10 +30,13 @@
 5. Health phải thật: `app_health_check` chạy `SELECT 1` thật; UI không hardcode "ready".
 6. Không `Math.random()`/clock trong fixture; test phải `resetMockState()` được.
 7. `AGENTS.md` là file của user — không sửa/xóa.
+8. (Phase 05) Mọi HTTP tới provider đi qua `GuardedHttp` với exact-host allowlist của adapter sở hữu; renderer chỉ gửi query/ID/URL-để-đối-khớp, không bao giờ host/headers/endpoint tùy ý. Save metadata luôn re-fetch phía Rust trong 1 transaction; không xóa chapter theo response thiếu.
 
 ## 4. Việc còn tồn (chưa có phase nào giao)
 
 - [ ] Chạy thử **bản cài đặt** (MSI/NSIS trong `src-tauri/target/release/bundle/`, gitignore) + xác nhận titlebar drag/resize/snap, scaling 100–200%, screenshot các màn hình tại 1440×900 và 1024×700 → đính vào docs phase sau.
+- [ ] `npm run tauri build` lại từ code Phase 05 (gate trước release).
+- [ ] Phase 05 live pending: bấm thử Discover live + Import URL với `truyentuoitho.com` trên máy user (WAF site reset request dồn — client đã pace ≥3s); MangaDex vẫn BLOCKED ở mạng dev.
 - [ ] Icon app thật (thay placeholder 16×16): `npx tauri icon <png>` trước khi release.
 - [ ] Cân nhắc self-host font Inter (CSP `'self'` cấm CDN).
 - [ ] `AppError::Internal` (Rust) sẽ được dùng khi có lỗi nghiệp vụ.
@@ -42,6 +47,7 @@
 2. Quy trình đã thống nhất: **inspect repo → implement theo task trong brief → tự review đối chiếu brief (BLOCKING/ADVISORY, sửa ngay BLOCKING) → chạy gates → commit local → report**. Bước reviewer ngoài đã được user bỏ (2026-09-22).
 3. Lệnh chuẩn: xem `README.md` §Quality Gates. Không push/merge/deploy khi user chưa yêu cầu rõ.
 4. Kết thúc mỗi phase: cập nhật `docs/phase-XX/` + bảng §1 của file này.
+5. **Contract Phase 06 (đã user chốt 2026-09-22):** tải thuần ảnh chương từ nguồn đã đăng ký → nén thành file `.cbz`; pipeline: `get_page_manifest` nội bộ theo adapter, checkpoint `download_pages` (schema có từ 0002), hàng đợi qua `download_tasks`; không đổi CSP/capability.
 
 ## 6. Cấu trúc docs
 
@@ -49,6 +55,7 @@
 docs/
 ├── briefs/          # brief gốc Phase 01–03 (nguồn yêu cầu)
 ├── plans/           # implementation plan đã duyệt Phase 01
-├── phase-01|02|03/  # implementation-notes + self-review từng phase
+├── phase-01|02|03|04|05/  # implementation/notes + self-review + test-results từng phase
+├── IPC_CONTRACT.md   # hợp đồng command/DTO/error (Phase 04 + 05)
 └── HANDOFF.md       # file này
 ```

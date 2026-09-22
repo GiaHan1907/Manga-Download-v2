@@ -5,6 +5,7 @@ import type { ReaderService } from "./reader.service";
 import type { SettingsService } from "./settings.service";
 import { localLibraryApi } from "./local-library.api";
 import { settingsApi } from "./settings.api";
+import { sourceApi } from "./source.api";
 import {
   mockCatalogService,
   mockDownloadService,
@@ -21,10 +22,10 @@ export interface AppServices {
   settings: SettingsService;
 }
 
-// Demo sandbox (explicitly labeled in UI): catalog/library/downloads/reader
-// remain fixture-backed until Phase 05–07. Settings is REAL since Phase 04
-// (persisted in SQLite via IPC). `localServices` is the production-mode
-// boundary for data that already has a Rust backend.
+// Demo sandbox (explicitly labeled in UI): catalog/downloads/reader remain
+// fixture-backed until Phase 06–07. Settings is real since Phase 04 and
+// discovery is real since Phase 05 (persisted/registry-backed via IPC).
+// `localServices` is the production-mode boundary for data with a Rust backend.
 export const services: AppServices = {
   catalog: mockCatalogService,
   library: mockLibraryService,
@@ -35,6 +36,7 @@ export const services: AppServices = {
 
 export const localServices = {
   library: localLibraryApi,
+  source: sourceApi,
 };
 
 export const subscribeServices = subscribeMock;

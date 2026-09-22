@@ -93,12 +93,12 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 51/51 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix; counts updated at each self-review) |
-| `npm run build` | ✅ Pass | Vite, 1952 modules → `dist/` (356 kB JS, gzip 109.7 kB) |
+| `npm run test` | ✅ Pass | 62/62 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix + Phase 04 local states + Phase 05 discovery UI; counts updated at each self-review) |
+| `npm run build` | ✅ Pass | Vite, 1957 modules → `dist/` (365.86 kB JS, gzip 112.39 kB) |
 | `cargo check` | ✅ Pass | clean (Phase 04 removed the old dead-code warning by using `Internal` in the error contract) |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
-| `cargo test` | ✅ Pass | 23/23 (Phase 01 bootstrap + Phase 04 fresh/upgrade/reopen, upsert idempotency, FK/CHECK, favorites/progress/settings persistence, bounded pagination, input validation) |
-| `npm run tauri dev` | ✅ Smoke | Phase 03 prototype runs in the Tauri window (compile + clean launch recorded in `docs/phase-03/implementation-notes.md` §7.1). Visual checks: drag/resize/scaling — human confirmation recommended |
+| `cargo test` | ✅ Pass | 45/45 (Phase 01 bootstrap + Phase 04 persistence/FK/CHECK/bounded queries + Phase 05 sources: adapter parsing, HTTP policy/SSRF/redirect re-validation, discovery save idempotency/rollback/reopen, registry rebuild) |
+| `npm run tauri dev` | ✅ Smoke | Phase 05 (2026-09-22): rebuild sạch, app chạy, đóng cửa sổ exit 0; DB thật migrate `0003_source_config` (schema 3) thành công, không reset dữ liệu cũ. Visual checks: drag/resize/scaling + bấm live source — human confirmation recommended |
 | `npm run tauri build` | ✅ Pass (2026-09-22) | Exit 0; artifacts MSI + NSIS trong `src-tauri/target/release/bundle/` (checksums ghi ở `docs/phase-02/self-review.md` F1). Chạy thử bản cài đặt: chờ user xác nhận |
 
 ---

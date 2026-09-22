@@ -1,13 +1,149 @@
+import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
+import Input from "../../components/ui/Input";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import Tooltip from "../../components/ui/Tooltip";
-import { services } from "../../services/provider";
+import { localServices, services } from "../../services/provider";
+import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useServicesVersion } from "../../shared/hooks/useServices";
+import type { SourceViewDto } from "../../types/source";
 
-export default function SourcesPage() {
+function RealSources() {
+  const [reload, setReload] = useState(0);
+  const [name, setName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [reload]);
+
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await action();
+      setReload((n) => n + 1);
+    } catch (error: unknown) {
+      setActionError(normalizeIpcError(error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (sources.state === "loading") {
+    return <Skeleton height="10rem" label="Đang tải nguồn thật" />;
+  }
+  if (sources.state === "error") {
+    const error = normalizeIpcError(sources.error);
+    return (
+      <ErrorState
+        title="Không đọc được registry nguồn"
+        description={`${error.message} (mã: ${error.code})`}
+        action={<Button onClick={() => setReload((n) => n + 1)}>Thử lại</Button>}
+      />
+    );
+  }
+
+  return (
+    <div className="page-stack">
+      <p className="muted">
+        Nguồn thật chạy trong Rust (source engine Phase 05). Người dùng đăng ký site Madara/WordPress bằng
+        tên + URL gốc; renderer không tự thêm host vào tầng mạng.
+      </p>
+      <div className="sources-list">
+        {sources.data.map((source) => (
+          <div key={source.id} className="source-row">
+            <div>
+              <h3>{source.displayName}</h3>
+              <p className="muted">{source.baseUrl ?? source.id}</p>
+              <div className="chip-row">
+                <StatusBadge tone={source.builtin ? "neutral" : "success"}>
+                  {source.builtin ? "Tích hợp sẵn" : "Do người dùng thêm"}
+                </StatusBadge>
+                {source.capabilities.map((capability) => (
+                  <StatusBadge key={capability} tone="neutral">
+                    {capability}
+                  </StatusBadge>
+                ))}
+                {source.enabled ? (
+                  <StatusBadge tone="warning">bật</StatusBadge>
+                ) : (
+                  <StatusBadge tone="neutral">tắt</StatusBadge>
+                )}
+              </div>
+              {source.attribution && <p className="muted">{source.attribution}</p>}
+            </div>
+            <div className="chip-row">
+              <Button
+                variant={source.enabled ? "secondary" : "primary"}
+                disabled={busy}
+                onClick={() =>
+                  void run(() =>
+                    localServices.source.setSourceEnabled({
+                      sourceId: source.id,
+                      enabled: !source.enabled,
+                    }),
+                  )
+                }
+              >
+                {source.enabled ? "Tắt" : "Bật"}
+              </Button>
+              {source.builtin ? (
+                <Tooltip content="Nguồn tích hợp sẵn của app — không thể xoá, chỉ có thể tắt.">
+                  <Button disabled aria-label={`${source.displayName}: không xoá được (nguồn tích hợp)`}>
+                    Xoá
+                  </Button>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void run(() => localServices.source.removeSource(source.id))}
+                >
+                  Xoá nguồn
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="discover-controls">
+        <Input
+          label="Tên nguồn mới"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="VD: Truyen Tuoi Tho"
+        />
+        <Input
+          label="URL gốc (HTTPS, chỉ host đã đăng ký mới được gọi)"
+          value={baseUrl}
+          onChange={(event) => setBaseUrl(event.target.value)}
+          placeholder="https://vd-site-madara.com/"
+        />
+      </div>
+      {actionError && <ErrorState title="Thao tác với nguồn thất bại" description={actionError} />}
+      <div className="settings-actions">
+        <Button
+          variant="primary"
+          disabled={busy || name.trim() === "" || baseUrl.trim() === ""}
+          onClick={() =>
+            void run(() =>
+              localServices.source.addSource({ displayName: name.trim(), baseUrl: baseUrl.trim() }),
+            )
+          }
+        >
+          {busy ? "Đang xử lý..." : "Thêm nguồn"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DemoSources() {
   const version = useServicesVersion();
   const sources = useAsyncData(() => services.catalog.listSources(), [version]);
 
@@ -20,7 +156,10 @@ export default function SourcesPage() {
 
   return (
     <div className="page-stack">
-      <p className="muted">Bật/tắt nguồn ảnh hưởng trực tiếp tới bộ lọc trong Discover. Đây là trạng thái mock của phiên demo.</p>
+      <p className="muted">
+        Bật/tắt ở đây chỉ ảnh hưởng bộ lọc tab &quot;Demo sandbox&quot; trong Discover — trạng thái mock của
+        phiên demo, khác với registry nguồn thật ở trên.
+      </p>
       <div className="sources-list">
         {sources.data.map((source) => (
           <div key={source.id} className="source-row">
@@ -42,13 +181,17 @@ export default function SourcesPage() {
           </div>
         ))}
       </div>
-      <div className="settings-actions">
-        <Tooltip content="Chỉ áp dụng sau khi Source Engine (Phase 04+) được tích hợp — hiện chưa có adapter thật.">
-          <Button disabled aria-label="Thêm nguồn — khả dụng sau Source Engine integration">
-            Thêm nguồn (disabled)
-          </Button>
-        </Tooltip>
-      </div>
+    </div>
+  );
+}
+
+export default function SourcesPage() {
+  return (
+    <div className="page-stack">
+      <h2>Nguồn thật (Rust registry)</h2>
+      <RealSources />
+      <h2>Demo sandbox (Phase 03)</h2>
+      <DemoSources />
     </div>
   );
 }

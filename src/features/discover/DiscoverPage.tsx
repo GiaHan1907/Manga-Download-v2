@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
@@ -13,6 +13,8 @@ import { services } from "../../services/provider";
 import type { CatalogSource } from "../../services/catalog.service";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useServicesVersion } from "../../shared/hooks/useServices";
+import LiveSearchPanel from "./LiveSearchPanel";
+import LiveUrlImportPanel from "./LiveUrlImportPanel";
 import UrlImportPanel from "./components/UrlImportPanel";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 
@@ -109,40 +111,44 @@ function SearchPanel({ sources }: { sources: CatalogSource[] }) {
   );
 }
 
-export default function DiscoverPage() {
+function DemoSandbox({ initialTab }: { initialTab: string }) {
   const version = useServicesVersion();
-  const [searchParams] = useSearchParams();
   const sources = useAsyncData(() => services.catalog.listSources(), [version]);
-  const initialTab = searchParams.get("tab") === "url" ? "url" : "search";
-
-  const tabs = useMemo(() => {
-    if (sources.state !== "success") {
-      return null;
-    }
-    return [
-      {
-        id: "search",
-        label: "Tìm kiếm demo",
-        content: <SearchPanel sources={sources.data} />,
-      },
-      {
-        id: "url",
-        label: "Import URL (demo)",
-        content: <UrlImportPanel catalog={services.catalog} />,
-      },
-    ];
-  }, [sources]);
 
   if (sources.state === "loading") {
     return <Skeleton height="12rem" label="Đang tải nguồn demo" />;
   }
-  if (sources.state === "error" || !tabs) {
+  if (sources.state === "error") {
     return <ErrorState title="Không tải được danh sách nguồn demo" description="Dịch vụ catalog lỗi. Reload để thử lại." />;
   }
 
   return (
+    <Tabs
+      defaultValue={initialTab === "url" ? "url" : "search"}
+      items={[
+        { id: "search", label: "Tìm kiếm demo", content: <SearchPanel sources={sources.data} /> },
+        { id: "url", label: "Import URL (demo)", content: <UrlImportPanel catalog={services.catalog} /> },
+      ]}
+    />
+  );
+}
+
+export default function DiscoverPage() {
+  const [searchParams] = useSearchParams();
+  const requested = searchParams.get("tab") ?? "search";
+  const initialTab = requested === "url" || requested === "search" ? requested : "demo";
+  const demoInitialTab = requested === "url" || requested === "demo-url" ? "url" : "search";
+
+  return (
     <div className="page-stack">
-      <Tabs items={tabs} defaultValue={initialTab} />
+      <Tabs
+        defaultValue={initialTab}
+        items={[
+          { id: "search", label: "Tìm kiếm (thật)", content: <LiveSearchPanel /> },
+          { id: "url", label: "Import URL (thật)", content: <LiveUrlImportPanel /> },
+          { id: "demo", label: "Demo sandbox", content: <DemoSandbox initialTab={demoInitialTab} /> },
+        ]}
+      />
     </div>
   );
 }
