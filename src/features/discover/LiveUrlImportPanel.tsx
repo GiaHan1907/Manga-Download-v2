@@ -37,7 +37,7 @@ export default function LiveUrlImportPanel() {
       <Input
         label="Import URL manga (thật)"
         type="url"
-        placeholder="https:<domain>/manga/<slug> — thuộc nguồn đã đăng ký"
+        placeholder="https://<domain>/manga/<slug> — thuộc nguồn đã đăng ký"
         value={url}
         onChange={(event) => setUrl(event.target.value)}
         hint="Chỉ nhận HTTPS, host đúng khớp danh sách nguồn đã đăng ký; app không fetch URL lạ để đoán."

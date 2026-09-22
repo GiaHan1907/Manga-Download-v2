@@ -1,6 +1,6 @@
 # Phase 10 — Release Test Matrix (T10-01..T10-40)
 
-**Candidate:** source `30f50be` + commit Phase 10 này · version 1.0.0 · artifact `Manga Downloader 1989_1.0.0_x64-setup.exe` SHA-256 `6090b532…f97a6` (4,480,762 B, unsigned).
+**Candidate:** source `30f50be` + commit Phase 10 này · version 1.0.0 · artifact `Manga Downloader 1989_1.0.0_x64-setup.exe` SHA-256 `6090b532…f97a6` (4,480,762 B, unsigned). **RECONCILE:** toàn bộ bảng này mô tả candidate gốc; sau review toàn project 4 vòng, tree đổi và RC rebuild → artifact hiện hành `2245f30e…a90674` (4,490,082 B), gates hiện hành vitest 85/85 · cargo 134/134 (xem `ARTIFACT_MANIFEST.md` + `docs/HANDOFF.md` §1a). Các dòng test tự động bên dưới đã chạy LẠI trên tree mới và vẫn PASS với số lớn hơn.
 **Quy tắc:** PASS = đã chạy thật có bằng chứng; BLOCKED = cần hạ tầng/quyền/chủ thể khác; NOT RUN = chưa ai thao tác; N/A = capability không tồn tại trong cấu hình release đã khóa. Không mục nào được tô hồng.
 
 | ID | Test | Trạng thái | Bằng chứng / ghi chú |

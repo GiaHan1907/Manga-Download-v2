@@ -137,15 +137,20 @@ fn dir_size(path: &Path) -> u64 {
     total
 }
 
-/// Remove files inside (never the directory itself). True on full success.
+/// Remove files inside (never the directory itself). True on full success:
+/// ANY unreadable entry or failed removal reports failure, so the caller
+/// never claims a directory was cleared when contents may remain.
 fn clear_dir_contents(path: &Path) -> bool {
     let Some(entries) = bounded_read_dir(path) else {
         return false;
     };
     let mut count = 0usize;
     let mut ok_count = 0usize;
-    for entry in entries.filter_map(Result::ok) {
+    for entry in entries {
         count += 1;
+        let Ok(entry) = entry else {
+            continue;
+        };
         let target = entry.path();
         let removed = if target.is_dir() {
             std::fs::remove_dir_all(&target).is_ok()

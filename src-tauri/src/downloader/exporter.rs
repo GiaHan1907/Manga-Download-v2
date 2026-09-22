@@ -172,14 +172,22 @@ pub fn verify_cbz(archive_path: &Path, pages: &[ExportPage<'_>]) -> Result<(), A
             data[cursor + 44],
             data[cursor + 45],
         ]) as usize;
-        let name =
-            std::str::from_utf8(&data[cursor + 46..cursor + 46 + name_len]).map_err(|_| bad())?;
-        cursor += 46 + name_len + extra_len + comment_len;
+        let name_end = cursor + 46 + name_len;
+        if name_end > data.len() {
+            return Err(bad());
+        }
+        let name = std::str::from_utf8(&data[cursor + 46..name_end]).map_err(|_| bad())?;
+        cursor = name_end + extra_len + comment_len;
 
         if name != page.staged_name || size as i64 != page.size_bytes {
             return Err(bad());
         }
-        // Parse the local header and extract payload bytes.
+        // Parse the local header and extract payload bytes. Every offset read
+        // from the central directory is attacker-controlled when we VERIFY A
+        // PRE-EXISTING file (adoption path), so bound-check before slicing.
+        if local_offset + 30 > data.len() {
+            return Err(bad());
+        }
         if &data[local_offset..local_offset + 4] != b"PK\x03\x04" {
             return Err(bad());
         }
@@ -236,17 +244,21 @@ pub fn publish_artifact(
 /// Image-folder export: copy ordered, validated pages into `<name>.part-dir/`
 /// beside the final location, verify every file byte-for-byte, then rename
 /// the directory into place. A partial folder is never observable.
+/// Export pages as a directory tree beside `final_dir`, then rename
+/// atomically. Returns `true` when THIS run created `final_dir` (a cancel may
+/// then safely undo the rename), `false` when a pre-existing verified
+/// directory was adopted (the content predates this run and stays).
 pub fn export_folder(
     staging_dir: &Path,
     pages: &[ExportPage<'_>],
     part_dir: &Path,
     final_dir: &Path,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     if final_dir.exists() {
         // Idempotent adoption only when content matches exactly.
         verify_folder(final_dir, pages, staging_dir).map_err(|_| AppError::Conflict)?;
         let _ = std::fs::remove_dir_all(part_dir);
-        return Ok(());
+        return Ok(false);
     }
     let _ = std::fs::remove_dir_all(part_dir);
     std::fs::create_dir_all(part_dir)?;
@@ -264,7 +276,7 @@ pub fn export_folder(
     }
     verify_folder(part_dir, pages, part_dir)?;
     std::fs::rename(part_dir, final_dir)?;
-    Ok(())
+    Ok(true)
 }
 
 fn verify_folder(
@@ -404,11 +416,65 @@ mod tests {
         ];
         let part_dir = out_dir.path().join("ch.part-dir");
         let final_dir = out_dir.path().join("ch");
-        export_folder(staging.path(), &pages, &part_dir, &final_dir).unwrap();
+        assert!(
+            export_folder(staging.path(), &pages, &part_dir, &final_dir).unwrap(),
+            "first publish is created by this run"
+        );
         assert!(final_dir.join("000000.png").exists());
         assert!(final_dir.join("000001.png").exists());
         assert!(!part_dir.exists());
-        // Idempotent re-run adopts the verified folder.
-        export_folder(staging.path(), &pages, &part_dir, &final_dir).unwrap();
+        // Idempotent re-run adopts the verified folder — and reports it as
+        // NOT newly created (a cancel must never delete an adopted artifact).
+        assert!(
+            !export_folder(staging.path(), &pages, &part_dir, &final_dir).unwrap(),
+            "adoption returns false"
+        );
+    }
+
+    #[test]
+    fn t10_verify_cbz_adversarial_offsets_error_instead_of_panicking() {
+        // The adoption path runs verify_cbz on a PRE-EXISTING (possibly
+        // hostile) file. Untrusted central-directory offsets must produce a
+        // validation error, never a slice-out-of-bounds panic in the worker.
+        let staging = tempfile::tempdir().unwrap();
+        let out_dir = tempfile::tempdir().unwrap();
+        let bytes = png(7, 40);
+        std::fs::write(staging.path().join("000000.png"), &bytes).unwrap();
+        let checksum = crc32_hex(&bytes);
+        let pages = [ExportPage {
+            index: 0,
+            staged_name: "000000.png",
+            size_bytes: bytes.len() as i64,
+            checksum_hex: checksum.as_str(),
+        }];
+        let part = out_dir.path().join("a.cbz.part");
+        write_cbz(staging.path(), &pages, &part).unwrap();
+        let valid = std::fs::read(&part).unwrap();
+        let central = valid
+            .windows(4)
+            .rposition(|w| w == b"PK\x01\x02")
+            .expect("central header");
+
+        // 1) name_len pointing past end of file.
+        let mut tampered = valid.clone();
+        tampered[central + 28..central + 30].copy_from_slice(&10_000u16.to_le_bytes());
+        let hostile = out_dir.path().join("hostile-name.cbz");
+        std::fs::write(&hostile, &tampered).unwrap();
+        assert!(verify_cbz(&hostile, &pages).is_err());
+
+        // 2) local header offset pointing past end of file.
+        let mut tampered = valid.clone();
+        let beyond = (valid.len() as u32) + 100;
+        tampered[central + 42..central + 46].copy_from_slice(&beyond.to_le_bytes());
+        let hostile = out_dir.path().join("hostile-offset.cbz");
+        std::fs::write(&hostile, &tampered).unwrap();
+        assert!(verify_cbz(&hostile, &pages).is_err());
+
+        // 3) extra_len pushing the next record past end of file.
+        let mut tampered = valid.clone();
+        tampered[central + 30..central + 32].copy_from_slice(&60_000u16.to_le_bytes());
+        let hostile = out_dir.path().join("hostile-extra.cbz");
+        std::fs::write(&hostile, &tampered).unwrap();
+        assert!(verify_cbz(&hostile, &pages).is_err());
     }
 }

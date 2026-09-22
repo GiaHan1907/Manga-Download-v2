@@ -7,7 +7,7 @@ Mọi mục có trạng thái thật. "AUTO" = đã có test tự động phía 
 | # | Hạng mục | Kết quả | Ghi chú |
 |---|---|---|---|
 | 1 | `npm run tauri dev` — app cửa sổ thật, WebView2, custom titlebar | **PASS** (nhiều lần, gần nhất P08 review 3 vòng) | 0 panic; tray + notification plugin load; DB schema 5 |
-| 2 | `npm run tauri build` — release + bundle | **PASS EXIT=0** 2026-09-23 | MSI 6.46 MB + NSIS 4.47 MB; SHA256 trong `evidence/bundle-checksums-2026-09-23.txt`; gate treo từ Phase 04 chính thức khép ở mức build |
+| 2 | `npm run tauri build` — release + bundle | **PASS EXIT=0** 2026-09-23 | MSI 6.46 MB + NSIS 4.47 MB; SHA256 trong `evidence/bundle-checksums-2026-09-23.txt`; gate treo từ Phase 04 chính thức khép ở mức build. **Reconcile 4 vòng:** bundle hiện hành là NSIS-only 4,490,082 B / `2245f30e…a90674` (`docs/phase-10/ARTIFACT_MANIFEST.md`); checksums cũ là snapshot pre-rebuild |
 | 3 | Chạy **release exe** trực tiếp (`target/release/manga-downloader-1989.exe`) | **PASS** | sống 12 s, process healthy, đóng bằng terminate (force) — shutdown-path test bằng close thường ở mục 4 manual |
 | 4 | Ctrl+K palette, dialogs, focus trap, Escape | **AUTO PASS** (vitest) | jsdom-level |
 | 5 | Tồn tại dữ liệu qua restart app (DB cùng file) | **AUTO PASS** (Rust reopen-pool tests) | |

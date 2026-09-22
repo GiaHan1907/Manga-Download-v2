@@ -345,7 +345,7 @@ pub async fn save(
 ) -> Result<SaveResult, AppError> {
     let RemoteDetail { detail } = remote_detail(registry, pool, source_id, source_manga_id).await?;
     let mut conn = pool.acquire().await?;
-    let mut tx = conn.begin().await?;
+    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
 
     let ts = now_iso();
     // mangas.source_id is an FK; built-in sources may have no row until first save.

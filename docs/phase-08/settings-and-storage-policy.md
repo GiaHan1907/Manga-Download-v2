@@ -22,7 +22,7 @@ Quy tắc:
 
 | Hành động | closeToTray=false (mặc định) | closeToTray=true |
 |---|---|---|
-| Bấm X | Exit → `ExitRequested` → shutdown coordinator ≤5s (worker cancel) → thoát process; task active về `queued` ở lần chạy sau (recovery) | Ẩn cửa sổ; process + download tiếp chạy; tray là đường quay lại duy nhất |
+| Bấm X | Exit → `ExitRequested` → shutdown coordinator ≤5s (cờ shutdown riêng — worker exit NON-TERMINAL, không ghi cancel; revised 4 vòng) → thoát process; task active về `queued` ở lần chạy sau (recovery, checkpoint `download_pages` giữ nguyên) | Ẩn cửa sổ; process + download tiếp chạy; tray là đường quay lại duy nhất |
 | Tray Show/Hide | Luôn có sẵn (icon từ default window icon) | — |
 | Tray Open Downloads | Focus cửa sổ + emit `tray-open-downloads` → bridge điều hướng `/downloads` | — |
 | Tray Quit | `app.exit(0)` → Đi qua cùng lifecycle `ExitRequested` (shutdown sạch). Không có tuyên bố "tải tiếp sau khi process thoát" — kiến trúc này không có background service | |

@@ -19,6 +19,8 @@ export function useDownloadQueue() {
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const revisionRef = useRef<Map<string, number>>(new Map());
+  const latestRef = useRef<Map<string, DownloadTaskDto>>(new Map());
+  const requestSeq = useRef(0);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -28,21 +30,34 @@ export function useDownloadQueue() {
     };
   }, []);
 
+  /// Monotonic merge: the highest-revision DTO seen per task wins, whether it
+  /// arrived as an event frame or inside an (older) snapshot.
+  function note(task: DownloadTaskDto): DownloadTaskDto {
+    const seen = revisionRef.current.get(task.id) ?? -1;
+    if (task.revision < seen) {
+      return latestRef.current.get(task.id) ?? task;
+    }
+    revisionRef.current.set(task.id, task.revision);
+    latestRef.current.set(task.id, task);
+    return task;
+  }
+
   const refresh = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
       const page = await downloadsApi.listTasks({ limit: QUEUE_PAGE_SIZE, offset });
-      if (!mounted.current) return;
-      for (const task of page.items) {
-        revisionRef.current.set(task.id, task.revision);
-      }
-      setTasks(page.items);
+      // Stale-response guard: only the newest request may commit.
+      if (!mounted.current || seq !== requestSeq.current) return;
+      setTasks(page.items.map(note));
       setTotal(page.total);
     } catch (err) {
-      if (mounted.current) setError(err instanceof Error ? err.message : "Không tải được hàng đợi.");
+      if (mounted.current && seq === requestSeq.current) {
+        setError(err instanceof Error ? err.message : "Không tải được hàng đợi.");
+      }
     } finally {
-      if (mounted.current) setLoading(false);
+      if (mounted.current && seq === requestSeq.current) setLoading(false);
     }
   }, [offset]);
 
@@ -59,11 +74,10 @@ export function useDownloadQueue() {
     void downloadsApi
       .subscribe((event: DownloadTaskEvent) => {
         if (cancelled || !mounted.current) return;
-        const seen = revisionRef.current.get(event.task.id) ?? -1;
-        if (event.task.revision < seen) {
+        const merged = note(event.task);
+        if (merged !== event.task) {
           return; // stale frame — authoritative snapshot wins
         }
-        revisionRef.current.set(event.task.id, event.task.revision);
         setLive((prev) => ({
           ...prev,
           [event.task.id]: { bytes: event.downloadedBytes, speed: event.speedBytesPerSecond },
@@ -93,8 +107,8 @@ export function useDownloadQueue() {
     async (taskId: string, action: (id: string) => Promise<DownloadTaskDto>) => {
       try {
         const updated = await action(taskId);
-        revisionRef.current.set(updated.id, Math.max(revisionRef.current.get(updated.id) ?? 0, updated.revision));
-        setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
+        const merged = note(updated);
+        setTasks((prev) => prev.map((task) => (task.id === updated.id ? merged : task)));
         // Re-fetch authoritative snapshot after each action.
         await refresh();
         return updated;

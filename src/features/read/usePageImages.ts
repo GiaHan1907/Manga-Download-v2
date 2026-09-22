@@ -21,6 +21,7 @@ export function usePageImages(
   const cache = useRef(new Map<number, string>());
   const inflight = useRef(new Set<number>());
   const chapterRef = useRef(chapterId);
+  const disposed = useRef(false);
   const [nonce, setNonce] = useState(0);
 
   // Reset when the chapter changes: object URLs from another archive are stale.
@@ -60,12 +61,18 @@ export function usePageImages(
           }
           const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
           const url = URL.createObjectURL(blob);
+          // A fetch resolving after unmount must not seed the revoked cache —
+          // revoke immediately instead of leaking the object URL.
+          if (disposed.current) {
+            URL.revokeObjectURL(url);
+            return;
+          }
           cache.current.set(index, url);
           setUrls((prev) => ({ ...prev, [index]: url }));
         })
         .catch((error: unknown) => {
           inflight.current.delete(index);
-          if (chapterRef.current !== forChapter) {
+          if (disposed.current || chapterRef.current !== forChapter) {
             return;
           }
           setErrors((prev) => ({
@@ -93,12 +100,14 @@ export function usePageImages(
 
   // Revoke everything on unmount.
   useEffect(() => {
-    const local = cache.current;
+    disposed.current = false;
     return () => {
-      for (const url of local.values()) {
+      disposed.current = true;
+      const live = cache.current;
+      for (const url of live.values()) {
         URL.revokeObjectURL(url);
       }
-      local.clear();
+      live.clear();
     };
   }, []);
 

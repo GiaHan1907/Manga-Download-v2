@@ -193,8 +193,14 @@ export default function SourcesPage() {
     <div className="page-stack">
       <h2>Nguồn thật (Rust registry)</h2>
       <RealSources />
-      <h2>Demo sandbox (Phase 03)</h2>
-      <DemoSources />
+      {/* Plan §2.7: the mock sandbox is dev-build only — never rendered in a
+          production app where it could be mistaken for real sources. */}
+      {import.meta.env.DEV && (
+        <>
+          <h2>Demo sandbox (Phase 03)</h2>
+          <DemoSources />
+        </>
+      )}
     </div>
   );
 }

@@ -27,6 +27,10 @@ use crate::sources::registry::SourceRegistry;
 pub struct WorkerFlags {
     pub cancel: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
+    /// App is exiting: the worker must leave WITHOUT writing a terminal
+    /// state, so startup recovery re-queues it with checkpoints intact.
+    /// Distinct from `cancel` (a user action that IS terminal).
+    pub shutdown: Arc<AtomicBool>,
 }
 
 pub struct WorkerDeps {
@@ -112,6 +116,20 @@ async fn fail_or_requeue(
     error: &AppError,
     live: &SharedLive,
 ) -> Option<DownloadTaskDto> {
+    // App exit outranks everything: never persist a terminal state here —
+    // startup recovery re-queues active tasks. A pending user cancel
+    // outranks failure classification for the same reason the chunk loop
+    // checks it before returning errors.
+    if deps.flags.shutdown.load(Ordering::Relaxed) {
+        return download_repo::get_task(&deps.pool, task_id)
+            .await
+            .ok()
+            .flatten()
+            .map(task_repo::to_dto);
+    }
+    if deps.flags.cancel.load(Ordering::Relaxed) {
+        return stop_as_cancelled(deps, task_id).await.ok();
+    }
     let row = download_repo::get_task(&deps.pool, task_id).await.ok()??;
     if matches!(row.status.as_str(), "cancelled" | "paused" | "completed") {
         return Some(task_repo::to_dto(row));
@@ -168,6 +186,9 @@ async fn attempt_run(
     if enabled == 0 {
         return Err(AppError::Source(SourceError::SourceDisabled));
     }
+    if deps.flags.shutdown.load(Ordering::Relaxed) {
+        return current_dto(deps, &task_id).await;
+    }
     if deps.flags.cancel.load(Ordering::Relaxed) {
         return stop_as_cancelled(deps, &task_id).await;
     }
@@ -223,6 +244,7 @@ async fn attempt_run(
         flags: WorkerFlags {
             cancel: deps.flags.cancel.clone(),
             pause: deps.flags.pause.clone(),
+            shutdown: deps.flags.shutdown.clone(),
         },
         running_total: Arc::new(Mutex::new(0u64)),
     });
@@ -235,6 +257,11 @@ async fn attempt_run(
             .collect();
         if pending.is_empty() {
             break;
+        }
+        if deps.flags.shutdown.load(Ordering::Relaxed) {
+            // Leave the task active; startup recovery normalizes and keeps
+            // checkpoints — app exit is not a user cancellation.
+            return current_dto(deps, &task_id).await;
         }
         if deps.flags.cancel.load(Ordering::Relaxed) {
             transfer::discard_part_files(&staging)?;
@@ -254,9 +281,12 @@ async fn attempt_run(
             match result {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    // User cancel outranks failure classification: a page
-                    // that observed the cancel flag must land as `cancelled`,
-                    // never as a spurious `failed`.
+                    // Shutdown outranks everything, then user cancel outranks
+                    // failure classification: a page that observed either
+                    // flag must not land as a spurious `failed`.
+                    if deps.flags.shutdown.load(Ordering::Relaxed) {
+                        return current_dto(deps, &task_id).await;
+                    }
                     if deps.flags.cancel.load(Ordering::Relaxed) {
                         transfer::discard_part_files(&staging)?;
                         return stop_as_cancelled(deps, &task_id).await;
@@ -298,9 +328,12 @@ async fn attempt_run(
 
     // 5. exporting: build beside the final location, verify, atomically
     //    publish, and only then commit completion in the DB.
-    // Honor a cancel that arrived during verify/export BEFORE writing any
+    // Honor shutdown/cancel that arrived during verify BEFORE writing any
     // artifact (cancel from any non-terminal state, design §6.1); no file is
     // published yet, so staging cleanup is safe.
+    if deps.flags.shutdown.load(Ordering::Relaxed) {
+        return current_dto(deps, &task_id).await;
+    }
     if deps.flags.cancel.load(Ordering::Relaxed) {
         transfer::discard_part_files(&staging)?;
         return stop_as_cancelled(deps, &task_id).await;
@@ -344,7 +377,20 @@ async fn attempt_run(
         "folder" => {
             let final_dir = manga_dir.join(&base);
             let part_dir = manga_dir.join(format!("{base}.part-dir"));
-            exporter::export_folder(&staging, &exports, &part_dir, &final_dir)?;
+            let newly_published =
+                exporter::export_folder(&staging, &exports, &part_dir, &final_dir)?;
+            // Last cooperative exit: the artifact was renamed by THIS run,
+            // so undoing the rename restores the pre-export state exactly.
+            // An adopted pre-existing artifact (recovered crash) is kept and
+            // the task completes — cancel cannot race the commit forever.
+            if deps.flags.shutdown.load(Ordering::Relaxed) {
+                return current_dto(deps, &task_id).await;
+            }
+            if newly_published && deps.flags.cancel.load(Ordering::Relaxed) {
+                let _ = std::fs::remove_dir_all(&final_dir);
+                transfer::discard_part_files(&staging)?;
+                return stop_as_cancelled(deps, &task_id).await;
+            }
             format!("{manga_dir_name}/{base}")
         }
         _ => {
@@ -352,6 +398,16 @@ async fn attempt_run(
             let (part_path, _) = exporter::part_paths(&final_path);
             exporter::write_cbz(&staging, &exports, &part_path)?;
             exporter::verify_cbz(&part_path, &exports)?;
+            // The final cooperative check happens while only our private
+            // `.part` exists — deleting it never touches user content.
+            if deps.flags.shutdown.load(Ordering::Relaxed) {
+                return current_dto(deps, &task_id).await;
+            }
+            if deps.flags.cancel.load(Ordering::Relaxed) {
+                let _ = std::fs::remove_file(&part_path);
+                transfer::discard_part_files(&staging)?;
+                return stop_as_cancelled(deps, &task_id).await;
+            }
             exporter::publish_artifact(&part_path, &final_path, &exports)?;
             format!("{manga_dir_name}/{base}")
         }
@@ -388,7 +444,7 @@ async fn fetch_and_store_page(
     index: usize,
     url: String,
 ) -> Result<(), AppError> {
-    if job.flags.cancel.load(Ordering::Relaxed) {
+    if job.flags.cancel.load(Ordering::Relaxed) || job.flags.shutdown.load(Ordering::Relaxed) {
         return Err(AppError::Internal);
     }
     let staged = transfer::fetch_page(&job.staging, index, job.adapter.fetch_image(&url)).await?;

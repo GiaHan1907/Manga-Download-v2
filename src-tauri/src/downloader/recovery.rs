@@ -18,6 +18,9 @@ pub struct StartupReport {
     pub normalized_tasks: u64,
     /// `*.part` files discarded in known task staging dirs.
     pub discarded_parts: usize,
+    /// Orphan export temp artifacts (`*.cbz.part`, `*.part-dir`) discarded
+    /// inside library dirs — only names carrying a known task token.
+    pub discarded_library_parts: usize,
     /// Completed tasks whose verified artifact vanished (offline flag
     /// cleared, task history preserved — no phantom "available offline").
     pub cleared_missing_outputs: usize,
@@ -55,10 +58,16 @@ pub async fn reconcile_startup(
         // adopts the verified existing artifact instead of overwriting.
     }
 
+    // 2b. Orphan export temps inside the library (crash between writing the
+    //     `.cbz.part` / `.part-dir` and publishing). Bounded like everything
+    //     else: only names embedding the token of a task the DB knows about
+    //     are removed — unknown files are never touched.
+    let library_root = storage::library_root(app_data_dir);
+    report.discarded_library_parts = sweep_library_export_temps(&library_root, pool).await?;
+
     // 3. Truthful offline flags: a completed task only counts while its
     //    recorded artifact exists on disk.
     let completed = download_repo::tasks_in_status(pool, "completed").await?;
-    let library_root = storage::library_root(app_data_dir);
     let mut seen_chapters: HashSet<String> = HashSet::new();
     for task in completed {
         let Some(relpath) = task.output_relpath.as_deref() else {
@@ -78,6 +87,68 @@ pub async fn reconcile_startup(
         }
     }
     Ok(report)
+}
+
+/// Remove export temps (`<base>.cbz.part`, `<base>.part-dir`) from manga
+/// directories, but only when the embedded `-t<token>` belongs to a task the
+/// DB knows about. Unknown names are left exactly as found.
+async fn sweep_library_export_temps(
+    library_root: &Path,
+    pool: &SqlitePool,
+) -> Result<usize, AppError> {
+    let task_ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM download_tasks LIMIT 5000")
+        .fetch_all(pool)
+        .await?;
+    let tokens: HashSet<String> = task_ids
+        .iter()
+        .map(|(id,)| storage::id_token(id))
+        .filter(|token| !token.is_empty())
+        .collect();
+    let mut removed = 0usize;
+    let Ok(manga_dirs) = std::fs::read_dir(library_root) else {
+        return Ok(0);
+    };
+    for manga_dir in manga_dirs.filter_map(Result::ok) {
+        if !manga_dir.path().is_dir() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(manga_dir.path()) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let Some(token) = export_temp_task_token(&name) else {
+                continue;
+            };
+            if !tokens.contains(token) {
+                continue;
+            }
+            let path = entry.path();
+            let removed_ok = if path.is_dir() {
+                std::fs::remove_dir_all(&path).is_ok()
+            } else {
+                std::fs::remove_file(&path).is_ok()
+            };
+            if removed_ok {
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// `<title>-c<chapter-token>-t<task-token>[.cbz].part(-dir)?` → task token.
+/// Returns None for names that are not export temps of the engine.
+fn export_temp_task_token(name: &str) -> Option<&str> {
+    let base = name
+        .strip_suffix(".part-dir")
+        .or_else(|| name.strip_suffix(".part"))?;
+    let tail = base.rsplit_once("-t")?.1;
+    let token = tail.split('.').next().filter(|t| !t.is_empty())?;
+    if token.len() > 8 || !token.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(token)
 }
 
 fn count_parts(dir: &Path) -> usize {
@@ -194,5 +265,59 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(local.0, None, "phantom offline flag must clear");
+    }
+
+    #[test]
+    fn t10_export_temp_token_parsing_is_conservative() {
+        assert_eq!(
+            export_temp_task_token("ch-title-abc-tdeadbeef.cbz.part"),
+            Some("deadbeef")
+        );
+        assert_eq!(
+            export_temp_task_token("ch-title-abc-tdeadbeef.part-dir"),
+            Some("deadbeef")
+        );
+        // Not an export temp: unknown shapes never match.
+        assert_eq!(export_temp_task_token("notes.txt"), None);
+        assert_eq!(export_temp_task_token("chapter.cbz"), None);
+        assert_eq!(export_temp_task_token("readme.part"), None);
+        assert_eq!(export_temp_task_token("x-tdeadbeef1.part"), None); // token too long
+        assert_eq!(export_temp_task_token("x-t!.part"), None);
+        // A published artifact is NEVER an export temp.
+        assert_eq!(export_temp_task_token("ch-a-cb-tdeadbeef.cbz"), None);
+    }
+
+    #[tokio::test]
+    async fn t10_startup_sweeps_library_export_temps_only_for_known_tasks() {
+        use crate::downloader::storage;
+        let (_dir, pool) = test_pool().await;
+        let app_data = tempfile::tempdir().unwrap();
+        let (_, chapter) = seed_chapter(&pool).await;
+        let task = download_repo::queue_batch(&pool, std::slice::from_ref(&chapter), "cbz", 0)
+            .await
+            .unwrap()
+            .created[0]
+            .clone();
+        let token = storage::id_token(&task.id);
+
+        let manga_dir = storage::library_root(app_data.path()).join("title-ma1");
+        std::fs::create_dir_all(&manga_dir).unwrap();
+        let orphan = manga_dir.join(format!("ch-c1-cabc-t{token}.cbz.part"));
+        let orphan_dir = manga_dir.join(format!("ch-c2-cdef-t{token}.part-dir"));
+        let foreign = manga_dir.join("ch-c3-cghi-t0000dead.cbz.part"); // unknown task
+        let published = manga_dir.join(format!("ch-c4-cjkl-t{token}.cbz"));
+        std::fs::write(&orphan, b"half-written").unwrap();
+        std::fs::create_dir_all(&orphan_dir).unwrap();
+        std::fs::write(&foreign, b"someone else's temp").unwrap();
+        std::fs::write(&published, b"real artifact").unwrap();
+
+        let report = reconcile_startup(&pool, app_data.path()).await.unwrap();
+        assert_eq!(report.discarded_library_parts, 2);
+        assert!(!orphan.exists() && !orphan_dir.exists());
+        assert!(foreign.exists(), "unknown-task temps are never touched");
+        assert!(
+            published.exists(),
+            "published artifacts are never touched by the sweep"
+        );
     }
 }

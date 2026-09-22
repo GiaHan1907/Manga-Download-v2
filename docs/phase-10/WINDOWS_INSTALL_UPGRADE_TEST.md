@@ -5,7 +5,7 @@ File này là **hướng dẫn + biểu mẫu kết quả** cho kiểm thử cà
 ## Chuẩn bị
 
 - VM hoặc Windows user profile mới (Settings → Accounts → Other users) — không dùng profile chính có dữ liệu.
-- Artifact: `Manga Downloader 1989_1.0.0_x64-setup.exe` — SHA-256 `6090b532758b3006f8fa0fe5969e00c752cbea6d14e2732e38239efb9d7f97a6`, 4,480,762 bytes (khớp `ARTIFACT_MANIFEST.md`).
+- Artifact: `Manga Downloader 1989_1.0.0_x64-setup.exe` — SHA-256 `2245f30e625ed5ecbe6c73ad63da4f56182b922d0b31ed5c7def702c22a90674`, 4,490,082 bytes (khớp `ARTIFACT_MANIFEST.md` bản rebuild sau review 4 vòng; hash cũ `6090b532…` đã superseded — đừng đối chiếu bản đó).
 - Hai kịch bản WebView2: (A) runtime có sẵn (Win11 mặc định), (B) máy chưa có runtime — kiểm bằng `Get-AppxPackage *WebView2*` / registry `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`.
 
 ## Checklist (điền PASS/FAIL + ghi chú/ảnh vào cột Kết quả)

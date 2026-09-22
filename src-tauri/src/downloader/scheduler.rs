@@ -39,7 +39,9 @@ pub struct Coordinator {
     events: Arc<ProgressEmitter>,
     wake: tokio::sync::Notify,
     active: Mutex<HashMap<String, ActiveWorker>>,
-    shutting_down: AtomicBool,
+    /// Shared with every worker: set on app exit. Workers exit WITHOUT
+    /// writing a terminal state so startup recovery re-queues them.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Coordinator {
@@ -56,7 +58,7 @@ impl Coordinator {
             events,
             wake: tokio::sync::Notify::new(),
             active: Mutex::new(HashMap::new()),
-            shutting_down: AtomicBool::new(false),
+            shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -66,7 +68,7 @@ impl Coordinator {
         let coordinator = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
             loop {
-                if coordinator.shutting_down.load(Ordering::Relaxed) {
+                if coordinator.shutdown.load(Ordering::Relaxed) {
                     break;
                 }
                 coordinator.dispatch_available().await;
@@ -96,7 +98,7 @@ impl Coordinator {
                 let active = self.active.lock().unwrap();
                 capacity.saturating_sub(active.len())
             };
-            if free == 0 || self.shutting_down.load(Ordering::Relaxed) {
+            if free == 0 || self.shutdown.load(Ordering::Relaxed) {
                 return;
             }
             let claimed = match download_repo::claim_next(&self.pool).await {
@@ -131,6 +133,7 @@ impl Coordinator {
             flags: worker::WorkerFlags {
                 cancel: Arc::clone(&cancel),
                 pause: Arc::clone(&pause),
+                shutdown: Arc::clone(&self.shutdown),
             },
             image_concurrency,
         });
@@ -179,13 +182,17 @@ impl Coordinator {
                 self.publish_now(&moved);
                 Ok(task_repo::to_dto(moved))
             }
-            "resolving" | "downloading" | "verifying" | "exporting" => {
+            "resolving" | "downloading" => {
                 // Cooperative: worker acknowledges once writes quiesce.
                 if let Some(handle) = self.active.lock().unwrap().get(task_id) {
                     handle.pause.store(true, Ordering::Relaxed);
                 }
                 Ok(task_repo::to_dto(row))
             }
+            // Verify+export is a short commit window: the worker cannot
+            // pause mid-publish, so reject honestly instead of silently
+            // dropping the request.
+            "verifying" | "exporting" => Err(invalid_transition()),
             "pausing" | "paused" => Ok(task_repo::to_dto(row)),
             _ => Err(invalid_transition()),
         }
@@ -252,21 +259,13 @@ impl Coordinator {
         Ok(task_repo::to_dto(moved))
     }
 
-    /// Cooperative app-shutdown: signal every worker, wait briefly for
-    /// in-flight page writes to quiesce, then return. Checkpointed state
-    /// remains in the DB; startup recovery normalizes the rest.
+    /// Cooperative app-shutdown: signal every worker with the SHUTDOWN flag
+    /// (never `cancel` — that would persist a terminal `cancelled` state the
+    /// user never asked for), wait briefly for in-flight page writes to
+    /// quiesce, then return. Workers exit with their task still active;
+    /// startup recovery re-queues active states and checkpoints remain.
     pub async fn shutdown(&self) {
-        self.shutting_down.store(true, Ordering::Relaxed);
-        let flags: Vec<Arc<AtomicBool>> = self
-            .active
-            .lock()
-            .unwrap()
-            .values()
-            .map(|handle| Arc::clone(&handle.cancel))
-            .collect();
-        for flag in flags {
-            flag.store(true, Ordering::Relaxed);
-        }
+        self.shutdown.store(true, Ordering::Relaxed);
         for _ in 0..20 {
             if self.active.lock().unwrap().is_empty() {
                 break;

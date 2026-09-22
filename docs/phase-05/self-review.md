@@ -20,7 +20,7 @@ Quy trình đã đổi theo chỉ đạo user (2026-09-22): không có reviewer 
 - F5 (ADVISORY, giữ nguyên): `get_remote_chapters` command tồn tại theo §6 brief nhưng UI dùng `get_remote_manga_details` (một request, đủ dữ liệu). Không xóa (contract), ghi chú tại IPC_CONTRACT.
 - F6 (ADVISORY, giữ nguyên): khi TẤT CẢ nguồn lỗi, UI hiển thị danh sách `sourceErrors` (không phải empty-success) nhưng không có nút Retry tổng — user chỉ cần gõ lại query. Chấp nhận cho Phase 05, có thể thêm ở round sau nếu reviewer ngoài yêu cầu.
 
-**Kiểm tra bất biến (đạt):** không `invoke()` ngoài `desktop.ts` (grep); capability/CSP không đổi; một SQLite pool; registry không nhận host từ renderer; Demo sandbox tách tab, fixtures không vào DB; migration `0003` verified trên DB thật (schema 3, `app_settings` giữ nguyên, `sources` trống).
+**Kiểm tra bất biến (đạt):** không `invoke()` ngoài `desktop.ts` (grep); capability/CSP không đổi; một SQLite pool; registry không nhận host từ renderer (Annotation review 4 vòng: chính Phase 05 sau đó thêm `add_manga_source` — người dùng ĐĂNG KÝ host Madara, có validate HTTPS/host đơn/port cấm/IP cấm + GuardedHttp exact-host; bất biến đúng nghĩa là "không host tùy ý ngoài đường đăng ký đã kiểm soát", khai báo trong `docs/IPC_CONTRACT.md`); Demo sandbox tách tab, fixtures không vào DB; migration `0003` verified trên DB thật (schema 3, `app_settings` giữ nguyên, `sources` trống).
 
 **Gate sau vòng 1:** lint 0 · vitest 63/63 · build pass · cargo 45/45 · clippy -D warnings sạch · dev smoke exit 0.
 

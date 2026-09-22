@@ -25,7 +25,7 @@ export default function DownloadCard({
         <h3 className="download-card__title">{title}</h3>
         <p className="download-card__meta">{description}</p>
       </div>
-      <Progress value={progress} label={`Tiến độ mô phỏng theo trang cho ${title}`} />
+      <Progress value={progress} label={`Tiến độ theo trang cho ${title}`} />
       <div className="download-card__footer">
         <StatusBadge tone={statusTone}>{status}</StatusBadge>
         {children && <div className="download-card__actions">{children}</div>}

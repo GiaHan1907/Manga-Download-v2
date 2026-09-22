@@ -153,7 +153,7 @@ pub async fn queue_batch(
         return Err(AppError::validation("priority phải trong khoảng -10..=10."));
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let mut outcome = QueueOutcome::default();
     let ts = now_iso();
     for chapter_id in chapter_ids {
@@ -188,7 +188,26 @@ pub async fn queue_batch(
         for state in NON_TERMINAL_STATES {
             query = query.bind(state);
         }
-        if let Some(task) = query.fetch_optional(&mut *tx).await? {
+        if let Some(mut task) = query.fetch_optional(&mut *tx).await? {
+            // Reuse wins over duplication, but a submission with a DIFFERENT
+            // format must not silently keep the old one. Only safe while no
+            // worker owns the row (queued/paused/failed): an active task's
+            // format is fixed until it settles.
+            if matches!(task.status.as_str(), "queued" | "paused" | "failed")
+                && task.target_format != target_format
+            {
+                let ts2 = now_iso();
+                sqlx::query(
+                    "UPDATE download_tasks SET target_format = ?2, revision = revision + 1, \
+                     updated_at = ?3 WHERE id = ?1",
+                )
+                .bind(&task.id)
+                .bind(target_format)
+                .bind(&ts2)
+                .execute(&mut *tx)
+                .await?;
+                task.target_format = target_format.to_string();
+            }
             outcome.reused.push(task);
             continue;
         }
@@ -237,7 +256,7 @@ pub async fn transition(
     {
         return Err(AppError::validation("Chuyển đổi trạng thái không hợp lệ."));
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     let clear_error = if to == "failed" {
         ""
@@ -279,7 +298,7 @@ pub async fn set_priority(
         return Err(AppError::validation("priority phải trong khoảng -10..=10."));
     }
     let movable = ["queued", "paused", "failed"];
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let sql = format!(
         "UPDATE download_tasks SET priority = ?2, revision = revision + 1, updated_at = ?3 \
          WHERE id = ?1 AND status IN ({})",
@@ -305,7 +324,7 @@ pub async fn set_priority(
 /// Dispatcher claim: the highest-priority, oldest eligible queued task whose
 /// retry window (if any) has elapsed, atomically moved to `resolving`.
 pub async fn claim_next(pool: &SqlitePool) -> Result<Option<TaskRow>, AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     let candidate: Option<(String,)> = sqlx::query_as(
         "SELECT id FROM download_tasks \
@@ -363,7 +382,7 @@ pub async fn ensure_page_rows(
             "Số trang nằm ngoài giới hạn cho phép.",
         ));
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     for index in 0..total_pages {
         sqlx::query(
@@ -405,7 +424,7 @@ pub async fn mark_page_stored(
     size_bytes: i64,
     checksum: &str,
 ) -> Result<i64, AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     sqlx::query(
         "UPDATE download_pages SET status = 'stored', storage_key = ?3, size_bytes = ?4, \
@@ -462,7 +481,7 @@ pub async fn requeue_with_backoff(
     error_code: &str,
     error_message: &str,
 ) -> Result<Option<TaskRow>, AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     let from = ACTIVE_STATES;
     let sql = format!(
@@ -499,7 +518,7 @@ pub async fn record_failure(
     error_code: &str,
     error_message: &str,
 ) -> Result<Option<TaskRow>, AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     sqlx::query(
         "UPDATE download_tasks SET error_code = ?2, error_message = ?3 \
@@ -538,7 +557,7 @@ pub async fn publish_completed(
     output_format: &str,
     local_size_bytes: Option<i64>,
 ) -> Result<Option<TaskRow>, AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let (chapter_id,): (String,) =
         sqlx::query_as("SELECT chapter_id FROM download_tasks WHERE id = ?1")
             .bind(task_id)
@@ -687,6 +706,38 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn t10_reuse_of_idle_task_adopts_new_target_format() {
+        // Regression (whole-project review round 2): re-submitting a queued
+        // task with a different format silently kept the OLD format.
+        let (_dir, pool) = crate::db::test_pool().await;
+        let chapter = seed_chapter(&pool, "c1").await;
+        let first = queue_batch(&pool, std::slice::from_ref(&chapter), "cbz", 0)
+            .await
+            .unwrap()
+            .created[0]
+            .clone();
+        let again = queue_batch(&pool, std::slice::from_ref(&chapter), "folder", 0)
+            .await
+            .unwrap();
+        assert_eq!(again.reused.len(), 1);
+        assert_eq!(again.reused[0].id, first.id, "still deduped");
+        assert_eq!(
+            again.reused[0].target_format, "folder",
+            "idle (queued) reuse must honor the newly requested format"
+        );
+
+        // An ACTIVE task's format is fixed until it settles (its worker
+        // already captured it; rewriting would desync export vs DB record).
+        transition(&pool, &first.id, &["queued"], "downloading")
+            .await
+            .unwrap();
+        let busy = queue_batch(&pool, std::slice::from_ref(&chapter), "cbz", 0)
+            .await
+            .unwrap();
+        assert_eq!(busy.reused[0].target_format, "folder");
     }
 
     #[tokio::test]

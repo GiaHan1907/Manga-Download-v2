@@ -30,7 +30,7 @@
 
 ## 3. Không tìm thấy (đã chủ động soi)
 
-- Không `dangerouslySetInnerHTML`, không `eval`, không `asset:` scope rộng, không `shell.open`/opener, không `fs` plugin, không command nào nhận path/URL tùy ý, không secret/URL private trong notify body (chỉ title metadata), không wildcard CSP.
+- Không `dangerouslySetInnerHTML`, không `eval`, không `asset:` scope rộng (review 4 vòng đã bỏ hẳn allowance `asset:`/`http://asset.localhost` khỏi CSP — reader dùng IPC bytes + blob), không `shell.open`/opener, không `fs` plugin, không command generic nào nhận path/URL tùy ý — **ba ngoại lệ đã khai báo + validate Rust-side**: `resolve_manga_url` (URL chính người dùng nhập, exact-host match trước khi fetch), `add_manga_source` (base_url HTTPS host đơn khi đăng ký source), và `outputRelpath` chiều trả về (relative display-only). Xem `docs/IPC_CONTRACT.md` §Invariant. Không secret/URL private trong notify body (chỉ title metadata), không wildcard CSP.
 
 ## 4. Kết luận
 

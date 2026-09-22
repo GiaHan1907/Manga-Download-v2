@@ -11,7 +11,6 @@ export type InvalidationDomain =
   | "library"
   | "favorites"
   | "downloads"
-  | "progress"
   | "settings"
   | "sources";
 

@@ -36,13 +36,15 @@ Windows 11 Pro x64 Build 26200 · Node v24.18.0 · rustc 1.98.1 stable-msvc · @
 
 `npm run typecheck` 0 · `npm run lint` 0 · `npx vitest run` **81/81** · `npm run build` 0 · `cargo fmt --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 · `cargo test` **123/123** · `npm run check:version` OK 1.0.0 (+ drift-capture exit 1) · `npm run tauri build -- --bundles nsis` **EXIT=0** · release exe smoke 12 s sống ổn.
 
+> **Reconcile (review toàn project 4 vòng, cùng ngày):** các con số trên là snapshot của candidate `6090b532…` TRƯỚC vòng review. Sau review, tree đổi (engine/worker/migration/frontend — xem `docs/HANDOFF.md` §1a) và RC được build lại: gates hiện hành **vitest 85/85 · cargo 134/134**, artifact mới `2245f30e…a90674` (4,490,082 B). Bảng §7 dưới đây ghi giá trị hiện hành.
+
 ## 6. Release identity
 
 commit baseline `30f50be` + P10 commit · version **1.0.0** · tag đề xuất khi được duyệt: `v1.0.0` (chưa tạo) · product `Manga Downloader 1989` · identifier `com.manga1989.downloader` (không đổi — giữ đường dẫn dữ liệu).
 
 ## 7. Artifact manifest
 
-`Manga Downloader 1989_1.0.0_x64-setup.exe` · 4,480,762 B · SHA-256 `6090b532758b3006f8fa0fe5969e00c752cbea6d14e2732e38239efb9d7f97a6` · **UNSIGNED** · chi tiết: `ARTIFACT_MANIFEST.md`.
+`Manga Downloader 1.0.0` installer — giá trị HIỆN HÀNH sau rebuild 4 vòng: 4,490,082 B · SHA-256 `2245f30e625ed5ecbe6c73ad63da4f56182b922d0b31ed5c7def702c22a90674` · **UNSIGNED** · chi tiết + history superseded hash `6090b532…`: `ARTIFACT_MANIFEST.md`.
 
 ## 8. WebView2 policy
 
@@ -70,7 +72,7 @@ Không Critical/High **defect** mở. Phân biệt rõ: **K-3 (HIGH) là verific
 
 ## 14. Codex Reviewer verdict
 
-(để Reviewer điền: ACCEPT/REJECT + hash đã review `6090b532…f97a6` + commit được chỉ định.)
+(để Reviewer điền: ACCEPT/REJECT + hash đã review `2245f30e…a90674` (hash cũ `6090b532…f97a6` đã superseded bởi rebuild 4 vòng) + commit được chỉ định.)
 
 ## 15. Owner release approval & Release Engineer action
 
@@ -94,3 +96,4 @@ Không Critical/High **defect** mở. Phân biệt rõ: **K-3 (HIGH) là verific
 - **Vòng 2 (docs-vs-chính-nó):** **BLOCKING — summary ma trận T10 sai số học lần 2** (ghi 20/3/8/3/4 = 38 ≠ 40; đếm thật: 25 PASS trong đó 8 có điều kiện · 2 PARTIAL · 6 NOT RUN · 3 N/A · 4 BLOCKED · 0 FAIL) — sửa 3 tài liệu; đối thuẫn K-3 "High" vs câu "không Critical/High mở" được diễn đạt lại (K-3 là verification gap chặn ACCEPT, không phải defect bị che); typo runbook.
 - **Vòng 3 (adversarial):** re-hash installer trên đĩa = khớp manifest từng byte (4,480,762 B / `6090b532…f97a6`); drift test chạy lại với exit code trung thực (1 khi lệch, 0 khi khôi phục — capture lỗi tiên nghiệm bằng pipe đã bị che exit code, sửa trong evidence); quét secrets: workflows 0 tham chiếu secret, repo 0 file key/cert. Toàn bộ bằng chứng: `evidence/rc-verification-2026-09-23.txt`.
 - **Kết luận:** 0 BLOCKING code/runtime tồn tại; mọi finding thuộc loại portability-docs-honesty và đã sửa. Gates chốt sau 3 vòng: vitest 81/81 · cargo 123/123 · fmt/clippy · typecheck/lint/build · `check:version` OK. Trạng thái giữ nguyên: **RC_TESTED — PUBLICATION BLOCKED**.
+- **Bổ sung — review TOÀN PROJECT 4 vòng (ngay sau đó, user yêu cầu):** vòng 1 security/bất biến (CSP bỏ `asset:` dead-allowance; validate_relpath trước khi probe path từ DB), vòng 2 engine/data (shutdown không cancel; cancel tới trước commit; verify_cbz hết panic offset; repair migration 0004 giữ checksum; has_missing đúng in-app delete; BEGIN IMMEDIATE; sweep temp trong library; queue reuse nhận format), vòng 3 frontend (action table theo lifecycle mới; monotonic merge chống stale-snapshot; blob leak post-unmount; Sources sandbox gate DEV), vòng 4 docs↔code + rebuild RC. Gates hiện hành: **vitest 85/85 · cargo 134/134**, artifact `2245f30e…a90674`. Chi tiết: `docs/HANDOFF.md` §1a. Trạng thái release KHÔNG đổi: RC_TESTED — PUBLICATION BLOCKED.

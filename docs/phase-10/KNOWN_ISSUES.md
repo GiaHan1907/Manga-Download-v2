@@ -15,6 +15,6 @@ Không có Critical/High mở (theo P09 SECURITY/RISK + review vòng). Medium/Lo
 | K-9 | 8 crate transitive "unmaintained" warnings (cargo audit) | Low | Chuỗi build tương lai | Tri-age khi pin release; không bump hàng loạt |
 | K-10 | Search palette dùng `library_list` (LIKE) — library cực lớn có thể cần endpoint riêng | Low | Chưa đo ra vấn đề (4.9 ms @10k) | Đo trước, tối ưu sau |
 | K-11 | ARM64 Windows chưa build/test | Low (scope) | Không có installer ARM | Work item riêng nếu cần |
-| K-12 | Download đang chạy khi Quit từ tray → worker cancel cooperative ≤5s; task active về queued lần chạy sau (recovery) — **không** hứa "chạy nền sau khi thoát process" | Low (đúng thiết kế, cần hiểu đúng) | Người dùng có thể kỳ vọng sai | Đã ghi trong policy Settings/Windows |
+| K-12 | Download đang chạy khi Quit từ tray/app → worker exit KHÔNG ghi trạng thái terminal (cờ shutdown tách khỏi cancel — sửa ở review 4 vòng); mọi task active về `queued` qua startup recovery với checkpoint `download_pages` nguyên vẹn — **không** hứa "chạy nền sau khi thoát process", và cũng **không** còn bị cancel oan | Low (đúng thiết kế, cần hiểu đúng) | Người dùng có thể kỳ vọng tải nền | Đã ghi trong policy Settings/Windows + `docs/HANDOFF.md` §1a |
 
 **Deferred hợp lệ từ plan P10:** MSI (chỉ khi deployment yêu cầu), offline WebView2 installer (chỉ khi yêu cầu install offline-first), Microsoft Store, code signing, updater production.

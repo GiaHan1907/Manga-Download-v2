@@ -57,7 +57,7 @@ pub async fn save_progress(
         return Err(AppError::validation("pageTotal không hợp lệ."));
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let result = save_progress_tx(
         tx.as_mut(),
         manga_id,

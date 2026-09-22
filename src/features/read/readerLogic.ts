@@ -19,7 +19,7 @@ export function buildSpreads(pageCount: number, firstSingle: boolean): Spread[] 
   }
   for (; index < pageCount; index += 2) {
     const secondary = index + 1 < pageCount ? index + 1 : null;
-    spreads.push(firstSingle ? { primary: index, secondary } : { primary: index, secondary });
+    spreads.push({ primary: index, secondary });
   }
   return spreads;
 }
@@ -69,20 +69,6 @@ export function prefetchWindow(page: number, pageCount: number, radius: number):
     result.push(index);
   }
   return result;
-}
-
-/// Logical page from vertical-scroll offset (used to persist progress for
-/// resume in vertical mode; approximate is acceptable by design).
-export function pageFromScroll(scrollTop: number, pageTops: number[], pageCount: number): number {
-  let page = 0;
-  for (let index = 0; index < pageTops.length; index += 1) {
-    if (pageTops[index] <= scrollTop + 1) {
-      page = index;
-    } else {
-      break;
-    }
-  }
-  return clampPage(page, pageCount);
 }
 
 export function progressPercent(page: number, pageCount: number): number {

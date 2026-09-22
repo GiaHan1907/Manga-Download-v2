@@ -11,7 +11,6 @@ import StatusBadge from "../../components/ui/StatusBadge";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
-import { useServicesVersion } from "../../shared/hooks/useServices";
 import { localServices } from "../../services/provider";
 import type { LibraryFilter, LibraryMangaDto, LibrarySort } from "../../types/library";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
@@ -52,7 +51,6 @@ function relativeTime(iso: string | null): string {
 }
 
 export default function LibraryPage() {
-  const version = useServicesVersion();
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<LibrarySort>("lastRead");
@@ -73,7 +71,8 @@ export default function LibraryPage() {
         limit: PAGE_SIZE,
         offset,
       }),
-    [debouncedQuery, offset, sort, filter, retryNonce, version, libraryVersion],
+    // Real-IPC screen: must NOT refetch when only mock/dev state changes.
+    [debouncedQuery, offset, sort, filter, retryNonce, libraryVersion],
   );
 
   function toggleView() {

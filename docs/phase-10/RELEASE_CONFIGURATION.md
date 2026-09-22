@@ -4,7 +4,7 @@
 
 ## Tiền đề gate
 
-- Phase 09: toàn bộ gates tự động PASS (vitest 81/81, cargo 123/123, clippy/fmt, `tauri build` EXIT=0), QA matrix 45 PASS/PASS(code) · 5 PARTIAL · 1 NOT RUN · 1 BLOCKED-by-design · 0 FAIL; review nội bộ 3 vòng (`PHASE_09_HANDOFF.md` §14).
+- Phase 09: toàn bộ gates tự động PASS (vitest 81/81, cargo 123/123, clippy/fmt, `tauri build` EXIT=0), QA matrix 45 PASS/PASS(code) · 5 PARTIAL · 1 NOT RUN · 1 BLOCKED-by-design · 0 FAIL; review nội bộ 3 vòng (`PHASE_09_HANDOFF.md` §14). **Reconcile 4 vòng:** hiện hành vitest 85/85 · cargo 134/134, artifact `2245f30e…a90674` — xem `ARTIFACT_MANIFEST.md`.
 - Quy trình repo: user đã bỏ bước reviewer ngoài (ghi nhận 2026-09-22, `docs/HANDOFF.md` §5) — ACCEPT thực hiện theo mô hình "review N vòng" của user; **chốt ACCEPT/REJECT cuối cho Phase 10 vẫn thuộc user/Codex Reviewer**. Không có bằng chứng ACCEPT bên ngoài nào được giả định.
 - Release blockers còn mở (từ P09, không đổi bởi P10 config): R-1 live download journey + 13 mục manual Windows — cần người thật/VM sạch.
 
@@ -32,7 +32,7 @@
 - User data: `%APPDATA%\com.manga1989.downloader` (DB `manga-downloader-1989.db`, `library/`, `cache/`, `covers/`) — NSIS uninstall không đụng app-data (mặc định Tauri không xóa data) → kiểm bằng test matrix T10-24.
 - Migration chain 0001–0005 forward-only; schema 5.
 - Capabilities `default.json`: core:default + 5 window perms — **không đổi** cho release (rule §2.10).
-- CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost blob:` — không đổi.
+- CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:` — **đã đổi ở review toàn project 4 vòng**: bỏ `asset:`/`http://asset.localhost` (dead allowance — reader phục vụ bytes qua typed IPC + blob, không protocol asset). Vẫn không wildcard, không remote.
 - Version hiển thị trong app (`app_get_info`) lấy `CARGO_PKG_VERSION` → nay 1.0.0, khớp About dialog.
 
 ## Trạng thái máy build

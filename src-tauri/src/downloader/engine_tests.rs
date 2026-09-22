@@ -34,6 +34,9 @@ struct Script {
     pause_during_fetch: bool,
     fail_first_fetches: usize,
     poison_pages: Vec<usize>,
+    /// page_manifest waits on `gate` then fails: exercises the flag
+    /// precedence inside `fail_or_requeue` deterministically.
+    manifest_gate_fail: bool,
     fetches: Arc<AtomicUsize>,
     gate: Arc<AtomicBool>,
 }
@@ -46,6 +49,7 @@ impl Script {
             pause_during_fetch: false,
             fail_first_fetches: 0,
             poison_pages: Vec::new(),
+            manifest_gate_fail: false,
             fetches: Arc::new(AtomicUsize::new(0)),
             gate: Arc::new(AtomicBool::new(false)),
         }
@@ -102,6 +106,15 @@ impl SourceAdapter for ScriptedAdapter {
         _source_manga_id: &str,
         source_chapter_id: &str,
     ) -> Result<PageManifest, SourceError> {
+        if self.script.manifest_gate_fail {
+            for _ in 0..2500 {
+                if self.script.gate.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+            return Err(SourceError::Network);
+        }
         let pages = (0..self.script.pages)
             .map(|index| PageDescriptor {
                 index,
@@ -210,6 +223,16 @@ impl World {
         pause: Arc<AtomicBool>,
         cancel: Arc<AtomicBool>,
     ) -> Result<crate::domain::DownloadTaskDto, AppError> {
+        self.run_once_flags(pause, cancel, Arc::new(AtomicBool::new(false)))
+            .await
+    }
+
+    async fn run_once_flags(
+        &self,
+        pause: Arc<AtomicBool>,
+        cancel: Arc<AtomicBool>,
+        shutdown: Arc<AtomicBool>,
+    ) -> Result<crate::domain::DownloadTaskDto, AppError> {
         let claimed = download_repo::claim_next(&self.pool)
             .await?
             .expect("claimable task");
@@ -218,7 +241,11 @@ impl World {
             registry: self.registry(),
             app_data_dir: self.data_dir.path().to_path_buf(),
             events: self.events.clone(),
-            flags: worker::WorkerFlags { cancel, pause },
+            flags: worker::WorkerFlags {
+                cancel,
+                pause,
+                shutdown,
+            },
             image_concurrency: 2,
         });
         worker::run_task(claimed, deps)
@@ -336,6 +363,133 @@ async fn cancel_observed_midflight_lands_cancelled_not_failed() {
 }
 
 #[tokio::test]
+async fn shutdown_after_error_keeps_task_resumable_not_failed() {
+    // Regression (whole-project review round 2): app shutdown previously
+    // reused the cancel flag, so workers persisted a terminal `cancelled`
+    // the user never asked for. Shutdown must leave the task active and
+    // error-free so startup recovery re-queues it with checkpoints intact.
+    let mut script = Script::new(3);
+    script.manifest_gate_fail = true;
+    let world = World::new(script).await;
+    let chapter_id = world.seed_chapter("ch-shutdown").await;
+    world.queue(&chapter_id, "cbz").await;
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let waiter = {
+        let shutdown = shutdown.clone();
+        let gate = world.script.gate.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            shutdown.store(true, Ordering::SeqCst);
+            gate.store(true, Ordering::SeqCst); // manifest fails AFTER shutdown
+        })
+    };
+    let dto = world
+        .run_once_flags(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            shutdown,
+        )
+        .await
+        .unwrap();
+    waiter.await.unwrap();
+    assert_eq!(dto.status, "resolving", "shutdown must not terminalize");
+    assert_ne!(dto.status, "failed");
+    assert_ne!(dto.status, "cancelled");
+    assert!(dto.error_code.is_none(), "no failure may be persisted");
+    // Startup recovery re-queues it.
+    let report = crate::downloader::recovery::reconcile_startup(&world.pool, world.data_dir.path())
+        .await
+        .unwrap();
+    assert_eq!(report.normalized_tasks, 1);
+    let after = download_repo::get_task(&world.pool, &dto.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.status, "queued");
+}
+
+#[tokio::test]
+async fn pending_cancel_after_error_lands_cancelled() {
+    // fail_or_requeue must honor a cancel that raced the error path: a
+    // user-requested cancel never turns into `failed`/requeue noise.
+    let mut script = Script::new(3);
+    script.manifest_gate_fail = true;
+    let world = World::new(script).await;
+    let chapter_id = world.seed_chapter("ch-cancel-err").await;
+    world.queue(&chapter_id, "cbz").await;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let waiter = {
+        let cancel = cancel.clone();
+        let gate = world.script.gate.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            cancel.store(true, Ordering::SeqCst);
+            gate.store(true, Ordering::SeqCst);
+        })
+    };
+    let dto = world
+        .run_once_flags(
+            Arc::new(AtomicBool::new(false)),
+            cancel,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+    waiter.await.unwrap();
+    assert_eq!(dto.status, "cancelled");
+    assert!(dto.error_code.is_none());
+}
+
+#[tokio::test]
+async fn coordinator_rejects_pause_in_verify_export_commit_window() {
+    // Pause must not be silently swallowed: verifying/exporting cannot
+    // pause mid-publish, so the coordinator rejects instead of accepting a
+    // request that would never be honored.
+    use crate::downloader::scheduler::Coordinator;
+    use std::sync::Mutex;
+    let world = World::new(Script::new(1)).await;
+    let chapter_id = world.seed_chapter("ch-pause-window").await;
+    let task = world.queue(&chapter_id, "cbz").await;
+    for (from, to) in [
+        ("queued", "resolving"),
+        ("resolving", "downloading"),
+        ("downloading", "verifying"),
+        ("verifying", "exporting"),
+    ] {
+        download_repo::transition(&world.pool, &task.id, &[from], to)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let coordinator = Coordinator::new(
+        world.pool.clone(),
+        Arc::new(Mutex::new(SourceRegistry::with_adapters(vec![]))),
+        world.data_dir.path().to_path_buf(),
+        world.events.clone(),
+    );
+    let error = coordinator.pause(&task.id).await.unwrap_err();
+    assert!(
+        matches!(error, AppError::Validation(_)),
+        "expected validation rejection, got {error:?}"
+    );
+    // downloading still accepts cooperative pause.
+    download_repo::transition(&world.pool, &task.id, &["exporting"], "verifying")
+        .await
+        .unwrap()
+        .unwrap();
+    download_repo::transition(&world.pool, &task.id, &["verifying"], "downloading")
+        .await
+        .unwrap()
+        .unwrap();
+    coordinator
+        .pause(&task.id)
+        .await
+        .expect("downloading accepts pause");
+}
+
+#[tokio::test]
 async fn pause_midflight_then_resume_skips_stored_pages() {
     let mut script = Script::new(4);
     script.pause_during_fetch = true;
@@ -387,6 +541,7 @@ async fn pause_midflight_then_resume_skips_stored_pages() {
         flags: worker::WorkerFlags {
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
+            shutdown: Arc::new(AtomicBool::new(false)),
         },
         image_concurrency: 4,
     });

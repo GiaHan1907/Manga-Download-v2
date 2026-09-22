@@ -4,6 +4,8 @@
 **Runner:** Windows 11 Pro x64 Build 26200 · Node v24.18.0 · rustc 1.98.1 stable-msvc · debug build cho test, release cho build/smoke.
 **Quy ước:** PASS = có output thật đã chạy; PASS(code) = logic test được, tác động OS chưa thao tác thật; PARTIAL = một phần kịch bản có bằng chứng; NOT RUN = chưa chạy; BLOCKED = thiếu môi trường/quyền. Không mục nào dịch BLOCKED/NOT RUN sang PASS.
 
+> **Reconcile (review toàn project 4 vòng, cùng ngày):** snapshot 81/81 vitest · 123/123 cargo ở các dòng T09-01/02/52 là của candidate P09. Hiện hành sau review: **vitest 85/85 · cargo 134/134**, mọi dòng tự động trên vẫn PASS với số lớn hơn — nguồn sự thật gates: `docs/HANDOFF.md` §1a.
+
 | ID | Trạng thái | Lệnh / test | Actual / evidence |
 |---|---|---|---|
 | T09-01 | PASS | `npm run lint` · `typecheck` · `test` · `build` | 0 lỗi lint; tsc sạch; vitest 81/81 (10 files); vite build 396 kB; scripts đúng trong package.json |

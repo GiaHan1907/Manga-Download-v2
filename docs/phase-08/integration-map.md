@@ -25,7 +25,7 @@ Audit baseline: commit `0f81dac` (Phase 07 + review 3 vòng). Mọi đường d�
 - `useServicesVersion` (`shared/hooks/useServices.ts`) → **chỉ bump khi MOCK store đổi**; dữ liệu thật không có invalidation liên màn.
 - Mỗi màn tự `retryNonce/nonce` sau mutation → chỉ refresh CHÍNH nó; quay lại màn khác phải remount mới thấy dữ liệu mới.
 - Event `download-task-updated` chỉ được `DownloadsPage` subscribe qua `useDownloadQueue` (revision-guarded). Không có listener cấp app.
-- **Quyết định Phase 08 (deviation có chủ đích khỏi gợi ý TanStack/Zustand trong plan §2.6):** KHÔNG thêm dependency state mới (plan §2/§4 ưu tiên cấu trúc hiện hữu, AGENTS.md cấm dep thừa). Thay bằng invalidation bus nội bộ `src/shared/hooks/useInvalidation.ts` (external store + domain keys đúng bộ `qk` gợi ý: home/library/favorites/downloads/progress/settings/sources) + `AppEventBridge` mount 1 lần trong shell: subscribe `download-task-updated`, bump domain theo terminal transition, giữ active-count cho badge.
+- **Quyết định Phase 08 (deviation có chủ đích khỏi gợi ý TanStack/Zustand trong plan §2.6):** KHÔNG thêm dependency state mới (plan §2/§4 ưu tiên cấu trúc hiện hữu, AGENTS.md cấm dep thừa). Thay bằng invalidation bus nội bộ `src/shared/hooks/useInvalidation.ts` (external store + domain keys gợi ý theo `qk`: home/library/favorites/downloads/settings/sources — hiện hành 6 domain, `progress` đã gỡ ở review toàn project 4 vòng vì không có bump/subscriber) + `AppEventBridge` mount 1 lần trong shell: subscribe `download-task-updated`, bump domain theo terminal transition, giữ active-count cho badge.
 
 ## 3. Settings keys thực tế (blob `settings.v1`, validate Rust `domain/settings.rs`)
 

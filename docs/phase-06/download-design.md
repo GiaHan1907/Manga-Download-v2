@@ -8,8 +8,9 @@ Rust là thẩm quyền duy nhất (renderer chỉ gửi chapterId + hành độ
 queued → resolving → downloading → verifying → exporting → completed
    ↑          |             |            |           |
    └──── retry (từ failed) / automatic backoff-requeue ────┘
-queued/downloading/… → pausing → paused      (pause hợp tác, chỉ acknowledged khi writes đã ổn định)
-bất kỳ non-terminal  → cancelled              (không xóa file người dùng đã có)
+queued/downloading/… → pausing → paused      (pause hợp tác, chỉ acknowledged khi writes đã ổn định;
+                                                revised 4 vòng: verifying/exporting TỪ CHỐI pause bằng VALIDATION_ERROR — cửa sổ commit ngắn)
+bất kỳ non-terminal  → cancelled              (không xóa file người dùng đã có; cancel được tôn trọng tới TRƯỚC commit artifact — revised 4 vòng)
 failed               ← lỗi không recover được hoặc hết retry budget
 ```
 
@@ -62,7 +63,7 @@ async fn fetch_image(&self, url:&str) -> Result<Vec<u8>, SourceError>; // qua Tr
 - CBZ: ghi `*.cbz.part` **trong cùng thư mục đích** (same volume), ZIP **Stored** (không re-encode), entry basename-only `000001.jpg` (chống ZIP slip), đóng central directory → **đọc lại verify**: đủ số entry, đúng thứ tự, CRC từng entry → rename atomic → commit `chapters.local_path/output_format` + task `completed` (1 transaction; nếu commit fail, lần khởi động tới nhận diện artifact đã verify và repair idempotent).
 - Folder mode: copy bộ trang đã verify vào `*.part-folder/`, verify đủ+N+order, rename → commit.
 - Path safety: mọi đường dẫn nội bộ Rust dựng từ ID đã validate `[a-z0-9._-]`, sanitize tiêu đề (bỏ `..`, separators, device name Windows, control chars, chấm/cách cuối, reserved names, giới hạn 80 ký tự); canonicalize rồi assert nằm dưới root đã duyệt; từ chối symlink/reparse escape.
-- Recovery khởi động (chỉ quét thư mục task được DB biết, có bound): xóa `*.part` (staging + library), verify artifact final đã tồn tại mà DB chưa commit → nhận về; thiếu file của row `stored` → reset trang đó về pending; không bao giờ quét đệ quy thư viện người dùng.
+- Recovery khởi động (chỉ quét thư mục task được DB biết, có bound): xóa `*.part` (staging + library), verify artifact final đã tồn tại mà DB chưa commit → nhận về; thiếu file của row `stored` → reset trang đó về pending; không bao giờ quét đệ quy nội dung người dùng — revised 4 vòng: thư viện được quét có giới hạn 2 cấp (manga dir → file) và CHỈ xóa temp export mang suffix `.part`/`.part-dir` có task-token khớp task đã biết trong DB (`sweep_library_export_temps`, `StartupReport.discarded_library_parts`); file lạ/không khớp không bao giờ bị chạm.
 
 ## 6. IPC (tên theo contract hiện hành, camelCase DTO)
 
@@ -70,11 +71,11 @@ async fn fetch_image(&self, url:&str) -> Result<Vec<u8>, SourceError>; // qua Tr
 |---|---|---|
 | `queue_chapter_downloads` | `chapterIds: string[] (≤100), format?: 'cbz'\|'folder'` | `QueueResultDto { tasks: DownloadTaskDto[], reused: string[], errors: {chapterId, code, message}[] }` |
 | `get_download_task` | `taskId` | `DownloadTaskDto` |
-| `pause_download` / `resume_download` / `cancel_download` / `retry_download` | `taskId` | `DownloadTaskDto` (state sau acknowledge; từ chối transition sai → `INVALID_STATE_TRANSITION`) |
+| `pause_download` / `resume_download` / `cancel_download` / `retry_download` | `taskId` | `DownloadTaskDto` (state sau acknowledge; từ chối transition sai → `VALIDATION_ERROR` — tên code wire thực tế, `INVALID_STATE_TRANSITION` chưa bao giờ tồn tại; pause riêng `verifying/exporting` bị từ chối từ review 4 vòng) |
 | `set_download_priority` | `taskId, priority(-10..10)` | `DownloadTaskDto` |
 | `app_list_local_download_tasks` (REUSE + mở rộng) | status/limit/offset | `PagedResult<DownloadTaskDto+>` thêm `errorMessage,nextRetryAt,finishedAt,outputRelpath,revision,downloadedBytes,speedBytesPerSecond` |
 
-Dedup: submission trùng chapter đang có task **non-terminal** → trả reused id (không tạo task 2, không đè artifact completed). Event `download-task-updated` payload `{ taskId, revision, snapshot }`: hợp nhất ≥250ms cho progress, **tức thì** cho mọi chuyển trạng thái; UI giữ revision cao nhất, refetch sau action/focus.
+Dedup: submission trùng chapter đang có task **non-terminal** → trả reused id (không tạo task 2, không đè artifact completed); revised 4 vòng: reuse task ĐANG idle (`queued/paused/failed`) với format khác → format mới được áp dụng, task active giữ nguyên format. Event `download-task-updated` payload `{ task: DownloadTaskDto, downloadedBytes, speedBytesPerSecond, occurredAt }` (contract thật trong `docs/IPC_CONTRACT.md` §Phase 06; bản draft cũ ghi `{taskId, revision, snapshot}` chưa bao giờ ship): hợp nhất ≥250ms cho progress, **tức thì** cho mọi chuyển trạng thái; UI giữ revision cao nhất, refetch sau action/focus.
 
 ## 7. Frontend
 

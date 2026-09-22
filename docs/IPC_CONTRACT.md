@@ -31,7 +31,7 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `app_save_reading_progress` | `{ mangaId, chapterId, pageIndex, scrollOffset?, pageTotal? }` | `ReadingProgressDto` (+`scrollOffset,pageTotal`) | validate ownership chapter∈manga trong MỘT transaction; `0 ≤ pageIndex ≤ 10000`; `scrollOffset∈0..=1`; stamp `mangas.last_read_at` (Phase 07); write lỗi không phá progress cũ |
 | `app_list_local_download_tasks` | `{ status?, limit?, offset? }` | `PagedResult<DownloadTaskDto>` | CHỈ ĐỌC (Phase 06 mới ghi); status sai → `VALIDATION_ERROR` |
 
-**Không tồn tại** command nào nhận đường dẫn file tuyệt đối, SQL, URL tùy ý để fetch, headers từ renderer hay generic insert metadata. `save_discovered_manga` chỉ nhận cặp ID và tự re-fetch từ provider.
+**Không tồn tại** command chung nào nhận đường dẫn file tuyệt đối, SQL, URL tùy ý để fetch, headers từ renderer hay generic insert metadata. `save_discovered_manga` chỉ nhận cặp ID và tự re-fetch từ provider. **Ba ngoại lệ được khai báo tường minh** (review toàn project 4 vòng): `resolve_manga_url` (URL do CHÍNH người dùng nhập để import — Rust parse + so khớp exact-host theo policy adapter TRƯỚC khi fetch, không fetch URL lạ), `add_manga_source` (base_url người dùng nhập khi đăng ký Madara source — validate HTTPS, host đơn không IP literal/port lạ, sau đó mọi request vẫn qua GuardedHttp exact-host), và chiều NHẬN lại: `outputRelpath`/`local_path` hiển thị chỉ là đường dẫn TƯƠNG ĐỐI theo library root (display-only), không bao giờ path tuyệt đối.
 
 ## Commands Phase 05 — source engine & discovery
 
@@ -53,7 +53,7 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 |---|---|---|---|
 | `queue_chapter_downloads` | `{ chapterIds[] (1..100), format?: "cbz"\|"folder", priority?: -10..10 }` | `QueueResultDto { tasks, reused, errors[], queuedAt }` | KHÔNG nhận URL/headers/path. Format mặc định từ Settings (pdf bị từ chối). Dedup: chapter đã có task non-terminal → `reused`. Lỗi từng mục (`NOT_FOUND`/`UNSUPPORTED_OPERATION` khi nguồn thiếu capability `pages`) không fail cả batch. Một transaction |
 | `get_download_task` | `{ taskId }` | `DownloadTaskDto` | snapshot bền vững; `NOT_FOUND` |
-| `pause_download` | `{ taskId }` | `DownloadTaskDto` | queued→paused ngay; đang chạy → flag hợp tác, worker tự chốt `pausing→paused` khi writes dừng; transition sai → `VALIDATION_ERROR` |
+| `pause_download` | `{ taskId }` | `DownloadTaskDto` | queued→paused ngay; `resolving`/`downloading` → flag hợp tác, worker tự chốt `pausing→paused` khi writes dừng; `verifying`/`exporting` → **từ chối bằng `VALIDATION_ERROR`** (cửa sổ commit ngắn, pause không thể giữa chừng — review 4 vòng); transition sai khác cũng `VALIDATION_ERROR` |
 | `resume_download` | `{ taskId }` | `DownloadTaskDto` | chỉ paused→queued |
 | `cancel_download` | `{ taskId }` | `DownloadTaskDto` | queued/paused ngay; worker nhận flag tự chốt cancelled; staging của task bị xóa, **không đụng file đã publish** |
 | `retry_download` | `{ taskId }` | `DownloadTaskDto` | chỉ failed→queued; giữ attempts/backoff đã lưu |
@@ -88,7 +88,7 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 **Event** `tray-open-downloads` → payload rỗng: tín hiệu điều hướng từ tray menu; subscribe qua `desktop.subscribeTrayOpenDownloads()`, unlisten khi teardown (bridge duy nhất cấp app).
 
-**Invalidation frontend:** `src/shared/hooks/useInvalidation.ts` — 7 domain transient (`home/library/favorites/downloads/progress/settings/sources`); event/status mutation CHỈ bump domain, screens refetch snapshot từ Rust. Không phải kênh dữ liệu mới — không thêm IPC.
+**Invalidation frontend:** `src/shared/hooks/useInvalidation.ts` — 6 domain transient (`home/library/favorites/downloads/settings/sources`; domain `progress` đã gỡ vì không có bump/subscriber — review toàn project 4 vòng); event/status mutation CHỈ bump domain, screens refetch snapshot từ Rust. Không phải kênh dữ liệu mới — không thêm IPC.
 
 Capabilities KHÔNG đổi (notification gọi từ Rust, không qua IPC permission).
 

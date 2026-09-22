@@ -44,7 +44,7 @@ KHÔNG migration mới (schema 5 giữ nguyên; settings là blob JSON). Key m�
 - Commands mới: `library_stats`, `storage_status`, `clear_regenerable_cache` (contract: `docs/IPC_CONTRACT.md` §Phase 08).
 - Event mới: `tray-open-downloads` (Rust→JS, payload rỗng — tín hiệu điều hướng).
 - `download-task-updated`: không đổi payload; consumer app-level duy nhất (bridge) + per-screen queue merge; mọi handler guard `disposed`, unlisten đầy đủ (T08-35).
-- Invalidation: 7 domain (home/library/favorites/downloads/progress/settings/sources) — UI transient, persisted truth luôn refetch từ Rust.
+- Invalidation: 7 domain (home/library/favorites/downloads/progress/settings/sources) — UI transient, persisted truth luôn refetch từ Rust. (Reconcile review 4 vòng: còn 6 domain — `progress` gỡ vì không dùng.)
 
 ## 7. Storage & Windows behavior
 

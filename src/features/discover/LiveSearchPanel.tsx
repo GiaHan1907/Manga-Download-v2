@@ -38,7 +38,9 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
       debounced.length < 2
         ? Promise.resolve(null)
         : localServices.source.search({ query: debounced, sourceIds: effectiveIds }),
-    [debounced, selected.join(","), reload],
+    // effectiveIds key: disabling/removing a source must invalidate rendered
+    // results that were gathered from sources which are no longer searchable.
+    [debounced, selected.join(","), effectiveIds?.join(",") ?? "all", reload],
   );
 
   function toggleSource(sourceId: string) {

@@ -48,9 +48,12 @@ export function allowedDownloadActions(status: DownloadTaskDto["status"]): ("pau
       return ["pause", "cancel"];
     case "resolving":
     case "downloading":
+      return ["pause", "cancel"];
     case "verifying":
     case "exporting":
-      return ["pause", "cancel"];
+      // Backend commit window: pause is rejected there (scheduler.rs),
+      // cancel is honored until the artifact commit.
+      return ["cancel"];
     case "pausing":
       // Worker acknowledgement pending — resume would race the pause commit;
       // the backend only accepts resume from `paused`.

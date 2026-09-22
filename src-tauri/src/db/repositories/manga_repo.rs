@@ -39,7 +39,7 @@ pub async fn upsert_manga(
     description: Option<&str>,
     status: &str,
 ) -> Result<(String, bool), AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let result = upsert_manga_tx(
         tx.as_mut(),
         source_id,
@@ -124,7 +124,7 @@ pub async fn upsert_chapter(
     number: Option<f64>,
     page_count: Option<i64>,
 ) -> Result<(String, bool), AppError> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
     let manga_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM mangas WHERE id = ?1")
         .bind(manga_id)

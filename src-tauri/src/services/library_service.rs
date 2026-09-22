@@ -75,7 +75,8 @@ pub async fn list_mangas(
          (SELECT rp.page_total FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_page_total, \
          (SELECT rp.updated_at FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_updated_at, \
          EXISTS (SELECT 1 FROM download_tasks dt JOIN chapters c ON c.id = dt.chapter_id \
-                 WHERE c.manga_id = m.id AND dt.status = 'completed' AND c.local_path IS NULL) AS has_missing \
+                 WHERE c.manga_id = m.id AND dt.status = 'completed' \
+                 AND dt.output_relpath IS NOT NULL AND c.local_path IS NULL) AS has_missing \
          FROM mangas m";
     let where_sql = format!("WHERE 1=1 {search} {filter}");
     let total_sql = format!("SELECT COUNT(*) FROM ({base} {where_sql})");
@@ -171,7 +172,10 @@ pub async fn downloaded_chapters(
     for row in rows {
         let local_path: Option<String> = row.try_get("local_path")?;
         let Some(path) = local_path else { continue };
-        let artifact = storage::library_root(app_data_dir).join(&path);
+        // Same relpath discipline as every other DB-path consumer: a tampered
+        // row must not even probe arbitrary paths through artifactOk.
+        let artifact_ok = storage::validate_relpath(&path).is_ok()
+            && storage::library_root(app_data_dir).join(&path).exists();
         items.push(serde_json::json!({
             "id": row.try_get::<String, _>("id")?,
             "title": row.try_get::<String, _>("title")?,
@@ -179,7 +183,7 @@ pub async fn downloaded_chapters(
             "pageCount": row.try_get::<Option<i64>, _>("page_count")?,
             "storageFormat": row.try_get::<Option<String>, _>("output_format")?,
             "sizeBytes": row.try_get::<Option<i64>, _>("local_size_bytes")?,
-            "artifactOk": artifact.exists(),
+            "artifactOk": artifact_ok,
             "updatedAt": row.try_get::<String, _>("updated_at")?,
         }));
     }
@@ -323,12 +327,20 @@ pub async fn remove_chapter_files(
     }
     sqlx::query(
         "UPDATE chapters SET local_path = NULL, output_format = NULL, local_size_bytes = NULL, \
-         page_count = NULL, updated_at = ?2 WHERE id = ?1",
+         updated_at = ?2 WHERE id = ?1",
     )
     .bind(chapter_id)
     .bind(now_iso())
     .execute(pool)
     .await?;
+    // An INTENTIONAL delete must not keep the manga flagged "missing": the
+    // completed-task proof of an artifact points at a path that is now gone
+    // by user request. (Externally deleted files keep the flag — startup
+    // recovery only clears local_path, never the task's output_relpath.)
+    sqlx::query("UPDATE download_tasks SET output_relpath = NULL WHERE chapter_id = ?1 AND status = 'completed'")
+        .bind(chapter_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -525,6 +537,106 @@ mod tests {
             lib.data.path().join("outside.cbz").exists(),
             "rejected delete must not touch the file"
         );
+    }
+
+    #[tokio::test]
+    async fn t10_downloaded_chapters_never_probes_unvalidated_paths() {
+        let (lib, _, _) = seeded().await;
+        let (manga_id, ids) = testkit::seed_manga(&lib.pool, "probe", 1).await;
+        // Tampered DB row with a traversal local_path: listing must succeed
+        // and report artifactOk=false WITHOUT evaluating the raw path.
+        testkit::mark_downloaded(&lib.pool, &ids[0], "../outside.cbz", "cbz").await;
+        std::fs::write(lib.data.path().join("outside.cbz"), b"exists-bait").unwrap();
+        let items = downloaded_chapters(&lib.pool, lib.data.path(), &manga_id)
+            .await
+            .unwrap();
+        let row = items
+            .iter()
+            .find(|item| item["id"] == serde_json::json!(ids[0]))
+            .expect("tampered chapter listed");
+        assert_eq!(row["artifactOk"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn t11_intentional_delete_clears_missing_flag_external_loss_keeps_it() {
+        // Regression (whole-project review round 2): remove_chapter_files
+        // left the completed task untouched, so the manga was flagged
+        // "missing chapters" forever after an INTENTIONAL delete. External
+        // loss must keep the flag — that is the anomaly it advertises.
+        let (lib, _, _) = seeded().await;
+        let (manga_id, ids) = testkit::seed_manga(&lib.pool, "missing", 1).await;
+        testkit::build_cbz(
+            &lib.data.path().join("stg2"),
+            &storage::library_root(lib.data.path()),
+            "missing/cb1.cbz",
+            3,
+        );
+        testkit::mark_downloaded(&lib.pool, &ids[0], "missing/cb1.cbz", "cbz").await;
+        sqlx::query("UPDATE chapters SET page_count = 3 WHERE id = ?1")
+            .bind(&ids[0])
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+        let ts = now_iso();
+        sqlx::query(
+            "INSERT INTO download_tasks (id, chapter_id, status, target_format, priority, \
+             completed_pages, total_pages, attempts, revision, output_relpath, created_at, updated_at) \
+             VALUES ('tk-missing', ?1, 'completed', 'cbz', 0, 3, 3, 0, 1, 'missing/cb1.cbz', ?2, ?2)",
+        )
+        .bind(&ids[0])
+        .bind(&ts)
+        .execute(&lib.pool)
+        .await
+        .unwrap();
+        let list_one = |l: &Lib| {
+            let pool = l.pool.clone();
+            let manga = manga_id.clone();
+            async move {
+                list_mangas(&pool, None, Some("title"), Some("all"), 50, 0)
+                    .await
+                    .unwrap()
+                    .0
+                    .into_iter()
+                    .find(|m| m.id == manga)
+                    .unwrap()
+                    .has_missing
+            }
+        };
+        assert!(!list_one(&lib).await, "downloaded and present: not missing");
+
+        remove_chapter_files(&lib.pool, lib.data.path(), &ids[0])
+            .await
+            .unwrap();
+        assert!(
+            !list_one(&lib).await,
+            "intentional delete must not flag missing"
+        );
+        // Catalog metadata (page_count) survives the delete of files only.
+        let pages: (Option<i64>,) = sqlx::query_as("SELECT page_count FROM chapters WHERE id = ?1")
+            .bind(&ids[0])
+            .fetch_one(&lib.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            pages.0,
+            Some(3),
+            "page_count is catalog data, not download state"
+        );
+
+        // Simulate the external-loss path: startup/reconcile clears the
+        // offline flag but keeps the task's output_relpath proof.
+        sqlx::query("UPDATE chapters SET local_path = NULL, output_format = NULL WHERE id = ?1")
+            .bind(&ids[0])
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE download_tasks SET output_relpath = 'missing/cb1.cbz' WHERE id = 'tk-missing'",
+        )
+        .execute(&lib.pool)
+        .await
+        .unwrap();
+        assert!(list_one(&lib).await, "lost artifact must flag missing");
     }
 
     #[tokio::test]
