@@ -1,8 +1,8 @@
-import type { ChapterSummary, MangaSummary } from "../../domain/manga";
+import type { MangaSummary } from "../../domain/manga";
 import { applyDownloadAction, type DemoDownloadTask } from "../../domain/download";
 import type { ReaderPage, ReadingProgress } from "../../domain/reader";
 import { DEMO_SOURCE_PATTERN, type CatalogService, type CatalogSource } from "../catalog.service";
-import { InvalidTransitionError, type DownloadService, type QueueResult } from "../download.service";
+import { InvalidTransitionError, type DownloadService } from "../download.service";
 import type { LibraryService } from "../library.service";
 import type { ReaderService } from "../reader.service";
 import { DEFAULT_SETTINGS, SETTINGS_LIMITS, type AppSettings, type SettingsService } from "../settings.service";
@@ -123,45 +123,40 @@ export const mockLibraryService: LibraryService = {
   },
 };
 
-let taskCounter = 0;
-
 export const mockDownloadService: DownloadService = {
   async listTasks() {
     return getMockState().tasks.map((task) => ({ ...task }));
   },
 
   async queueChapters(chapterIds) {
-    const newTasks: DemoDownloadTask[] = [];
+    let added = 0;
     let skipped = 0;
-    for (const chapterId of chapterIds) {
-      const chapter: ChapterSummary | undefined = getChapter(chapterId);
-      if (!chapter) {
-        skipped += 1;
-        continue;
+    updateMockState((current) => {
+      let nextTaskSeq = current.nextTaskSeq;
+      const tasks = [...current.tasks];
+      for (const chapterId of chapterIds) {
+        const chapter = getChapter(chapterId);
+        const duplicate =
+          !chapter || tasks.some((task) => task.chapterId === chapterId && task.status !== "cancelled");
+        if (!chapter || duplicate) {
+          skipped += 1;
+          continue;
+        }
+        tasks.push({
+          id: `demo-task-${String(nextTaskSeq).padStart(3, "0")}`,
+          mangaId: chapter.mangaId,
+          chapterId: chapter.id,
+          status: "queued",
+          completedPages: 0,
+          totalPages: chapter.pageCount ?? 0,
+          createdAt: "2026-09-22T00:00:00.000Z",
+        });
+        nextTaskSeq += 1;
+        added += 1;
       }
-      const existing = getMockState().tasks.find(
-        (task) => task.chapterId === chapterId && task.status !== "cancelled",
-      );
-      if (existing) {
-        skipped += 1;
-        continue;
-      }
-      taskCounter += 1;
-      newTasks.push({
-        id: `demo-task-${taskCounter}`,
-        mangaId: chapter.mangaId,
-        chapterId: chapter.id,
-        status: "queued",
-        completedPages: 0,
-        totalPages: chapter.pageCount ?? 0,
-        createdAt: "2026-09-22T00:00:00.000Z",
-      });
-    }
-    if (newTasks.length > 0) {
-      updateMockState((current) => ({ ...current, tasks: [...current.tasks, ...newTasks] }));
-    }
-    const result: QueueResult = { added: newTasks.length, skipped };
-    return result;
+      return { ...current, tasks, nextTaskSeq };
+    });
+    return { added, skipped };
   },
 
   async transition(taskId, action) {

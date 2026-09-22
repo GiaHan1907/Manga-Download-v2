@@ -8,6 +8,7 @@ export interface MockState {
   libraryIds: string[];
   favoriteIds: string[];
   tasks: DemoDownloadTask[];
+  nextTaskSeq: number;
   readingProgress: Record<string, ReadingProgress>;
   enabledSourceIds: string[];
   settings: AppSettings;
@@ -18,6 +19,7 @@ function seedState(): MockState {
     libraryIds: [...SEED_LIBRARY_IDS],
     favoriteIds: [...SEED_FAVORITE_IDS],
     tasks: SEED_TASKS.map((task) => ({ ...task })),
+    nextTaskSeq: 1,
     readingProgress: {},
     enabledSourceIds: ["src-alpha", "src-beta"],
     settings: { ...DEFAULT_SETTINGS },

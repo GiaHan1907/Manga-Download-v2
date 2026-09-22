@@ -78,6 +78,18 @@ describe("download service", () => {
     expect(result).toEqual({ added: 0, skipped: 1 });
   });
 
+  it("generates deterministic task ids reproducible after reset", async () => {
+    await services.downloads.queueChapters(["manga-004-ch-01"]);
+    const idFirst = (await services.downloads.listTasks()).find((t) => t.chapterId === "manga-004-ch-01")?.id;
+
+    resetMockState();
+    await services.downloads.queueChapters(["manga-004-ch-01"]);
+    const idSecond = (await services.downloads.listTasks()).find((t) => t.chapterId === "manga-004-ch-01")?.id;
+
+    expect(idFirst).toBe("demo-task-001");
+    expect(idSecond).toBe(idFirst);
+  });
+
   it("applies valid transitions", async () => {
     await services.downloads.transition("task-003", "pause");
     let tasks = await services.downloads.listTasks();
