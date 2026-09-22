@@ -128,11 +128,19 @@ export default function DownloadsPage() {
       {error && <p className="queue-error" role="alert">{error}</p>}
 
       {visible.length === 0 ? (
-        <EmptyState
-          title="Chưa có tác vụ tải"
-          description="Mở một truyện đã lưu trong Library, chọn chương rồi bấm Tải để xếp hàng."
-          action={<Button to="/library" variant="primary">Tới Library</Button>}
-        />
+        tasks.length > 0 ? (
+          <EmptyState
+            title="Không có tác vụ khớp bộ lọc"
+            description={`Trong ${tasks.length} tác vụ của trang hiện tại không có trạng thái đang chọn. Đổi bộ lọc hoặc bấm Làm mới.`}
+            action={<Button variant="secondary" onClick={() => setFilter("all")}>Xem tất cả</Button>}
+          />
+        ) : (
+          <EmptyState
+            title="Chưa có tác vụ tải"
+            description="Mở một truyện đã lưu trong Library, chọn chương rồi bấm Tải để xếp hàng."
+            action={<Button to="/library" variant="primary">Tới Library</Button>}
+          />
+        )
       ) : (
         <div className="downloads-grid">
           {visible.map((task) => {

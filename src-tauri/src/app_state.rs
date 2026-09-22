@@ -9,10 +9,21 @@ use crate::sources::registry::SourceRegistry;
 /// Settings snapshot the synchronous event paths (window close handler,
 /// notification sink) read without awaiting the database. Refreshed by the
 /// settings commands right after a validated persist.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RuntimeFlags {
     pub notify_enabled: AtomicBool,
     pub close_to_tray: AtomicBool,
+}
+
+impl Default for RuntimeFlags {
+    /// Mirrors `AppSettings::default()` so documented behavior holds even
+    /// before (or if) the startup settings load lands.
+    fn default() -> Self {
+        RuntimeFlags {
+            notify_enabled: AtomicBool::new(true),
+            close_to_tray: AtomicBool::new(false),
+        }
+    }
 }
 
 impl RuntimeFlags {
@@ -43,4 +54,26 @@ pub struct AppState {
     pub app_data_dir: PathBuf,
     /// Phase 08: live mirror of notification/tray settings for sync paths.
     pub flags: Arc<RuntimeFlags>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t08_runtime_flags_mirror_settings_defaults() {
+        let flags = RuntimeFlags::default();
+        let settings = AppSettings::default();
+        assert_eq!(flags.notify_enabled(), settings.notifications_enabled);
+        assert_eq!(flags.close_to_tray(), settings.close_to_tray);
+
+        let flipped = AppSettings {
+            notifications_enabled: false,
+            close_to_tray: true,
+            ..AppSettings::default()
+        };
+        flags.apply(&flipped);
+        assert!(!flags.notify_enabled());
+        assert!(flags.close_to_tray());
+    }
 }

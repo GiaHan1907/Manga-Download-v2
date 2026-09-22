@@ -16,6 +16,7 @@ const PAGE_SIZE = 20;
 export default function FavoritesPage() {
   const [retryNonce, setRetryNonce] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
   const favoritesVersion = useDomainVersion("favorites");
   const favorites = useAsyncData(
     () => localServices.library.listFavorites({ limit: PAGE_SIZE, offset }),
@@ -23,14 +24,14 @@ export default function FavoritesPage() {
   );
 
   async function unfavorite(mangaId: string) {
+    setActionError(null);
     try {
       await localServices.library.setFavorite(mangaId, false);
       bumpDomain("favorites");
       bumpDomain("library");
       bumpDomain("home");
     } catch (error) {
-      setRetryNonce((value) => value + 1);
-      throw error;
+      setActionError(normalizeIpcError(error).message);
     }
   }
 
@@ -75,7 +76,7 @@ export default function FavoritesPage() {
                   status={manga.status}
                 />
                 <div className="library-item__actions">
-                  <Button onClick={() => void unfavorite(manga.id).catch(() => undefined)}>
+                  <Button onClick={() => void unfavorite(manga.id)}>
                     <Star size={14} aria-hidden="true" />
                     Bỏ yêu thích
                   </Button>
@@ -105,6 +106,12 @@ export default function FavoritesPage() {
             </div>
           </div>
         </>
+      )}
+
+      {actionError && (
+        <p className="queue-error" role="alert">
+          Không bỏ yêu thích được — {actionError}
+        </p>
       )}
     </div>
   );

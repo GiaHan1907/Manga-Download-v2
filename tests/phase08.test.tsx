@@ -148,7 +148,10 @@ describe("T08 cross-screen invalidation (P08-02)", () => {
   it("maps task statuses to the domains that must refetch", () => {
     expect(domainsForTaskStatus("completed")).toEqual(["downloads", "library", "home"]);
     expect(domainsForTaskStatus("failed")).toEqual(["downloads", "home"]);
-    expect(domainsForTaskStatus("downloading")).toEqual(["downloads"]);
+    // Progress frames (every ~250ms) must NOT trigger cross-screen refetch.
+    expect(domainsForTaskStatus("downloading")).toEqual([]);
+    expect(domainsForTaskStatus("queued")).toEqual([]);
+    expect(domainsForTaskStatus("verifying")).toEqual([]);
     expect(domainsForTaskStatus("bogus")).toEqual([]);
   });
 
@@ -228,16 +231,20 @@ describe("T08-15/T08-16 favorites pagination + storage panel", () => {
     );
   });
 
-  it("settings storage panel shows sizes and clears only regenerable cache", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("settings storage panel shows sizes and clears only regenerable cache (inline confirm)", async () => {
     renderAt("/settings");
     const storageText = await screen.findByText((content) =>
       content.includes("Thư viện:") && content.includes("Cache/staging"),
     );
     expect(storageText.textContent).toMatch(/xấp xỉ/);
+    // Two-step inline confirmation — no native dialog in webviews.
     fireEvent.click(screen.getByRole("button", { name: "Dọn cache tái tạo được" }));
+    expect(await screen.findByText(/Sẽ xóa staging của các tác vụ đã kết thúc/)).toBeDefined();
+    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === "clear_regenerable_cache")).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Xác nhận dọn cache tạm" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("clear_regenerable_cache"));
     expect(await screen.findByText(/Đã xóa 2 thư mục tạm/i)).toBeDefined();
-    vi.mocked(window.confirm).mockRestore?.();
   });
 });

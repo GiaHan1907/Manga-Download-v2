@@ -91,7 +91,11 @@ pub fn run() {
             );
             downloads.start();
 
-            build_tray(app.handle())?;
+            // The tray is an enhancement — a platform refusal must never
+            // brick startup (same policy as recovery/cleanup logging).
+            if let Err(error) = build_tray(app.handle()) {
+                eprintln!("system tray unavailable: {error}");
+            }
 
             app.manage(AppState {
                 db: pool,

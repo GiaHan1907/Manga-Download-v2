@@ -10,8 +10,8 @@
 | `npm test` (vitest) | **PASS — 81/81** (10 files; +5 test `phase08.test.tsx`, các test phase03/04/06 đã cập nhật theo UI Phase 08 có chủ đích) |
 | `cargo fmt --all -- --check` | **PASS** |
 | `cargo clippy --all-targets -- -D warnings` | **PASS (0 warning)** |
-| `cargo test` | **PASS — 104/104** (+3 test `t08_*`) |
-| `npm run tauri dev` (smoke) | **PASS** — chạy ~105s ổn định với **tray + tauri-plugin-notification mới**, 0 error/panic trong log, DB schema 5; đóng app chủ động |
+| `cargo test` | **PASS — 106/106** (+5 test `t08_*` gồm 2 test bổ sung ở review vòng 1/3) |
+| `npm run tauri dev` (smoke) | **PASS ×2** — baseline + sau review 3 vòng (chạy ~60–105s ổn định với **tray + tauri-plugin-notification**, 0 error/panic, DB schema 5; port 1420 sạch sau đóng) |
 | `npm run tauri build` | **NOT RUN** (gate đóng gói treo từ Phase 04 — thuộc phạm vi release, không phải Phase 08) |
 
 ## Ma trận T08-01..T08-36
@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | T08-01 | DB Phase 07 → khởi động Phase 08, không mất dữ liệu | FIXTURE | PASS | Toàn bộ `cargo test` mở pool mới qua migrations 0001–0005 (favorites/progress/tasks/settings đọc lại); smoke `tauri dev` trên DB thật |
 | T08-02 | Discover → Detail → queue với ID đúng | FIXTURE (P05/P06 hồi quy) + UI | PASS | suite phase05/phase06 cũ green; queue payload chỉ mang chapterIds |
-| T08-03 | Task completed → mọi màn cập nhật không restart | UNIT + wiring | PASS (mức wiring) | `domainsForTaskStatus("completed")` = downloads+library+home; `AppEventBridge` subscribe 1 lần; `useDomainVersion` refetch (test store). **Hiệu ứng thật end-to-end cần 2 cửa sổ / running app = NOT RUN (manual)** |
+| T08-03 | Task completed → mọi màn cập nhật không restart | UNIT + wiring | PASS (mức wiring) | `domainsForTaskStatus("completed")` = downloads+library+home; **progress frames trung gian (≥250ms/task) KHÔNG bump domain (sửa ở review vòng 2 — chống refetch flood)**; `useDomainVersion` refetch (test store). **Hiệu ứng thật end-to-end cần 2 cửa sổ / running app = NOT RUN (manual)** |
 | T08-04 | failed/cancelled phản ánh trạng thái backend | UNIT | PASS | map + snapshot-refetch; engine source-of-truth không đổi (hồi quy P06) |
 | T08-05 | Duplicate queue không nhân bản | FIXTURE | PASS | `queue_batch` dedup P06 (test cũ green) |
 | T08-06 | Mở chương offline không cần mạng | FIXTURE | PASS | `t07_cbz_manifest...`/`t07_folder_mode...` (P07), không network |

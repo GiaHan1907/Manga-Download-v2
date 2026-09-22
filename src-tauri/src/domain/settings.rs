@@ -151,6 +151,22 @@ mod tests {
     }
 
     #[test]
+    fn t08_windows_flags_merge_and_validate() {
+        let base = AppSettings::default();
+        assert!(base.notifications_enabled);
+        assert!(!base.close_to_tray);
+
+        let patch = serde_json::from_str::<super::SettingsPatchInput>(
+            "{\"notificationsEnabled\":false,\"closeToTray\":true}",
+        )
+        .unwrap();
+        let merged = base.merged_with_patch(patch);
+        assert!(!merged.notifications_enabled);
+        assert!(merged.close_to_tray);
+        assert!(merged.validate().is_ok());
+    }
+
+    #[test]
     fn serialized_keys_are_camel_case() {
         let value = serde_json::to_value(AppSettings::default()).unwrap();
         // serde_json maps are key-sorted; assert the exact camelCase set.

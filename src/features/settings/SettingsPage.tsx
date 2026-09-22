@@ -13,13 +13,18 @@ import {
 import type { AppInfo } from "../../shared/api/contracts";
 import type { CacheCleanupDto, StorageStatusDto } from "../../types/backend";
 import { formatBytes } from "../../types/downloads";
-import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { services } from "../../services/provider";
-import { SETTINGS_LIMITS, type AppSettings, type OutputFormat } from "../../services/settings.service";
+import {
+  SETTINGS_LIMITS,
+  type AppSettings,
+  type OutputFormat,
+} from "../../services/settings.service";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 
 export default function SettingsPage() {
-  const settings = useAsyncData(() => services.settings.get(), []);
+  const settingsVersion = useDomainVersion("settings");
+  const settings = useAsyncData(() => services.settings.get(), [settingsVersion]);
   const appInfo = useAsyncData<AppInfo | null>(async () => {
     try {
       return await getAppInfo();
@@ -222,6 +227,7 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
 function StoragePanel() {
   const [nonce, setNonce] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<CacheCleanupDto | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const status = useAsyncData<StorageStatusDto | null>(async () => {
@@ -233,9 +239,9 @@ function StoragePanel() {
   }, [nonce]);
 
   async function clearCache() {
-    if (!window.confirm("Xóa cache tạm (staging của tác vụ đã kết thúc + covers)? Truyện đã tải và tiến độ đọc KHÔNG bị xóa.")) {
-      return;
-    }
+    // Two-step inline confirm (native window.confirm is unreliable in
+    // embedded webviews and off-design-system).
+    setConfirming(false);
     setBusy(true);
     setResult(null);
     try {
@@ -244,7 +250,6 @@ function StoragePanel() {
       bumpDomain("downloads");
       setNonce((value) => value + 1);
     } catch (error) {
-      setResult({ removedDirs: 0, freedBytes: 0, keptActiveDirs: 0 });
       setFeedbackMessage(normalizeIpcError(error).message);
     } finally {
       setBusy(false);
@@ -276,13 +281,35 @@ function StoragePanel() {
             </p>
           )}
           <div className="settings-actions">
-            <Button variant="secondary" onClick={() => void clearCache()} disabled={busy}>
-              {busy ? "Đang dọn…" : "Dọn cache tái tạo được"}
-            </Button>
+            {confirming ? (
+              <>
+                <Button variant="primary" onClick={() => void clearCache()} disabled={busy}>
+                  Xác nhận dọn cache tạm
+                </Button>
+                <Button variant="ghost" onClick={() => setConfirming(false)}>
+                  Hủy
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="secondary"
+                onClick={() => setConfirming(true)}
+                disabled={busy}
+                aria-label="Dọn cache tái tạo được"
+              >
+                {busy ? "Đang dọn…" : "Dọn cache tái tạo được"}
+              </Button>
+            )}
             <Button variant="ghost" onClick={() => setNonce((value) => value + 1)}>
               Tính lại
             </Button>
           </div>
+          {confirming && (
+            <p className="muted" role="status">
+              Sẽ xóa staging của các tác vụ đã kết thúc + cache covers. Truyện đã tải,
+              checkpoint đang chạy và tiến độ đọc KHÔNG bị ảnh hưởng.
+            </p>
+          )}
           {result && (
             <p className="muted" role="status">
               Đã xóa {result.removedDirs} thư mục tạm ({formatBytes(result.freedBytes)}) · giữ{" "}

@@ -67,6 +67,15 @@ export default function CommandPalette() {
         } else {
           openPalette();
         }
+      } else if (open && event.key === "Escape") {
+        // Global escape: works even if focus has drifted out of the dialog.
+        event.preventDefault();
+        closePalette();
+      } else if (open && event.key === "Tab") {
+        // Focus trap: the dialog's only tabbable control is the input;
+        // Tab must not scroll behind the overlay.
+        event.preventDefault();
+        inputRef.current?.focus();
       }
     }
     window.addEventListener("keydown", onKey);
