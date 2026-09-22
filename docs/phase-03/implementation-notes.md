@@ -117,7 +117,7 @@ State khả biến: `tasks[]`, `favorites: string[]`, `libraryAdded: string[]`, 
 | Frontend build | `npm run build` | pass — 1952 modules, 356 kB JS (gzip 109.7 kB) |
 | Rust check | `cargo check` | pass — unchanged Phase 01/02 (1 dead_code warning `Internal`) |
 | Rust tests | `cargo test` | pass — 2/2 DB tests (regression intact) |
-| `npm run tauri dev` smoke | running / recorded below | see §7 |
+| `npm run tauri dev` smoke | recorded §7.1 | pass — clean launch + exit 0, no runtime errors |
 | `npm run tauri build` | not run | slow; run before release |
 
 ## 7. Test matrix T03 → evidence (automated where possible)
@@ -140,7 +140,7 @@ State khả biến: `tasks[]`, `favorites: string[]`, `libraryAdded: string[]`, 
 
 ### 7.1 Windows smoke (tauri dev)
 
-See appended result after run. Human visual checks (titlebar drag/resize, scaling, reduced-motion) remain as in Phase 02 notes.
+`npm run tauri dev` (2026-09-22): Rust compile 22.35s (chỉ warning `Internal` chủ đích), app launch `target\debug\manga-downloader-1989.exe` với Phase 03 screens, đóng cửa sổ exit code **0** — không panic, không lỗi module, không permission denial. Phase 03 không đổi Rust/config nên kết quả này đồng thời xác nhận regression T03-12 ở tầng process. Visual/keyboard sweep có chủ đích của người dùng trên hành trình demo (Home→Discover→Detail→Queue→Downloads→Library→Reader→Settings) và scaling 125–200% vẫn được khuyến nghị khi review; chưa chụp screenshot vào docs.
 
 ## 8. Mock → Phase 04–07 backend swap map
 
