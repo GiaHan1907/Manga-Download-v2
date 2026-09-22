@@ -3,12 +3,15 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
   AppSettingsDto,
+  CacheCleanupDto,
   DownloadTaskDto,
+  LibraryStatsDto,
   LocalMangaDetailDto,
   LocalMangaDto,
   PagedResult,
   ReadingProgressDto,
   SettingsPatchDto,
+  StorageStatusDto,
 } from "../../types/backend";
 import type { QueueResultDto, DownloadTaskEvent } from "../../types/downloads";
 import type {
@@ -212,6 +215,10 @@ export async function libraryDownloadedChapters(mangaId: string): Promise<{
   return invoke<{ chapters: DownloadedChapterDto[] }>("library_get_downloaded_chapters", { mangaId });
 }
 
+export async function libraryStats(): Promise<LibraryStatsDto> {
+  return invoke<LibraryStatsDto>("library_stats");
+}
+
 export async function libraryReconcile(): Promise<ReconcileReportDto> {
   return invoke<ReconcileReportDto>("library_reconcile");
 }
@@ -245,6 +252,24 @@ export async function readerGetPageBytes(
     return new Uint8Array(response);
   }
   return Uint8Array.from(response);
+}
+
+/// Approximate storage accounting and regenerable-cache cleanup (Phase 08).
+/// No absolute path ever crosses this boundary.
+export async function storageStatus(): Promise<StorageStatusDto> {
+  return invoke<StorageStatusDto>("storage_status");
+}
+
+export async function clearRegenerableCache(): Promise<CacheCleanupDto> {
+  return invoke<CacheCleanupDto>("clear_regenerable_cache");
+}
+
+/// Subscribe to tray "Open Downloads" clicks. Cleanup function MUST be
+/// dropped on unmount (same rule as download events).
+export async function subscribeTrayOpenDownloads(
+  handler: () => void,
+): Promise<UnlistenFn> {
+  return listen<unknown>("tray-open-downloads", () => handler());
 }
 
 export function normalizeIpcError(error: unknown): AppError {

@@ -53,6 +53,8 @@ mod tests {
             chapter_concurrency: chapter,
             image_concurrency: None,
             output_format: None,
+            notifications_enabled: None,
+            close_to_tray: None,
         }
     }
 

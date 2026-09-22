@@ -71,7 +71,7 @@ function runAction(actions: ReturnType<typeof useDownloadQueue>["actions"], task
 }
 
 export default function DownloadsPage() {
-  const { tasks, live, loading, error, actions, refresh } = useDownloadQueue();
+  const { tasks, live, loading, error, actions, refresh, total, offset, goPage } = useDownloadQueue();
   const [filter, setFilter] = useState<FilterId>("all");
 
   const visible = useMemo(() => {
@@ -99,10 +99,13 @@ export default function DownloadsPage() {
   return (
     <div className="page-stack">
       <section className="panel" aria-label="Tổng quan hàng đợi tải">
-        <h2 className="panel__title">Hàng đợi tải — {tasks.length} tác vụ</h2>
+        <h2 className="panel__title">
+          Hàng đợi tải — {tasks.length}/{total} tác vụ (trang {Math.floor(offset / 100) + 1})
+        </h2>
         <p className="panel__description">
-          Trạng thái, tiến độ và file đều là dữ liệu thật từ engine Rust + SQLite. Tốc độ chỉ hiện khi đo được;
-          chương chỉ báo &quot;hoàn tất&quot; sau khi mục tin đã được kiểm tra toàn vẹn.
+          Trạng thái, tiến độ và file đều là dữ liệu thật từ engine Rust + SQLite. Bộ lọc áp dụng trên
+          trang đang xem; tốc độ chỉ hiện khi đo được; chương chỉ báo &quot;hoàn tất&quot; sau khi mục
+          tin đã được kiểm tra toàn vẹn.
         </p>
         <div className="chip-row">
           {FILTERS.map((item) => (
@@ -175,6 +178,26 @@ export default function DownloadsPage() {
               </DownloadCard>
             );
           })}
+        </div>
+      )}
+
+      {total > 100 && (
+        <div className="chapter-toolbar__footer">
+          <span className="muted">
+            Trang {Math.floor(offset / 100) + 1}/{Math.ceil(total / 100)} · tổng {total} tác vụ
+          </span>
+          <div className="settings-actions">
+            <Button variant="ghost" disabled={offset === 0} onClick={() => goPage(offset - 100)}>
+              Trước
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={offset + 100 >= total}
+              onClick={() => goPage(offset + 100)}
+            >
+              Sau
+            </Button>
+          </div>
         </div>
       )}
     </div>

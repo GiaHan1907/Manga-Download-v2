@@ -8,6 +8,8 @@ export interface AppSettings {
   chapterConcurrency: number;
   imageConcurrency: number;
   outputFormat: OutputFormat;
+  notificationsEnabled: boolean;
+  closeToTray: boolean;
 }
 
 export const SETTINGS_LIMITS = {
@@ -21,6 +23,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chapterConcurrency: 2,
   imageConcurrency: 4,
   outputFormat: "cbz",
+  notificationsEnabled: true,
+  closeToTray: false,
 };
 
 export interface SettingsService {

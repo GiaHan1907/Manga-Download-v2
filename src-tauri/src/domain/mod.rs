@@ -246,6 +246,40 @@ pub struct SettingsPatchInput {
     pub chapter_concurrency: Option<i64>,
     pub image_concurrency: Option<i64>,
     pub output_format: Option<String>,
+    pub notifications_enabled: Option<bool>,
+    pub close_to_tray: Option<bool>,
+}
+
+/// Phase 08 — Home overview aggregates (single SQL pass, no N+1).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStatsDto {
+    pub saved_mangas: i64,
+    pub downloaded_chapters: i64,
+    pub local_size_bytes: i64,
+    pub favorites: i64,
+}
+
+/// Phase 08 — storage accounting. Sizes are approximate by construction
+/// (DB-recorded artifact sizes + fs walk of app-owned cache roots); no
+/// absolute paths cross the IPC boundary.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageStatusDto {
+    pub library_bytes: i64,
+    pub cache_bytes: i64,
+    pub staging_dirs: i64,
+    pub active_tasks: i64,
+    pub root_available: bool,
+    pub approximate: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheCleanupDto {
+    pub removed_dirs: i64,
+    pub freed_bytes: i64,
+    pub kept_active_dirs: i64,
 }
 
 pub fn now_iso() -> String {

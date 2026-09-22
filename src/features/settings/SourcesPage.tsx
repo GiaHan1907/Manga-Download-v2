@@ -8,6 +8,7 @@ import Tooltip from "../../components/ui/Tooltip";
 import { localServices, services } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useServicesVersion } from "../../shared/hooks/useServices";
 import type { SourceViewDto } from "../../types/source";
 
@@ -25,6 +26,8 @@ function RealSources() {
     setActionError(null);
     try {
       await action();
+      // Cross-screen: Discover's source list/filters follow registry changes.
+      bumpDomain("sources");
       setReload((n) => n + 1);
     } catch (error: unknown) {
       setActionError(normalizeIpcError(error).message);

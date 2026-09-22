@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import type { ReaderManifestDto } from "../../types/library";
 import { localServices } from "../../services/provider";
+import { bumpDomain } from "../../shared/hooks/useInvalidation";
 
 const DEBOUNCE_MS = 800;
 
@@ -45,6 +46,11 @@ export function useReaderProgress(
           pageIndex: page,
           pageTotal: pageCount,
           scrollOffset,
+        })
+        .then(() => {
+          // Cross-screen: Home/Library Continue Reading reflects the new spot.
+          bumpDomain("home");
+          bumpDomain("library");
         })
         .catch(() => undefined);
     }, DEBOUNCE_MS);

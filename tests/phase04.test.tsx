@@ -44,6 +44,12 @@ beforeEach(() => {
     if (cmd === "library_get_downloaded_chapters") {
       return Promise.resolve({ chapters: [] });
     }
+    if (cmd === "library_stats") {
+      return Promise.resolve({ savedMangas: 0, downloadedChapters: 0, localSizeBytes: 0, favorites: 0 });
+    }
+    if (cmd === "app_list_local_download_tasks") {
+      return Promise.resolve({ items: [], total: 0, limit: 5, offset: 0 });
+    }
     return Promise.reject(new Error(`Unknown command ${cmd}`));
   });
 });
@@ -65,7 +71,7 @@ describe("T04-09/T04-10 local library states", () => {
     dbAvailable = false;
     // Navigate away and back to trigger a fresh fetch against the "failed" DB.
     fireEvent.click(screen.getByRole("link", { name: "Home" }));
-    await screen.findByRole("link", { name: "Explore Manga" });
+    await screen.findByRole("link", { name: "Khám phá nguồn thật" });
     fireEvent.click(screen.getByRole("link", { name: "Library" }));
 
     expect(await screen.findByText("Không đọc được Library từ database")).toBeDefined();

@@ -13,12 +13,16 @@ pub async fn app_update_settings(
     input: SettingsPatchInput,
     state: tauri::State<'_, AppState>,
 ) -> Result<AppSettings, AppError> {
-    settings_service::apply_patch(&state.db, input).await
+    let settings = settings_service::apply_patch(&state.db, input).await?;
+    state.flags.apply(&settings);
+    Ok(settings)
 }
 
 #[tauri::command]
 pub async fn app_reset_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<AppSettings, AppError> {
-    settings_service::reset(&state.db).await
+    let settings = settings_service::reset(&state.db).await?;
+    state.flags.apply(&settings);
+    Ok(settings)
 }

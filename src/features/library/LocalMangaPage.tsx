@@ -13,6 +13,7 @@ import type { QueueResultDto } from "../../types/downloads";
 import { localServices } from "../../services/provider";
 import { formatBytes } from "../../types/downloads";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 
 const MAX_BATCH = 100;
 
@@ -27,19 +28,21 @@ export default function LocalMangaPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const libraryVersion = useDomainVersion("library");
+  const downloadsVersion = useDomainVersion("downloads");
 
   const manga = useAsyncData<LocalMangaDetailDto | null>(
     () => localServices.library.getManga(mangaId),
-    [mangaId, nonce],
+    [mangaId, nonce, libraryVersion],
   );
   const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), []);
   const downloaded = useAsyncData<DownloadedChapterDto[]>(
     () => localServices.libraryV2.downloadedChapters(mangaId),
-    [mangaId, nonce],
+    [mangaId, nonce, libraryVersion, downloadsVersion],
   );
   const progress = useAsyncData(
     () => localServices.reader.getProgress(mangaId).catch(() => null),
-    [mangaId, nonce],
+    [mangaId, nonce, libraryVersion],
   );
 
   const source = useMemo(() => {
@@ -107,6 +110,8 @@ export default function LocalMangaPage() {
       const outcome = await localServices.downloads.queue({ chapterIds: [...selected] });
       setResult(outcome);
       setSelected(new Set());
+      bumpDomain("downloads");
+      bumpDomain("home");
       setNonce((value) => value + 1);
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Không xếp hàng được.");
@@ -120,7 +125,9 @@ export default function LocalMangaPage() {
     setActionError(null);
     try {
       await localServices.library.setFavorite(detail.id, !detail.favorite);
-      setNonce((value) => value + 1);
+      bumpDomain("favorites");
+      bumpDomain("library");
+      bumpDomain("home");
     } catch (error) {
       setActionError(
         `Không cập nhật được yêu thích: ${error instanceof Error ? error.message : "lỗi IPC"}`,
@@ -135,6 +142,8 @@ export default function LocalMangaPage() {
     setConfirmDelete(null);
     try {
       await localServices.libraryV2.removeChapter(chapterId);
+      bumpDomain("library");
+      bumpDomain("home");
       setNonce((value) => value + 1);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Không xóa được.");
@@ -149,6 +158,8 @@ export default function LocalMangaPage() {
       if (outcome.failed.length > 0) {
         setActionError(`Đã xóa ${outcome.removed.length} chương, ${outcome.failed.length} chương lỗi (giữ nguyên trạng thái cũ).`);
       }
+      bumpDomain("library");
+      bumpDomain("home");
       setNonce((value) => value + 1);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Không xóa được.");

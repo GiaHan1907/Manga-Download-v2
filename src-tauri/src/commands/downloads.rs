@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use tauri::Emitter;
 
-use crate::app_state::AppState;
+use crate::app_state::{AppState, RuntimeFlags};
 use crate::db::repositories::{download_repo, task_repo};
 use crate::domain::{now_iso, DownloadTaskDto, DownloadTaskEvent, QueueErrorDto, QueueResultDto};
 use crate::downloader::progress::TaskSink;
@@ -10,20 +12,57 @@ use crate::sources::dto::Capability;
 
 /// Production sink: forwards engine events to the renderer on a fixed
 /// channel. Payload carries only persisted-safe DTO fields (design §8).
+/// Chapter-terminal transitions additionally raise a native notification
+/// (Phase 08) when the user enabled them — one per task completion/failure,
+/// never per image, and never carrying paths or URLs.
 pub struct TauriEventSink {
     handle: tauri::AppHandle,
+    flags: Arc<RuntimeFlags>,
 }
 
 impl TauriEventSink {
-    pub fn new(handle: tauri::AppHandle) -> Self {
-        TauriEventSink { handle }
+    pub fn new(handle: tauri::AppHandle, flags: Arc<RuntimeFlags>) -> Self {
+        TauriEventSink { handle, flags }
     }
 }
 
 impl TaskSink for TauriEventSink {
     fn publish(&self, event: DownloadTaskEvent) {
+        if self.flags.notify_enabled() {
+            notify_terminal(&self.handle, &event.task);
+        }
         let _ = self.handle.emit("download-task-updated", event);
     }
+}
+
+fn notify_terminal(handle: &tauri::AppHandle, task: &DownloadTaskDto) {
+    let (title, body) = match task.status.as_str() {
+        "completed" => (
+            "Download hoàn tất",
+            format!(
+                "{} — {}",
+                task.manga_title.clone().unwrap_or_default(),
+                task.chapter_title.clone().unwrap_or_default()
+            ),
+        ),
+        "failed" => (
+            "Download thất bại",
+            format!(
+                "{} — {}: {}",
+                task.manga_title.clone().unwrap_or_default(),
+                task.chapter_title.clone().unwrap_or_default(),
+                task.error_message.as_deref().unwrap_or("lỗi không rõ")
+            ),
+        ),
+        _ => return,
+    };
+    use tauri_plugin_notification::NotificationExt;
+    let _ = handle
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
 }
 
 /// Batch submit. The renderer sends chapter ids only — never page URLs,

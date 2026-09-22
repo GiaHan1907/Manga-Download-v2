@@ -10,6 +10,7 @@ import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { useServicesVersion } from "../../shared/hooks/useServices";
 import { localServices } from "../../services/provider";
 import type { LibraryFilter, LibraryMangaDto, LibrarySort } from "../../types/library";
@@ -61,6 +62,7 @@ export default function LibraryPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [reconcileNote, setReconcileNote] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(query, 300);
+  const libraryVersion = useDomainVersion("library");
 
   const page = useAsyncData(
     () =>
@@ -71,7 +73,7 @@ export default function LibraryPage() {
         limit: PAGE_SIZE,
         offset,
       }),
-    [debouncedQuery, offset, sort, filter, retryNonce, version],
+    [debouncedQuery, offset, sort, filter, retryNonce, version, libraryVersion],
   );
 
   function toggleView() {
@@ -90,7 +92,9 @@ export default function LibraryPage() {
     setActionError(null);
     try {
       await localServices.library.setFavorite(manga.id, !manga.favorite);
-      setRetryNonce((value) => value + 1);
+      bumpDomain("favorites");
+      bumpDomain("library");
+      bumpDomain("home");
     } catch (error) {
       setActionError(`${manga.title}: ${normalizeIpcError(error).message}`);
     }

@@ -1,7 +1,14 @@
 use crate::app_state::AppState;
-use crate::domain::{LibraryMangaDto, PagedResult, ReconcileReportDto, RemoveMangaFilesDto};
+use crate::domain::{
+    LibraryMangaDto, LibraryStatsDto, PagedResult, ReconcileReportDto, RemoveMangaFilesDto,
+};
 use crate::error::AppError;
 use crate::services::library_service;
+
+#[tauri::command]
+pub async fn library_stats(state: tauri::State<'_, AppState>) -> Result<LibraryStatsDto, AppError> {
+    library_service::stats(&state.db).await
+}
 
 #[tauri::command]
 pub async fn library_list(

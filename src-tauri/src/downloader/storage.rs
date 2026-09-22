@@ -134,6 +134,17 @@ pub fn chapter_file_name(
     )
 }
 
+/// Task ids are app-generated uuid-ish tokens; staging directory names must
+/// match this shape before any cleanup touches them (defense against DB
+/// pollution deleting arbitrary folders).
+pub fn valid_task_id_shape(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// A name component produced by this module must be a plain file name — no
 /// separators, no traversal, no absolute paths, no control characters.
 pub fn assert_safe_name_component(name: &str) -> Result<(), AppError> {

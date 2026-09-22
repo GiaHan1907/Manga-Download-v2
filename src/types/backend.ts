@@ -80,6 +80,32 @@ export type AppSettingsDto = {
   chapterConcurrency: number;
   imageConcurrency: number;
   outputFormat: "cbz" | "folder" | "pdf";
+  notificationsEnabled: boolean;
+  closeToTray: boolean;
+};
+
+/// Phase 08 — Home overview aggregates (library_stats).
+export type LibraryStatsDto = {
+  savedMangas: number;
+  downloadedChapters: number;
+  localSizeBytes: number;
+  favorites: number;
+};
+
+/// Phase 08 — storage accounting (approximate by contract; no paths).
+export type StorageStatusDto = {
+  libraryBytes: number;
+  cacheBytes: number;
+  stagingDirs: number;
+  activeTasks: number;
+  rootAvailable: boolean;
+  approximate: boolean;
+};
+
+export type CacheCleanupDto = {
+  removedDirs: number;
+  freedBytes: number;
+  keptActiveDirs: number;
 };
 
 export type SettingsPatchDto = Partial<AppSettingsDto>;

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
+import AppEventBridge from "../../app/AppEventBridge";
 import ErrorBoundary from "../../app/ErrorBoundary";
+import CommandPalette from "../../features/global-search/CommandPalette";
 import PageContainer from "./PageContainer";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
@@ -11,6 +13,7 @@ export default function AppShell() {
 
   return (
     <div className={`app-shell${collapsed ? " app-shell--collapsed" : ""}`}>
+      <AppEventBridge />
       <WindowTitlebar />
       <div className="app-shell__body">
         <Sidebar collapsed={collapsed} onToggleCollapsed={() => setCollapsed((value) => !value)} />
@@ -23,6 +26,7 @@ export default function AppShell() {
           </PageContainer>
         </section>
       </div>
+      <CommandPalette />
     </div>
   );
 }

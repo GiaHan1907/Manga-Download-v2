@@ -80,7 +80,7 @@ describe("T06 Downloads manager (real backend)", () => {
   it("renders real tasks with status and per-status actions", async () => {
     mockQueue([baseTask("t1", "downloading", 3), baseTask("t2", "completed", 5)]);
     renderDownloads();
-    expect(await screen.findByText(/Hàng đợi tải — 2 tác vụ/)).toBeDefined();
+    expect(await screen.findByText(/Hàng đợi tải — 2\/2 tác vụ/)).toBeDefined();
     expect(screen.getByText("Truyện t1")).toBeDefined();
     const activeCard = screen.getByText("Truyện t1").closest("article") as HTMLElement;
     const doneCard = screen.getByText("Truyện t2").closest("article") as HTMLElement;

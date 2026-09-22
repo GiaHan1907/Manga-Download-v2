@@ -3,12 +3,17 @@ import type { DownloadTaskDto } from "../../types/backend";
 import type { DownloadTaskEvent } from "../../types/downloads";
 import { downloadsApi } from "../../services/downloads.api";
 
-/// Client-side mirror of the Rust queue: an initial authoritative snapshot,
+/// Client-side mirror of the Rust queue: an authoritative snapshot per page,
 /// then merged event frames guarded by per-task `revision` so an out-of-order
 /// event can never roll back newer state. Actions refetch after the backend
-/// acknowledges (no optimistic completion — design §8.2).
+/// acknowledges (no optimistic completion — design §8.2). History beyond the
+/// page window is reachable via `offset`/`total` (bounded paging, Phase 08).
+export const QUEUE_PAGE_SIZE = 100;
+
 export function useDownloadQueue() {
   const [tasks, setTasks] = useState<DownloadTaskDto[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [live, setLive] = useState<Record<string, { bytes: number; speed: number | null }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,18 +32,19 @@ export function useDownloadQueue() {
     setLoading(true);
     setError(null);
     try {
-      const page = await downloadsApi.listTasks({ limit: 100, offset: 0 });
+      const page = await downloadsApi.listTasks({ limit: QUEUE_PAGE_SIZE, offset });
       if (!mounted.current) return;
       for (const task of page.items) {
         revisionRef.current.set(task.id, task.revision);
       }
       setTasks(page.items);
+      setTotal(page.total);
     } catch (err) {
       if (mounted.current) setError(err instanceof Error ? err.message : "Không tải được hàng đợi.");
     } finally {
       if (mounted.current) setLoading(false);
     }
-  }, []);
+  }, [offset]);
 
   useEffect(() => {
     // Deferred so the first setState happens outside the synchronous effect
@@ -112,5 +118,15 @@ export function useDownloadQueue() {
     [applyAction],
   );
 
-  return { tasks, live, loading, error, actions, refresh: () => setReloadNonce((n) => n + 1) };
+  return {
+    tasks,
+    live,
+    loading,
+    error,
+    actions,
+    total,
+    offset,
+    goPage: (nextOffset: number) => setOffset(Math.max(0, nextOffset)),
+    refresh: () => setReloadNonce((n) => n + 1),
+  };
 }

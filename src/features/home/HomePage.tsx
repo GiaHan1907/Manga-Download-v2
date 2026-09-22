@@ -1,64 +1,38 @@
-import { Compass, Link2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Compass, Download, Link2 } from "lucide-react";
+import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
-import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import SystemStatus from "../system/SystemStatus";
-import type { MangaSummary } from "../../domain/manga";
-import type { DemoDownloadTask, DownloadStatus } from "../../domain/download";
-import type { ReadingProgress } from "../../domain/reader";
-import { services } from "../../services/provider";
+import {
+  listLocalDownloadTasks,
+  libraryStats,
+  normalizeIpcError,
+} from "../../shared/api/desktop";
+import type { DownloadTaskDto, LibraryStatsDto } from "../../types/backend";
+import { formatBytes } from "../../types/downloads";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
-import { useCatalogData } from "../../shared/hooks/useCatalogData";
-import { useServicesVersion } from "../../shared/hooks/useServices";
-import ContinueReading from "./components/ContinueReading";
+import { useDomainVersion } from "../../shared/hooks/useInvalidation";
 import LocalContinueReading from "./components/LocalContinueReading";
 import StatCard from "./components/StatCard";
 
-const statusTone: Record<DownloadStatus, "success" | "warning" | "error" | "neutral"> = {
+const STAT_TONE: Partial<Record<DownloadTaskDto["status"], "success" | "warning" | "error" | "neutral">> = {
   completed: "success",
-  queued: "warning",
-  paused: "neutral",
   failed: "error",
   cancelled: "neutral",
 };
 
-interface DashboardState {
-  library: MangaSummary[];
-  tasks: DemoDownloadTask[];
-  continueReading: (ReadingProgress & { totalPages: number }) | null;
-}
-
 export default function HomePage() {
-  const version = useServicesVersion();
-  const catalog = useCatalogData();
-  const dashboard = useAsyncData<DashboardState>(async () => {
-    const [library, tasks, progressList] = await Promise.all([
-      services.library.listManga(),
-      services.downloads.listTasks(),
-      services.reader.listProgress(),
-    ]);
-    const latest = progressList[progressList.length - 1] ?? null;
-    const totalPages = latest ? (await services.reader.getPages(latest.chapterId)).length : 0;
-    return {
-      library,
-      tasks,
-      continueReading: latest ? { ...latest, totalPages } : null,
-    };
-  }, [version]);
+  const homeVersion = useDomainVersion("home");
+  const [retryNonce, setRetryNonce] = useState(0);
+  const stats = useAsyncData<LibraryStatsDto>(() => libraryStats(), [homeVersion, retryNonce]);
+  const recentTasks = useAsyncData<DownloadTaskDto[]>(
+    async () => (await listLocalDownloadTasks({ limit: 5, offset: 0 })).items,
+    [homeVersion, retryNonce],
+  );
 
-  if (catalog.state === "error" || dashboard.state === "error") {
-    return (
-      <ErrorState
-        title="Không tải được bảng điều khiển demo"
-        description="Dịch vụ dữ liệu mẫu trả về lỗi. Thử lại bằng cách reload giao diện."
-      />
-    );
-  }
-
-  if (catalog.state === "loading" || dashboard.state === "loading") {
+  if (stats.state === "loading" || recentTasks.state === "loading") {
     return (
       <div className="page-stack" aria-busy="true" aria-label="Đang tải bảng điều khiển">
         <Skeleton height="3rem" />
@@ -67,27 +41,35 @@ export default function HomePage() {
       </div>
     );
   }
-
-  const recentAdditions = [...dashboard.data.library].reverse().slice(0, 4);
-  const queuePreview = dashboard.data.tasks.slice(0, 4);
-  const continueTitle = dashboard.data.continueReading
-    ? (catalog.data.mangaById.get(dashboard.data.continueReading.mangaId)?.title ?? null)
-    : null;
+  if (stats.state === "error") {
+    return (
+      <ErrorState
+        title="Không tải được số liệu thư viện"
+        description={normalizeIpcError(stats.error).message}
+        action={
+          <Button variant="primary" onClick={() => setRetryNonce((value) => value + 1)}>
+            Thử lại
+          </Button>
+        }
+      />
+    );
+  }
 
   return (
     <div className="page-stack">
       <LocalContinueReading />
       <section className="panel home-hero">
         <div>
-          <h2 className="panel__title">Bảng điều khiển demo</h2>
+          <h2 className="panel__title">Bảng điều khiển</h2>
           <p className="panel__description">
-            Prototype Phase 03 — toàn bộ số liệu lấy từ fixture nội bộ, không có tải truyện hay tìm kiếm thật.
+            Số liệu dưới đây là dữ liệu thật từ SQLite + đĩa máy bạn (Phase 04–07). Không có fixture
+            ở màn này.
           </p>
         </div>
         <div className="home-hero__actions">
           <Button to="/discover" variant="primary">
             <Compass size={16} aria-hidden="true" />
-            Explore Manga
+            Khám phá nguồn thật
           </Button>
           <Button to="/discover?tab=url" variant="secondary">
             <Link2 size={16} aria-hidden="true" />
@@ -96,54 +78,50 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="stats-grid" aria-label="Thống kê mẫu">
-        <StatCard label="Manga trong catalog demo" value={String(catalog.data.allManga.length)} hint="Sample statistics" />
-        <StatCard label="Chương demo" value={String(catalog.data.allChapters.length)} hint="Sample statistics" />
-        <StatCard label="Tác vụ hàng đợi (demo)" value={String(dashboard.data.tasks.length)} hint="Simulated queue" />
-        <StatCard label="Dung lượng lưu trữ" value="—" hint="Not connected in UI prototype" />
+      <section className="stats-grid" aria-label="Thống kê local">
+        <StatCard label="Truyện đã lưu" value={String(stats.data.savedMangas)} hint="SQLite — mangas" />
+        <StatCard
+          label="Chương offline"
+          value={String(stats.data.downloadedChapters)}
+          hint="Artifact đã kiểm chứng"
+        />
+        <StatCard
+          label="Dung lượng thư viện"
+          value={stats.data.localSizeBytes > 0 ? formatBytes(stats.data.localSizeBytes) : "0 B"}
+          hint="approximate — từ DB sizes"
+        />
+        <StatCard label="Yêu thích" value={String(stats.data.favorites)} hint="SQLite — favorites" />
       </section>
 
-      <ContinueReading progress={dashboard.data.continueReading} title={continueTitle} />
-
-      <section aria-label="Thêm mới gần đây">
+      <section aria-label="Tác vụ tải gần đây">
         <div className="section-header">
-          <h2>Thêm gần đây (dữ liệu mẫu)</h2>
-          <Button to="/library" variant="ghost">Xem Library</Button>
+          <h2>
+            <Download size={16} aria-hidden="true" /> Tác vụ tải gần đây
+          </h2>
+          <Button to="/downloads" variant="ghost">
+            Mở Downloads
+          </Button>
         </div>
-        {recentAdditions.length === 0 ? (
-          <p className="muted">Chưa có mục nào trong thư viện demo.</p>
-        ) : (
-          <div className="card-grid">
-            {recentAdditions.map((manga) => (
-              <Link key={manga.id} to={`/manga/${manga.id}`} className="card-link">
-                <MangaCard title={manga.title} subtitle={manga.author ?? manga.sourceId} status={manga.status} coverUrl={manga.coverAsset} />
-              </Link>
-            ))}
-          </div>
+        {recentTasks.state === "error" && (
+          <p className="queue-error" role="alert">
+            {normalizeIpcError(recentTasks.error).message}
+          </p>
         )}
-      </section>
-
-      <section aria-label="Xem trước hàng đợi demo">
-        <div className="section-header">
-          <h2>Hàng đợi tải (demo)</h2>
-          <Button to="/downloads" variant="ghost">Mở Downloads</Button>
-        </div>
-        {queuePreview.length === 0 ? (
-          <p className="muted">Chưa có tác vụ demo nào.</p>
-        ) : (
+        {recentTasks.state === "success" && recentTasks.data.length === 0 && (
+          <p className="muted">Chưa có tác vụ tải nào. Lưu truyện từ Discover rồi chọn chương để tải.</p>
+        )}
+        {recentTasks.state === "success" && recentTasks.data.length > 0 && (
           <ul className="queue-preview">
-            {queuePreview.map((task) => {
-              const manga = catalog.data.mangaById.get(task.mangaId);
-              const chapter = catalog.data.chapterById.get(task.chapterId);
-              return (
-                <li key={task.id}>
-                  <Link to="/downloads" className="queue-preview__item">
-                    <span>{manga?.title ?? task.mangaId} — {chapter?.title ?? task.chapterId}</span>
-                    <StatusBadge tone={statusTone[task.status]}>{task.status}</StatusBadge>
-                  </Link>
-                </li>
-              );
-            })}
+            {recentTasks.data.map((task) => (
+              <li key={task.id}>
+                <div className="queue-preview__item">
+                  <span>
+                    {task.mangaTitle ?? task.chapterId} — {task.chapterTitle ?? task.chapterId}
+                  </span>
+                  <StatusBadge tone={STAT_TONE[task.status] ?? "warning"}>{task.status}</StatusBadge>
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </section>

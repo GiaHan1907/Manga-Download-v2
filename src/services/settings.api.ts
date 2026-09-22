@@ -10,6 +10,8 @@ function toDto(settings: AppSettings): AppSettingsDto {
     chapterConcurrency: settings.chapterConcurrency,
     imageConcurrency: settings.imageConcurrency,
     outputFormat: settings.outputFormat,
+    notificationsEnabled: settings.notificationsEnabled,
+    closeToTray: settings.closeToTray,
   };
 }
 

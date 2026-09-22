@@ -20,6 +20,10 @@ pub struct AppSettings {
     pub chapter_concurrency: i64,
     pub image_concurrency: i64,
     pub output_format: String,
+    /// Phase 08: native notifications for chapter-terminal download outcomes.
+    pub notifications_enabled: bool,
+    /// Phase 08: window close hides to tray instead of exiting.
+    pub close_to_tray: bool,
 }
 
 impl Default for AppSettings {
@@ -30,6 +34,8 @@ impl Default for AppSettings {
             chapter_concurrency: 2,
             image_concurrency: 4,
             output_format: "cbz".to_string(),
+            notifications_enabled: true,
+            close_to_tray: false,
         }
     }
 }
@@ -77,6 +83,12 @@ impl AppSettings {
         }
         if let Some(value) = patch.output_format {
             next.output_format = value;
+        }
+        if let Some(value) = patch.notifications_enabled {
+            next.notifications_enabled = value;
+        }
+        if let Some(value) = patch.close_to_tray {
+            next.close_to_tray = value;
         }
         next
     }
@@ -150,6 +162,8 @@ mod tests {
             "chapterConcurrency",
             "imageConcurrency",
             "outputFormat",
+            "notificationsEnabled",
+            "closeToTray",
         ];
         expected.sort();
         assert_eq!(keys, expected);

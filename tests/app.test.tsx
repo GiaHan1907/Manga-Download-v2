@@ -39,6 +39,17 @@ function mockHealthySystem() {
     if (cmd === "app_list_local_download_tasks") {
       return Promise.resolve({ items: [], total: 0, limit: 100, offset: 0 });
     }
+    if (cmd === "library_stats") {
+      return Promise.resolve({
+        savedMangas: 0,
+        downloadedChapters: 0,
+        localSizeBytes: 0,
+        favorites: 0,
+      });
+    }
+    if (cmd === "library_list") {
+      return Promise.resolve({ items: [], total: 0, limit: 3, offset: 0 });
+    }
     return Promise.reject(new Error("Unknown command"));
   });
 }
@@ -71,10 +82,11 @@ describe("App shell", () => {
 
     render(<App />);
 
+    // Home's authoritative stats query fails → real error state (no silent
+    // fallback to demo numbers), with the sanitized IPC message.
     await waitFor(() => {
-      expect(screen.getByText("Lỗi: INTERNAL_ERROR")).toBeDefined();
+      expect(screen.getByText("Không tải được số liệu thư viện")).toBeDefined();
     });
-
     expect(screen.getByText("Test error")).toBeDefined();
   });
 

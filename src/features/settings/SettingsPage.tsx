@@ -4,8 +4,16 @@ import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import type { ReadingDirection, ReaderMode } from "../../domain/reader";
-import { getAppInfo } from "../../shared/api/desktop";
+import {
+  clearRegenerableCache,
+  getAppInfo,
+  normalizeIpcError,
+  storageStatus,
+} from "../../shared/api/desktop";
 import type { AppInfo } from "../../shared/api/contracts";
+import type { CacheCleanupDto, StorageStatusDto } from "../../types/backend";
+import { formatBytes } from "../../types/downloads";
+import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { services } from "../../services/provider";
 import { SETTINGS_LIMITS, type AppSettings, type OutputFormat } from "../../services/settings.service";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
@@ -21,10 +29,15 @@ export default function SettingsPage() {
   }, []);
 
   if (settings.state === "loading") {
-    return <Skeleton height="20rem" label="Đang tải cài đặt demo" />;
+    return <Skeleton height="20rem" label="Đang tải cài đặt" />;
   }
   if (settings.state === "error") {
-    return <ErrorState title="Không tải được cài đặt demo" description="Mock service lỗi. Reload để thử lại." />;
+    return (
+      <ErrorState
+        title="Không tải được cài đặt"
+        description={`${normalizeIpcError(settings.error).message} — đường dẫn này là SQLite thật, không có mock.`}
+      />
+    );
   }
 
   return <SettingsForm initial={settings.data} appInfo={appInfo} />;
@@ -33,11 +46,13 @@ export default function SettingsPage() {
 function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: AsyncAppInfo }) {
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
   async function save() {
     setFeedback(null);
     try {
       await services.settings.save(draft);
+      bumpDomain("settings");
       setFeedback("Đã lưu vào SQLite — giá trị giữ nguyên qua khởi động lại.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Không thể lưu cài đặt.");
@@ -45,20 +60,31 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
   }
 
   async function reset() {
-    await services.settings.reset();
-    setDraft(await services.settings.get());
-    setFeedback("Đã khôi phục giá trị mặc định trong database.");
+    try {
+      await services.settings.reset();
+      setDraft(await services.settings.get());
+      bumpDomain("settings");
+      setFeedback("Đã khôi phục giá trị mặc định trong database.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Không thể khôi phục mặc định.");
+    }
   }
 
   return (
     <div className="page-stack settings-grid">
       <section className="panel" aria-label="Cài đặt chung">
         <h2 className="panel__title">General</h2>
-        <p className="panel__description">Chủ đề: Dark Purple — mặc định của Phase 02, chưa có light mode trong prototype.</p>
+        <p className="panel__description">
+          Chủ đề: Dark Purple — hệ token duy nhất của app (Phase 02). Light/Auto chưa được thiết kế
+          accessibility nên KHÔNG có trong settings.
+        </p>
       </section>
 
       <section className="panel" aria-label="Cài đặt reader">
         <h2 className="panel__title">Reader</h2>
+        <p className="panel__description">
+          Áp dụng cho lần MỞ chương kế tiếp (reader đang mở giữ lựa chọn phiên của nó).
+        </p>
         <label className="input-field">
           <span className="input-field__label">Chế độ đọc mặc định</span>
           <select
@@ -84,8 +110,12 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
         </label>
       </section>
 
-      <section className="panel" aria-label="Cài đặt downloads (demo)">
+      <section className="panel" aria-label="Cài đặt downloads">
         <h2 className="panel__title">Downloads</h2>
+        <p className="panel__description">
+          Engine Rust đọc các giá trị này ở mỗi nhịp lập lịch — đổi chỉ ảnh hưởng job mới, không
+          phá checkpoint đang chạy.
+        </p>
         <label className="input-field">
           <span className="input-field__label">
             Chương đồng thời ({SETTINGS_LIMITS.chapterConcurrency.min}–{SETTINGS_LIMITS.chapterConcurrency.max})
@@ -113,19 +143,46 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
           />
         </label>
         <label className="input-field">
-          <span className="input-field__label">Định dạng đầu ra</span>
+          <span className="input-field__label">Định dạng xuất mặc định</span>
           <select
             className="input"
-            value={draft.outputFormat}
+            value={draft.outputFormat === "pdf" ? "cbz" : draft.outputFormat}
             onChange={(event) => setDraft({ ...draft, outputFormat: event.target.value as OutputFormat })}
           >
-            <option value="cbz">CBZ (planned — chưa xuất thật)</option>
-            <option value="folder">Image Folder (planned — chưa ghi thật)</option>
-            <option value="pdf">PDF (planned — chưa xuất thật)</option>
+            <option value="cbz">CBZ (xuất thật — đã kiểm chứng ZIP STORE)</option>
+            <option value="folder">Thư mục ảnh (xuất thật)</option>
           </select>
         </label>
-        <p className="muted">Lưu trữ: Not connected in UI prototype — không có duyệt thư mục hay grant quyền.</p>
+        <p className="muted">
+          PDF không có trong danh sách vì engine Phase 06 không xuất PDF — chọn sẽ bị server từ chối.
+        </p>
       </section>
+
+      <section className="panel" aria-label="Cài đặt Windows">
+        <h2 className="panel__title">Windows</h2>
+        <label className="input-field input-field--check">
+          <input
+            type="checkbox"
+            checked={draft.notificationsEnabled}
+            onChange={(event) => setDraft({ ...draft, notificationsEnabled: event.target.checked })}
+          />
+          <span>Thông báo khi một chương tải xong hoặc thất bại (tổng hợp theo chương, không theo ảnh)</span>
+        </label>
+        <label className="input-field input-field--check">
+          <input
+            type="checkbox"
+            checked={draft.closeToTray}
+            onChange={(event) => setDraft({ ...draft, closeToTray: event.target.checked })}
+          />
+          <span>
+            Nút X thu nhỏ xuống system tray thay vì thoát (tray có Show/Hide · Open Downloads · Quit;
+            Quit vẫn dừng worker theo lifecycle — không hứa tải tiếp sau khi process thoát)
+          </span>
+        </label>
+        <p className="muted">Cần lưu để có hiệu lực.</p>
+      </section>
+
+      <StoragePanel />
 
       <section className="panel" aria-label="Về ứng dụng">
         <h2 className="panel__title">About</h2>
@@ -137,17 +194,21 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
           <p className="panel__description">Không đọc được thông tin app qua IPC — kiểm tra Console.</p>
         )}
         <p className="panel__description">
-          Cài đặt được lưu thật vào SQLite (Phase 04). Các giá trị export/URL worker chỉ là sở thích — engine thật thuộc Phase 05–07.
+          Mọi cài đặt ở trang này được validate trong Rust và lưu vào SQLite (Phase 04). Không có
+          control nào ở đây là mock.
         </p>
         <div className="chip-row">
           <StatusBadge tone="success">Persisted — SQLite</StatusBadge>
-          <StatusBadge tone="neutral">Session-scoped</StatusBadge>
         </div>
       </section>
 
       <div className="settings-actions">
-        <Button variant="primary" onClick={() => void save()}>Lưu (mock)</Button>
-        <Button variant="secondary" onClick={() => void reset()}>Khôi phục mặc định</Button>
+        <Button variant="primary" onClick={() => void save()} disabled={!dirty}>
+          {dirty ? "Lưu thay đổi" : "Đã lưu — không có thay đổi"}
+        </Button>
+        <Button variant="secondary" onClick={() => void reset()}>
+          Khôi phục mặc định
+        </Button>
       </div>
       {feedback && (
         <p className="muted" role="status">
@@ -155,6 +216,94 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
         </p>
       )}
     </div>
+  );
+}
+
+function StoragePanel() {
+  const [nonce, setNonce] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CacheCleanupDto | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const status = useAsyncData<StorageStatusDto | null>(async () => {
+    try {
+      return await storageStatus();
+    } catch {
+      return null;
+    }
+  }, [nonce]);
+
+  async function clearCache() {
+    if (!window.confirm("Xóa cache tạm (staging của tác vụ đã kết thúc + covers)? Truyện đã tải và tiến độ đọc KHÔNG bị xóa.")) {
+      return;
+    }
+    setBusy(true);
+    setResult(null);
+    try {
+      const outcome = await clearRegenerableCache();
+      setResult(outcome);
+      bumpDomain("downloads");
+      setNonce((value) => value + 1);
+    } catch (error) {
+      setResult({ removedDirs: 0, freedBytes: 0, keptActiveDirs: 0 });
+      setFeedbackMessage(normalizeIpcError(error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel" aria-label="Lưu trữ và cache">
+      <h2 className="panel__title">Lưu trữ</h2>
+      {status.state === "loading" && <Skeleton height="4rem" label="Đang tính dung lượng" />}
+      {status.state === "error" && (
+        <p className="queue-error" role="alert">
+          {normalizeIpcError(status.error).message}
+        </p>
+      )}
+      {status.state === "success" && status.data && (
+        <div className="storage-status">
+          <p className="panel__description">
+            Thư viện: <strong>{formatBytes(status.data.libraryBytes)}</strong> · Cache/staging:{" "}
+            <strong>{formatBytes(status.data.cacheBytes)}</strong> · {status.data.stagingDirs} thư mục
+            tạm · {status.data.activeTasks} tác vụ đang chạy. Số liệu là{" "}
+            <em>xấp xỉ</em> (theo DB + walk thư mục app-managed). Thư mục nằm trong AppData của app —
+            đường dẫn tuyệt đối không đi qua IPC.
+          </p>
+          {!status.data.rootAvailable && (
+            <p className="queue-error" role="alert">
+              Không đọc được thư mục library (ổ đĩa bị ngắt?) — việc đọc/tải offline sẽ báo lỗi cho tới
+              khi root khả dụng lại.
+            </p>
+          )}
+          <div className="settings-actions">
+            <Button variant="secondary" onClick={() => void clearCache()} disabled={busy}>
+              {busy ? "Đang dọn…" : "Dọn cache tái tạo được"}
+            </Button>
+            <Button variant="ghost" onClick={() => setNonce((value) => value + 1)}>
+              Tính lại
+            </Button>
+          </div>
+          {result && (
+            <p className="muted" role="status">
+              Đã xóa {result.removedDirs} thư mục tạm ({formatBytes(result.freedBytes)}) · giữ{" "}
+              {result.keptActiveDirs} thư mục của tác vụ đang chạy.
+            </p>
+          )}
+          {feedbackMessage && (
+            <p className="queue-error" role="alert">
+              {feedbackMessage}
+            </p>
+          )}
+        </div>
+      )}
+      {status.state === "success" && !status.data && (
+        <p className="muted">Không đọc được trạng thái lưu trữ — thử lại sau.</p>
+      )}
+      <p className="muted">
+        Policy: không đổi được thư mục library ở Phase 08 (đảm bảo file cũ không bị mồ côi); không có
+        nút "mở thư mục" vì shell capability chưa được cấp.
+      </p>
+    </section>
   );
 }
 

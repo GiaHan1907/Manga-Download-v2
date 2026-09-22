@@ -8,6 +8,7 @@ import Tooltip from "../../components/ui/Tooltip";
 import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import type { SaveResultDto } from "../../types/source";
 
 type SaveState =
@@ -37,6 +38,9 @@ export default function RemoteDetailPage() {
     try {
       const result = await localServices.source.save({ sourceId, sourceMangaId });
       setSaveState({ status: "done", result });
+      // Cross-screen: Library/Home now include the newly saved manga.
+      bumpDomain("library");
+      bumpDomain("home");
       setRefresh((n) => n + 1);
     } catch (error: unknown) {
       setSaveState({ status: "error", message: normalizeIpcError(error).message });

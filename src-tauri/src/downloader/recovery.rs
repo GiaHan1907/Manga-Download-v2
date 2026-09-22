@@ -43,7 +43,7 @@ pub async fn reconcile_startup(
     .fetch_all(pool)
     .await?;
     for (task_id,) in unfinished {
-        if !valid_task_id_shape(&task_id) {
+        if !storage::valid_task_id_shape(&task_id) {
             continue;
         }
         let staging = storage::task_staging_dir(app_data_dir, &task_id);
@@ -78,14 +78,6 @@ pub async fn reconcile_startup(
         }
     }
     Ok(report)
-}
-
-fn valid_task_id_shape(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn count_parts(dir: &Path) -> usize {

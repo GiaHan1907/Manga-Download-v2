@@ -9,7 +9,8 @@ use sqlx::Row;
 use sqlx::SqlitePool;
 
 use crate::domain::{
-    now_iso, LibraryMangaDto, LibraryProgressDto, ReconcileReportDto, RemoveMangaFilesDto,
+    now_iso, LibraryMangaDto, LibraryProgressDto, LibraryStatsDto, ReconcileReportDto,
+    RemoveMangaFilesDto,
 };
 use crate::downloader::storage;
 use crate::error::{AppError, LibraryError};
@@ -69,10 +70,10 @@ pub async fn list_mangas(
          (SELECT COUNT(*) FROM chapters c WHERE c.manga_id = m.id) AS total_chapters, \
          (SELECT SUM(c.local_size_bytes) FROM chapters c WHERE c.manga_id = m.id AND c.local_path IS NOT NULL) AS local_size_bytes, \
          (SELECT MAX(c.updated_at) FROM chapters c WHERE c.manga_id = m.id AND c.local_path IS NOT NULL) AS last_download_at, \
-         (SELECT rp.chapter_id FROM reading_progress rp WHERE rp.manga_id = m.id) AS progress_chapter_id, \
-         (SELECT rp.page_index FROM reading_progress rp WHERE rp.manga_id = m.id) AS progress_page_index, \
-         (SELECT rp.page_total FROM reading_progress rp WHERE rp.manga_id = m.id) AS progress_page_total, \
-         (SELECT rp.updated_at FROM reading_progress rp WHERE rp.manga_id = m.id) AS progress_updated_at, \
+         (SELECT rp.chapter_id FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_chapter_id, \
+         (SELECT rp.page_index FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_page_index, \
+         (SELECT rp.page_total FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_page_total, \
+         (SELECT rp.updated_at FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_updated_at, \
          EXISTS (SELECT 1 FROM download_tasks dt JOIN chapters c ON c.id = dt.chapter_id \
                  WHERE c.manga_id = m.id AND dt.status = 'completed' AND c.local_path IS NULL) AS has_missing \
          FROM mangas m";
@@ -131,6 +132,24 @@ pub async fn list_mangas(
         })
         .collect::<Result<Vec<_>, AppError>>()?;
     Ok((items, total))
+}
+
+/// Phase 08 Home overview — one aggregate pass, all from persisted truth.
+pub async fn stats(pool: &SqlitePool) -> Result<LibraryStatsDto, AppError> {
+    let row = sqlx::query(
+        "SELECT (SELECT COUNT(*) FROM mangas) AS saved_mangas, \
+                (SELECT COUNT(*) FROM chapters WHERE local_path IS NOT NULL) AS downloaded_chapters, \
+                (SELECT IFNULL(SUM(local_size_bytes), 0) FROM chapters WHERE local_path IS NOT NULL) AS local_size_bytes, \
+                (SELECT COUNT(*) FROM favorites) AS favorites",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(LibraryStatsDto {
+        saved_mangas: row.try_get("saved_mangas")?,
+        downloaded_chapters: row.try_get("downloaded_chapters")?,
+        local_size_bytes: row.try_get("local_size_bytes")?,
+        favorites: row.try_get("favorites")?,
+    })
 }
 
 /// A chapter row with a presence-checked artifact flag (bounded fs per call).
@@ -513,5 +532,42 @@ mod tests {
         // c1 removed (real file); c2 fails (recorded file already missing).
         assert_eq!(result.removed.len(), 1);
         assert_eq!(result.failed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn t08_stats_and_progress_fallback_when_chapter_not_downloaded() {
+        let (lib, manga_a, chapters) = seeded().await;
+        let s = stats(&lib.pool).await.unwrap();
+        assert_eq!(s.saved_mangas, 2);
+        assert_eq!(s.downloaded_chapters, 2);
+        assert!(s.local_size_bytes >= 0);
+        assert_eq!(s.favorites, 1);
+
+        // Progress on a chapter WITHOUT a local artifact must not surface
+        // (Continue Reading would dead-end into a missing file).
+        crate::db::repositories::progress_repo::save_progress(
+            &lib.pool,
+            &manga_a,
+            &chapters[3],
+            5,
+            None,
+            Some(10),
+        )
+        .await
+        .unwrap();
+        let all = list_all(&lib, "all").await;
+        let a = all.iter().find(|m| m.id == manga_a).unwrap();
+        assert!(a.progress.is_none(), "undownloaded progress chapter hidden");
+        // And it reappears once the chapter is downloaded again.
+        testkit::build_cbz(
+            &lib.data.path().join("stg2"),
+            &lib.library(),
+            "ma/c4.cbz",
+            2,
+        );
+        testkit::mark_downloaded(&lib.pool, &chapters[3], "ma/c4.cbz", "cbz").await;
+        let all = list_all(&lib, "all").await;
+        let a = all.iter().find(|m| m.id == manga_a).unwrap();
+        assert_eq!(a.progress.as_ref().map(|p| p.page_index), Some(5));
     }
 }

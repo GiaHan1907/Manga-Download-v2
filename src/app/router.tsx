@@ -27,9 +27,16 @@ export function AppRoutes() {
         <Route path="/downloads" element={<DownloadsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/sources" element={<SourcesPage />} />
-        <Route path="/manga/:mangaId" element={<MangaDetailPage />} />
+        {/* Plan §2.7: mock-backed sandbox routes exist only in dev builds; in
+            production they fall through to NotFound instead of rendering
+            fixture data that could be mistaken for real content. */}
+        {import.meta.env.DEV && (
+          <>
+            <Route path="/manga/:mangaId" element={<MangaDetailPage />} />
+            <Route path="/reader/:mangaId/:chapterId" element={<ReaderPage />} />
+          </>
+        )}
         <Route path="/remote/:sourceId/:sourceMangaId" element={<RemoteDetailPage />} />
-        <Route path="/reader/:mangaId/:chapterId" element={<ReaderPage />} />
         <Route path="/read/:chapterId" element={<ReadPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
@@ -49,7 +56,7 @@ function NotFoundPage() {
   return (
     <ErrorState
       title="Không tìm thấy trang"
-      description="Route này không tồn tại trong prototype Phase 03. Hãy quay về Home hoặc chọn một mục trong sidebar."
+      description="Route này không tồn tại (các sandbox demo chỉ có ở bản dev). Hãy quay về Home hoặc chọn một mục trong sidebar."
       action={<Button to="/" variant="primary">Về Home</Button>}
     />
   );

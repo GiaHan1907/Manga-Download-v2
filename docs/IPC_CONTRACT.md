@@ -1,4 +1,4 @@
-# IPC Contract — React ↔ Rust (Phase 04 + 05 + 06 + 07)
+# IPC Contract — React ↔ Rust (Phase 04 + 05 + 06 + 07 + 08)
 
 Mọi lời gọi phía frontend đi qua `src/shared/api/desktop.ts` (duy nhất). Tham số và payload serialized **camelCase**; command Rust khai báo snake_case, Tauri tự map. Lỗi trả về luôn là envelope đã kiểm chứng, không bao giờ raw SQL/path/stack.
 
@@ -75,6 +75,22 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `reader_get_page_bytes` | `{ chapterId, pageIndex }` | **binary** (`ipc::Response` → JS `ArrayBuffer`) | 1 trang/lần, cap 20MB; entry archive là basename-only; magic-check; `PAGE_RESOURCE_NOT_FOUND` |
 
 `app_list_local_download_tasks`… (Phase 06 giữ nguyên). Reader page: UI dùng `URL.createObjectURL` blob có thu hồi; CSP `img-src` thêm `blob:` (duyệt trong Phase 07); capabilities không đổi.
+
+## Commands Phase 08 — integration, storage & Windows (id-only, approximate sizes)
+
+| Command | Input | Output | Ghi chú |
+|---|---|---|---|
+| `library_stats` | — | `LibraryStatsDto { savedMangas, downloadedChapters, localSizeBytes, favorites }` | 1 SQL aggregate cho Home thật; không N+1 |
+| `storage_status` | — | `StorageStatusDto { libraryBytes, cacheBytes, stagingDirs, activeTasks, rootAvailable, approximate:true }` | kích thước từ DB + walk root app-owned; symlink bỏ qua; **không absolute path** |
+| `clear_regenerable_cache` | — | `CacheCleanupDto { removedDirs, freedBytes, keptActiveDirs }` | chỉ staging của task terminal/unknown + covers; active-set chặn tuyệt đối; idempotent; cũng chạy tự động ở startup sau recovery |
+
+**Settings keys mới** (`AppSettingsDto`): `notificationsEnabled` (bool, default true) — Rust notify theo chapter-terminal; `closeToTray` (bool, default false) — X ẩn cửa sổ. Validate trong `domain/settings.rs`; `RuntimeFlags` mirror cho sync path; command save/reset đồng bộ flag sau persist. UI bỏ option `pdf` (engine vẫn từ chối pdf tại queue như cũ).
+
+**Event** `tray-open-downloads` → payload rỗng: tín hiệu điều hướng từ tray menu; subscribe qua `desktop.subscribeTrayOpenDownloads()`, unlisten khi teardown (bridge duy nhất cấp app).
+
+**Invalidation frontend:** `src/shared/hooks/useInvalidation.ts` — 7 domain transient (`home/library/favorites/downloads/progress/settings/sources`); event/status mutation CHỈ bump domain, screens refetch snapshot từ Rust. Không phải kênh dữ liệu mới — không thêm IPC.
+
+Capabilities KHÔNG đổi (notification gọi từ Rust, không qua IPC permission).
 
 ## DTO định nghĩa tại `src/types/backend.ts`
 

@@ -2,14 +2,16 @@ import { History } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import { localServices } from "../../../services/provider";
 import { useAsyncData } from "../../../shared/hooks/useAsyncData";
+import { useDomainVersion } from "../../../shared/hooks/useInvalidation";
 import type { LibraryMangaDto } from "../../../types/library";
 
 /// Real (SQLite-backed) Continue Reading strip — last-read manga with saved
-/// progress. Separate from the labeled demo panel below it on Home.
+/// progress. Refetches whenever another screen bumps the `home` domain.
 export default function LocalContinueReading() {
+  const homeVersion = useDomainVersion("home");
   const page = useAsyncData(
     () => localServices.libraryV2.list({ sort: "lastRead", filter: "downloaded", limit: 3, offset: 0 }),
-    [],
+    [homeVersion],
   );
   if (page.state !== "success") {
     return null;

@@ -25,6 +25,8 @@ const DEFAULT_SETTINGS = {
   chapterConcurrency: 2,
   imageConcurrency: 4,
   outputFormat: "cbz",
+  notificationsEnabled: true,
+  closeToTray: false,
 };
 
 function installBackendMock() {
@@ -35,6 +37,24 @@ function installBackendMock() {
         return Promise.resolve({ name: "Manga Downloader 1989", version: "0.1.0", platform: "windows" });
       case "app_health_check":
         return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 2 });
+      case "library_stats":
+        return Promise.resolve({
+          savedMangas: 3,
+          downloadedChapters: 7,
+          localSizeBytes: 12345,
+          favorites: 2,
+        });
+      case "app_list_local_download_tasks":
+        return Promise.resolve({ items: [], total: 0, limit: 5, offset: 0 });
+      case "storage_status":
+        return Promise.resolve({
+          libraryBytes: 12345,
+          cacheBytes: 0,
+          stagingDirs: 0,
+          activeTasks: 0,
+          rootAvailable: true,
+          approximate: true,
+        });
       case "app_get_settings":
         return Promise.resolve({ ...state.settings });
       case "app_update_settings": {
@@ -86,20 +106,21 @@ beforeEach(() => {
   installBackendMock();
 });
 
-describe("T03-01/T03-02 Home demo journey", () => {
-  it("navigates from Explore Manga to Discover", async () => {
+describe("T03-01/T03-02 Home journey (real data since Phase 08)", () => {
+  it("navigates from the real Discover CTA to Discover", async () => {
     renderAt("/");
-    const explore = await screen.findByRole("link", { name: "Explore Manga" });
+    const explore = await screen.findByRole("link", { name: "Khám phá nguồn thật" });
     fireEvent.click(explore);
     expect(await screen.findByRole("heading", { name: "Discover" })).toBeDefined();
   });
 
-  it("derives stats from mock state and flags demo", async () => {
+  it("renders stats from the real library_stats command, with no fixture claims", async () => {
     renderAt("/");
-    const stats = await screen.findByLabelText("Thống kê mẫu");
-    expect(within(stats).getByText("8")).toBeDefined();
-    expect(screen.getByText("Prototype · Demo + Local")).toBeDefined();
-    expect(screen.getByText("Not connected in UI prototype")).toBeDefined();
+    const stats = await screen.findByLabelText("Thống kê local");
+    expect(within(stats).getByText("7")).toBeDefined();
+    expect(within(stats).getByText("3")).toBeDefined();
+    expect(screen.getByText(/Không có fixture ở màn này/)).toBeDefined();
+    expect(screen.queryByText(/dữ liệu mẫu/)).toBeNull();
   });
 
   it("shows health with schema version (T04-13 regression)", async () => {
@@ -157,8 +178,8 @@ describe("T03-05/T03-06 demo detail, queue, favorites and local boundary", () =>
   });
 });
 
-describe("T03-08 Reader", () => {
-  it("navigates pages with bounds, keeps progress for Home", async () => {
+describe("T03-08 Reader (dev sandbox)", () => {
+  it("navigates pages with bounds and records mock progress", async () => {
     renderAt("/reader/manga-001/manga-001-ch-01");
     expect(await screen.findByText(/Trang 1\/4/)).toBeDefined();
 
@@ -176,9 +197,6 @@ describe("T03-08 Reader", () => {
       const progress = await services.reader.getProgress("manga-001");
       expect(progress?.page).toBe(1);
     });
-
-    fireEvent.click(screen.getByRole("link", { name: "Home" }));
-    expect(await screen.findByText(/Trang 2\/4/)).toBeDefined();
   });
 
   it("shows fallback for chapters without sample pages", async () => {
@@ -199,7 +217,7 @@ describe("T03-08/T04 Settings and Sources", () => {
     renderAt("/settings");
     const chapterInput = await screen.findByLabelText(/Chương đồng thời/);
     fireEvent.change(chapterInput, { target: { value: "9" } });
-    fireEvent.click(screen.getByRole("button", { name: "Lưu (mock)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
     expect((await screen.findByRole("status")).textContent).toMatch(/số nguyên từ 1 đến 5/);
   });
 
@@ -208,7 +226,7 @@ describe("T03-08/T04 Settings and Sources", () => {
     renderAt("/settings");
     const chapterInput = await screen.findByLabelText(/Chương đồng thời/);
     fireEvent.change(chapterInput, { target: { value: "4" } });
-    const saveButton = screen.getByRole("button", { name: "Lưu (mock)" });
+    const saveButton = screen.getByRole("button", { name: "Lưu thay đổi" });
     fireEvent.click(saveButton);
     expect((await screen.findByRole("status")).textContent).toMatch(/Đã lưu vào SQLite/);
     await waitFor(() => expect(backend.settings.chapterConcurrency).toBe(4));
@@ -232,7 +250,7 @@ describe("T03-08/T04 Settings and Sources", () => {
     fireEvent.click(betaToggle);
 
     fireEvent.click(screen.getByRole("link", { name: "Discover" }));
-    fireEvent.click(await screen.findByRole("tab", { name: "Demo sandbox" }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Demo sandbox/ }));
     const input = await screen.findByPlaceholderText(/Nhập tên, tác giả/);
 
     fireEvent.change(input, { target: { value: "kỷ nguyên" } });

@@ -10,16 +10,21 @@ import StatusBadge from "../../components/ui/StatusBadge";
 import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { useDomainVersion } from "../../shared/hooks/useInvalidation";
 import type { SearchResultDto, SourceViewDto } from "../../types/source";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 
-export default function LiveSearchPanel() {
-  const [query, setQuery] = useState("");
+export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState<string[]>([]);
   const [reload, setReload] = useState(0);
+  const sourcesVersion = useDomainVersion("sources");
   const debounced = useDebouncedValue(query.trim(), 300);
 
-  const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [reload]);
+  const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [
+    reload,
+    sourcesVersion,
+  ]);
 
   const searchable =
     sources.state === "success"

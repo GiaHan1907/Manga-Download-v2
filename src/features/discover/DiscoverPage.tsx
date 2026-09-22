@@ -136,19 +136,35 @@ function DemoSandbox({ initialTab }: { initialTab: string }) {
 export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
   const requested = searchParams.get("tab") ?? "search";
-  const initialTab = requested === "url" || requested === "search" ? requested : "demo";
+  const onlineQuery = searchParams.get("q") ?? "";
+  // Plan §2.7: demo fixture sandbox is dev-build only — never rendered in a
+  // production app where it could be mistaken for real sources.
+  const demoEnabled = import.meta.env.DEV;
+  const initialTab =
+    requested === "url" ||
+    requested === "search" ||
+    (demoEnabled && (requested === "demo" || requested === "demo-url"))
+      ? requested === "demo-url"
+        ? "demo"
+        : requested
+      : "search";
   const demoInitialTab = requested === "url" || requested === "demo-url" ? "url" : "search";
+
+  const items = [
+    { id: "search", label: "Tìm kiếm (thật)", content: <LiveSearchPanel initialQuery={onlineQuery} /> },
+    { id: "url", label: "Import URL (thật)", content: <LiveUrlImportPanel /> },
+  ];
+  if (demoEnabled) {
+    items.push({
+      id: "demo",
+      label: "Demo sandbox (dev)",
+      content: <DemoSandbox initialTab={demoInitialTab} />,
+    });
+  }
 
   return (
     <div className="page-stack">
-      <Tabs
-        defaultValue={initialTab}
-        items={[
-          { id: "search", label: "Tìm kiếm (thật)", content: <LiveSearchPanel /> },
-          { id: "url", label: "Import URL (thật)", content: <LiveUrlImportPanel /> },
-          { id: "demo", label: "Demo sandbox", content: <DemoSandbox initialTab={demoInitialTab} /> },
-        ]}
-      />
+      <Tabs defaultValue={initialTab} items={items} />
     </div>
   );
 }
