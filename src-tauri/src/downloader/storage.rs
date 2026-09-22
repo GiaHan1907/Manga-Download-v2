@@ -260,6 +260,21 @@ mod tests {
     }
 
     #[test]
+    fn t09_unicode_titles_produce_safe_path_components() {
+        // Vietnamese + punctuation + reserved-word collisions must all come
+        // out as plain, ASCII-safe, component-valid names.
+        let slug = sanitize_label("Ninja Loạn Thị — Tập 1000: FINAL!?");
+        assert!(assert_safe_name_component(&slug).is_ok(), "{slug}");
+        let dir = manga_dir_name("Đảo Hải Tặc VOL.99", "abc-123");
+        assert!(assert_safe_name_component(&dir).is_ok(), "{dir}");
+        assert!(dir.is_ascii());
+        // Reserved device names with unicode context still get neutralized.
+        let reserved = sanitize_label("NUL tập 1");
+        assert!(assert_safe_name_component(&reserved).is_ok());
+        assert!(!reserved.is_empty());
+    }
+
+    #[test]
     fn relpath_rejects_traversal_and_absolute() {
         assert!(validate_relpath("manga-1/ch-2-t3.cbz").is_ok());
         assert!(validate_relpath("../escape.cbz").is_err());

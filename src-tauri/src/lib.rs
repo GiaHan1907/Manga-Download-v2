@@ -4,6 +4,8 @@ mod db;
 mod domain;
 mod downloader;
 mod error;
+#[cfg(test)]
+mod perf;
 mod reader;
 mod services;
 mod sources;
@@ -41,7 +43,7 @@ pub fn run() {
             // Storage-root preparation is recoverable: log and continue rather
             // than failing startup for directories no feature needs yet.
             if let Err(error) = services::storage_service::prepare(&app_data_dir) {
-                eprintln!("storage preparation skipped: {error}");
+                eprintln!("storage preparation skipped: {:?}", error.kind());
             }
             let rows =
                 tauri::async_runtime::block_on(db::repositories::source_repo::list_sources(&pool))?;

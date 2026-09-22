@@ -228,4 +228,47 @@ mod tests {
             .is_err());
         conn.close().await.unwrap();
     }
+
+    /// T09-28: concurrent writers on the shared pool must serialize via
+    /// busy_timeout — no SQLITE_BUSY escapes to the user, no lost updates.
+    #[tokio::test]
+    async fn t09_concurrent_writers_serialize_without_busy_errors() {
+        let (_dir, pool) = test_pool().await;
+        let ts = crate::domain::now_iso();
+        sqlx::query(
+            "INSERT INTO app_settings (key, value_json, updated_at) VALUES ('busy-k', '0', ?1)",
+        )
+        .bind(&ts)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut handles = Vec::new();
+        for index in 0..8u32 {
+            let pool = pool.clone();
+            handles.push(tokio::spawn(async move {
+                sqlx::query("UPDATE app_settings SET value_json = ?2 WHERE key = 'busy-k'")
+                    .bind(index)
+                    .bind(format!("\"{index}\""))
+                    .execute(&pool)
+                    .await
+            }));
+        }
+        for handle in handles {
+            handle
+                .await
+                .unwrap()
+                .expect("busy_timeout must absorb contention");
+        }
+        let value: (String,) =
+            sqlx::query_as("SELECT value_json FROM app_settings WHERE key='busy-k'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            value.0.starts_with('"') && value.0.len() == 3,
+            "one final value: {}",
+            value.0
+        );
+    }
 }

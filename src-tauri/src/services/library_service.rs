@@ -313,8 +313,12 @@ pub async fn remove_chapter_files(
         std::fs::remove_file(&artifact)
     };
     if let Err(error) = delete_result {
-        // Filesystem still authoritative: keep DB flags intact.
-        eprintln!("chapter artifact delete failed for {chapter_id}: {error}");
+        // Filesystem still authoritative: keep DB flags intact. Log only the
+        // error KIND — io::Error Display can embed the absolute path.
+        eprintln!(
+            "chapter artifact delete failed for {chapter_id}: {:?}",
+            error.kind()
+        );
         return Err(LibraryError::DeleteFailed.into());
     }
     sqlx::query(

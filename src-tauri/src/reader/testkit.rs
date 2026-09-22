@@ -25,7 +25,8 @@ fn page_sets(count: usize) -> (Vec<String>, Vec<String>, Vec<Vec<u8>>) {
     let blobs: Vec<Vec<u8>> = names
         .iter()
         .enumerate()
-        .map(|(index, _)| png_bytes(index as u8 + 1, 40, 60))
+        // (index % 250) + 1: a 300-page fixture must not overflow the u8 seed.
+        .map(|(index, _)| png_bytes((index % 250) as u8 + 1, 40, 60))
         .collect();
     let checksums: Vec<String> = blobs.iter().map(|b| crc32_hex(b)).collect();
     (names, checksums, blobs)

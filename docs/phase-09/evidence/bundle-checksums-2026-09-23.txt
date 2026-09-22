@@ -1,0 +1,2 @@
+449447131ff3ef5328ee3a99cdb82f5621da6d5244d209df215a8614bb92fe82 *msi/Manga Downloader 1989_0.1.0_x64_en-US.msi
+04610637516d7c8f8a34dbfb5671ac3bb02767950a0b79d56804f5cf0c54a824 *nsis/Manga Downloader 1989_0.1.0_x64-setup.exe

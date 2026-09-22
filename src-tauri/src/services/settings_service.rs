@@ -80,4 +80,24 @@ mod tests {
         let reset = reset(&reopened).await.unwrap();
         assert_eq!(reset, AppSettings::default());
     }
+
+    #[tokio::test]
+    async fn t09_corrupt_stored_blob_falls_back_to_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::init_pool(dir.path()).await.unwrap();
+        // Simulate a half-written / hand-tampered settings row.
+        crate::db::repositories::settings_repo::upsert_json(
+            &pool,
+            SETTINGS_KEY,
+            "{ not valid json !!",
+            &crate::domain::now_iso(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(load(&pool).await.unwrap(), AppSettings::default());
+        // A patched write repairs storage through the normal path.
+        let updated = apply_patch(&pool, patch(None)).await.unwrap();
+        assert_eq!(updated, AppSettings::default());
+        assert_eq!(load(&pool).await.unwrap(), AppSettings::default());
+    }
 }

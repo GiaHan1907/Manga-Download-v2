@@ -449,4 +449,91 @@ mod tests {
             Err(SourceError::Network)
         ));
     }
+
+    #[test]
+    fn t09_classify_status_maps_http_codes_and_retry_after() {
+        use reqwest::StatusCode;
+        let classify = GuardedHttp::classify_status;
+        assert!(matches!(
+            classify(StatusCode::UNAUTHORIZED, None),
+            SourceError::PermissionDenied
+        ));
+        assert!(matches!(
+            classify(StatusCode::FORBIDDEN, None),
+            SourceError::PermissionDenied
+        ));
+        assert!(matches!(
+            classify(StatusCode::NOT_FOUND, None),
+            SourceError::NotFound
+        ));
+        assert!(matches!(
+            classify(StatusCode::TOO_MANY_REQUESTS, Some("120".into())),
+            SourceError::RateLimited(ref value) if value == "120"
+        ));
+        // Missing Retry-After still yields a retryable RateLimited marker.
+        assert!(matches!(
+            classify(StatusCode::TOO_MANY_REQUESTS, None),
+            SourceError::RateLimited(_)
+        ));
+        assert!(matches!(
+            classify(StatusCode::INTERNAL_SERVER_ERROR, None),
+            SourceError::Upstream
+        ));
+        assert!(matches!(
+            classify(StatusCode::IM_A_TEAPOT, None),
+            SourceError::Upstream
+        ));
+    }
+
+    #[test]
+    fn t09_dns_guard_rejects_private_literals_and_unresolvable_hosts() {
+        let policy = mangadex_policy();
+        // Private/loopback/metadata hosts fail even before any connection.
+        for url in [
+            "https://127.0.0.1/manga",
+            "https://10.1.2.3/manga",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]/manga",
+        ] {
+            let parsed = Url::parse(url).unwrap();
+            assert!(
+                matches!(
+                    policy.assert_resolved_addresses_public(&parsed),
+                    Err(SourceError::Network)
+                ),
+                "{url} must not resolve-fail-open"
+            );
+        }
+        // A guaranteed-NXDOMAIN host must error, never fall through silently.
+        let parsed = Url::parse("https://nonexistent-host-for-p09.invalid/").unwrap();
+        assert!(policy.assert_resolved_addresses_public(&parsed).is_err());
+    }
+
+    #[tokio::test]
+    async fn t09_per_host_pacing_enforces_minimum_spacing() {
+        let g = guarded();
+        g.pace().await; // first call: no history
+        let start = Instant::now();
+        g.pace().await; // second call must wait ~MIN_REQUEST_SPACING
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= MIN_REQUEST_SPACING - Duration::from_millis(400),
+            "pacing leaked: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn t09_mock_byte_transport_enforces_size_cap() {
+        let transport = Arc::new(mock::MockTransport::with(vec![
+            Ok("0123456789"),
+            Ok("0123456789"),
+        ]));
+        let oversize = transport.get_bytes("https://api.mangadex.org/x", 4).await;
+        assert!(matches!(oversize, Err(SourceError::Parse)));
+        let ok = transport
+            .get_bytes("https://api.mangadex.org/x", 1024)
+            .await
+            .unwrap();
+        assert_eq!(ok.len(), 10);
+    }
 }

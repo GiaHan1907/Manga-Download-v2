@@ -1,0 +1,16 @@
+# Gate outputs (verbatim tails) — Phase 09 candidate, 2026-09-23
+
+## cargo test
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.57s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## vitest
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m81 passed[39m[22m[90m (81)[39m
+
+## clippy/fmt
+FMT_OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.58s
+
+## perf numbers

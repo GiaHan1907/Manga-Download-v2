@@ -90,8 +90,8 @@ pub async fn clear_regenerable_cache(
                     report.freed_bytes += size as i64;
                 }
                 // Locked/partially-removed staging stays for the next pass —
-                // cleanup is idempotent by design.
-                Err(error) => eprintln!("staging cleanup skipped {name}: {error}"),
+                // cleanup is idempotent by design. Kind only: no paths in logs.
+                Err(error) => eprintln!("staging cleanup skipped {name}: {:?}", error.kind()),
             }
         }
     }
