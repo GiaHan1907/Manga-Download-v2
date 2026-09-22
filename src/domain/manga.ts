@@ -31,7 +31,3 @@ export interface MangaSource {
   demo: true;
   enabledByDefault: boolean;
 }
-
-export function formatChapterLabel(chapter: ChapterSummary): string {
-  return chapter.number !== undefined ? `Chapter ${chapter.number} — ${chapter.title}` : chapter.title;
-}

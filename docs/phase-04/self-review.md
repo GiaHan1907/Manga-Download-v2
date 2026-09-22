@@ -44,3 +44,15 @@ Bằng chứng mới trên DB thật của user: **không có seed demo nào l�
 | S3 | Test cũ khớp nhãn ★ chính xác ("Yêu thích") sau đổi label | tự sửa | regex insensitive |
 
 **Kết luận vòng 2: ACCEPT** — 2 BLOCKING đã sửa, vitest 53/53, lint/typecheck/build pass, Rust không đổi (23/23 vẫn hiệu lực).
+
+## Vòng 3 (hunt dead code + hành vi UI còn thiếu, cùng ngày)
+
+| # | Finding | Phân loại | Xử lý |
+|---|---|---|---|
+| D1 | `formatChapterLabel` (domain/manga.ts) là export chết từ Phase 03, không ai dùng | ADVISORY | ✅ Đã xóa |
+| D2 | `mockSettingsService` sau swap provider chỉ còn test dùng | ADVISORY | Giữ có chủ đích: là reference hành vi sandbox + parity `DEFAULT_SETTINGS`; ghi chú trong IPC contract |
+| D3 | Luồng Favorites-Local (bỏ yêu thích → refetch rỗng) mới có test Rust/UI error, chưa test hành vi UI thành công | BLOCKING-test-gap | ✅ Thêm `removes a persisted favorite through IPC and refetches to empty` — assert đúng lệnh IPC phát ra + UI chuyển empty state |
+| D4 | Chuỗi lỗi "invalid args" của Tauri (serde reject payload) rơi về INTERNAL_ERROR nguyên văn tiếng Anh | ADVISORY | Chấp nhận: path bình thường UI đã validate phía client; message không lộ nội bộ nhạy cảm |
+| D5 | `saveReadingProgress`/`getLocalManga` chưa có màn nào gọi (trước Phase 05–07) | ADVISORY | Giữ theo thiết kế Phase 04 (API surface cho phase sau, đã kiểm chứng bằng test Rust + contract) |
+
+**Kết luận vòng 3: ACCEPT** — vitest 54/54, lint/typecheck/build pass, Rust không đổi (23/23).

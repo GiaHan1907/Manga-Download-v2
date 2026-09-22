@@ -125,6 +125,39 @@ describe("normalizeIpcError contract", () => {
   });
 });
 
+describe("Favorites local flow (visible behavior, round 3)", () => {
+  it("removes a persisted favorite through IPC and refetches to empty", async () => {
+    const manga = {
+      id: "m-9",
+      sourceId: "src-a",
+      sourceMangaId: "a9",
+      title: "Truyện Local Đã Sao",
+      author: null,
+      description: null,
+      status: "ongoing",
+      chapterCount: 2,
+      favorite: true,
+      updatedAt: "2026-09-22T00:00:00.000Z",
+    };
+    const calls: Array<[string, unknown]> = [];
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+      calls.push([cmd, args]);
+      if (cmd === "app_list_favorite_mangas") {
+        const alreadyRemoved = calls.some(([c, a]) => c === "app_set_manga_favorite" && (a as { favorite: boolean }).favorite === false);
+        return Promise.resolve({ items: alreadyRemoved ? [] : [manga], total: alreadyRemoved ? 0 : 1, limit: 20, offset: 0 });
+      }
+      if (cmd === "app_set_manga_favorite") return Promise.resolve(false);
+      return Promise.reject(new Error(`Unknown command ${cmd}`));
+    });
+
+    renderAt("/favorites");
+    const remove = await screen.findByRole("button", { name: "Bỏ yêu thích" });
+    fireEvent.click(remove);
+    expect(await screen.findByText("Chưa có mục yêu thích local")).toBeDefined();
+    expect(calls.some(([c]) => c === "app_set_manga_favorite")).toBe(true);
+  });
+});
+
 describe("S1/S2 review-round-2 boundaries", () => {
   it("Manga Detail favorite is explicitly labeled demo with boundary note (§2.8)", async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
