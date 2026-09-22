@@ -5,15 +5,7 @@ import { AppRoutes } from "../src/app/router";
 import { resetMockState, services } from "../src/services/provider";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn((cmd: string) => {
-    if (cmd === "app_get_info") {
-      return Promise.resolve({ name: "Manga Downloader 1989", version: "0.1.0", platform: "windows" });
-    }
-    if (cmd === "app_health_check") {
-      return Promise.resolve({ status: "ok", database: "ready" });
-    }
-    return Promise.reject(new Error("Unknown command"));
-  }),
+  invoke: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -25,6 +17,44 @@ vi.mock("@tauri-apps/api/window", () => ({
   })),
 }));
 
+import { invoke } from "@tauri-apps/api/core";
+
+const DEFAULT_SETTINGS = {
+  defaultReaderMode: "single",
+  defaultReadingDirection: "rtl",
+  chapterConcurrency: 2,
+  imageConcurrency: 4,
+  outputFormat: "cbz",
+};
+
+function installBackendMock() {
+  const state = { settings: { ...DEFAULT_SETTINGS } };
+  vi.mocked(invoke).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+    switch (cmd) {
+      case "app_get_info":
+        return Promise.resolve({ name: "Manga Downloader 1989", version: "0.1.0", platform: "windows" });
+      case "app_health_check":
+        return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 2 });
+      case "app_get_settings":
+        return Promise.resolve({ ...state.settings });
+      case "app_update_settings": {
+        const patch = (args?.input ?? {}) as Record<string, unknown>;
+        Object.assign(state.settings, patch);
+        return Promise.resolve({ ...state.settings });
+      }
+      case "app_reset_settings":
+        state.settings = { ...DEFAULT_SETTINGS };
+        return Promise.resolve({ ...state.settings });
+      case "app_list_local_mangas":
+      case "app_list_favorite_mangas":
+        return Promise.resolve({ items: [], total: 0, limit: 20, offset: 0 });
+      default:
+        return Promise.reject(new Error(`Unknown command ${cmd}`));
+    }
+  });
+  return state;
+}
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -35,10 +65,11 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   resetMockState();
+  installBackendMock();
 });
 
-describe("T03-02 Home quick actions", () => {
-  it("shows dashboard stats and working quick links", async () => {
+describe("T03-01/T03-02 Home demo journey", () => {
+  it("navigates from Explore Manga to Discover", async () => {
     renderAt("/");
     const explore = await screen.findByRole("link", { name: "Explore Manga" });
     fireEvent.click(explore);
@@ -49,8 +80,14 @@ describe("T03-02 Home quick actions", () => {
     renderAt("/");
     const stats = await screen.findByLabelText("Thống kê mẫu");
     expect(within(stats).getByText("8")).toBeDefined();
-    expect(screen.getByText("Demo · dữ liệu mẫu")).toBeDefined();
+    expect(screen.getByText("Prototype · Demo + Local")).toBeDefined();
     expect(screen.getByText("Not connected in UI prototype")).toBeDefined();
+  });
+
+  it("shows health with schema version (T04-13 regression)", async () => {
+    renderAt("/");
+    expect(await screen.findByText("Phiên bản schema")).toBeDefined();
+    expect(await screen.findAllByText("2")).toBeDefined();
   });
 });
 
@@ -81,17 +118,8 @@ describe("T03-03/T03-04 Discover search and demo import", () => {
   });
 });
 
-describe("T03-05/T03-06 detail selection, queue, favorites sync", () => {
-  it("selects chapters, queues with added/skipped counts and syncs downloads", async () => {
-    renderAt("/manga/manga-001");
-    const checkboxes = await screen.findAllByRole("checkbox");
-    fireEvent.click(checkboxes[0]);
-    const add = screen.getByRole("button", { name: "Add selected to demo queue" });
-    fireEvent.click(add);
-    expect((await screen.findByRole("status")).textContent).toMatch(/thêm mới 1, bỏ qua 0/);
-  });
-
-  it("skips already-queued chapters in the counts", async () => {
+describe("T03-05/T03-06 demo detail, queue, favorites and local boundary", () => {
+  it("selects chapters, queues with added/skipped counts", async () => {
     renderAt("/manga/manga-001");
     const checkboxes = await screen.findAllByRole("checkbox");
     fireEvent.click(checkboxes[0]);
@@ -100,56 +128,14 @@ describe("T03-05/T03-06 detail selection, queue, favorites sync", () => {
     expect((await screen.findByRole("status")).textContent).toMatch(/thêm mới 1, bỏ qua 1/);
   });
 
-  it("favorite toggled in detail appears in favorites page", async () => {
+  it("demo favorite toggles in demo sandbox; Favorites page is Local-only (Phase 04 boundary)", async () => {
     renderAt("/manga/manga-003");
     const star = await screen.findByRole("button", { name: "Yêu thích" });
     fireEvent.click(star);
+    await waitFor(() => expect(star.getAttribute("aria-pressed")).toBe("true"));
+
     fireEvent.click(screen.getByRole("link", { name: "Favorites" }));
-    expect(await screen.findByText("Vị Giác Cuối Cùng")).toBeDefined();
-  });
-
-  it("library remove uses confirmation dialog and only mock state", async () => {
-    renderAt("/library");
-    const removeButtons = await screen.findAllByRole("button", { name: /Gỡ .* khỏi thư viện mẫu/ });
-    fireEvent.click(removeButtons[0]);
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Hủy" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(removeButtons[0]);
-    const dialog2 = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog2).getByRole("button", { name: "Gỡ (chỉ mock)" }));
-    await waitFor(() => {
-      expect(screen.queryAllByRole("button", { name: /Gỡ .* khỏi thư viện mẫu/ }).length).toBe(3);
-    });
-  });
-
-  it("dialog moves focus in, traps Tab and restores focus on close", async () => {
-    renderAt("/library");
-    const removeButton = (await screen.findAllByRole("button", { name: /Gỡ .* khỏi thư viện mẫu/ }))[0];
-    removeButton.focus();
-    fireEvent.click(removeButton);
-    const dialog = await screen.findByRole("dialog");
-    await waitFor(() => {
-      expect(dialog.contains(document.activeElement)).toBe(true);
-    });
-
-    fireEvent.keyDown(window, { key: "Tab" });
-    expect(dialog.contains(document.activeElement)).toBe(true);
-
-    fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(document.activeElement).toBe(removeButton);
-  });
-
-  it("offline filter keeps only manga with bundled sample pages", async () => {
-    renderAt("/library");
-    const offlineSelect = await screen.findByLabelText(/Available offline/);
-    fireEvent.change(offlineSelect, { target: { value: "true" } });
-    await waitFor(() => {
-      expect(screen.getByText("Hành Trình Ngôi Sao")).toBeDefined();
-      expect(screen.queryByText("Vị Giác Cuối Cùng")).toBeNull();
-      expect(screen.queryByText("Chuyến Tàu Cuối Ngày")).toBeNull();
-    });
+    expect(await screen.findByText("Chưa có mục yêu thích local")).toBeDefined();
   });
 });
 
@@ -215,17 +201,24 @@ describe("T03-09 error and empty states", () => {
   });
 });
 
-describe("T03-08 Settings and Sources", () => {
-  it("validates and saves demo settings", async () => {
+describe("T03-08/T04 Settings and Sources", () => {
+  it("rejects out-of-bounds settings client-side", async () => {
     renderAt("/settings");
     const chapterInput = await screen.findByLabelText(/Chương đồng thời/);
     fireEvent.change(chapterInput, { target: { value: "9" } });
     fireEvent.click(screen.getByRole("button", { name: "Lưu (mock)" }));
     expect((await screen.findByRole("status")).textContent).toMatch(/số nguyên từ 1 đến 5/);
+  });
 
+  it("valid settings save through IPC and persist in backend mock", async () => {
+    const backend = installBackendMock();
+    renderAt("/settings");
+    const chapterInput = await screen.findByLabelText(/Chương đồng thời/);
     fireEvent.change(chapterInput, { target: { value: "4" } });
-    fireEvent.click(screen.getByRole("button", { name: "Lưu (mock)" }));
-    expect((await screen.findByRole("status")).textContent).toMatch(/Đã lưu/);
+    const saveButton = screen.getByRole("button", { name: "Lưu (mock)" });
+    fireEvent.click(saveButton);
+    expect((await screen.findByRole("status")).textContent).toMatch(/Đã lưu vào SQLite/);
+    await waitFor(() => expect(backend.settings.chapterConcurrency).toBe(4));
   });
 
   it("source toggle affects enabled list", async () => {

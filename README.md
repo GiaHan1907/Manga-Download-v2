@@ -4,8 +4,9 @@ Local-first desktop app for downloading and reading manga offline. Built with Ta
 
 > **Bắt đầu từ đây (đặc biệt cho AI/dev tiếp theo):** đọc [`docs/HANDOFF.md`](docs/HANDOFF.md) — trạng thái, bất biến kiến trúc, việc còn tồn. Brief và plan các phase trong `docs/briefs/`, `docs/plans/`; self-review từng phase trong `docs/phase-*/`.
 
-> **Phase 01 — Foundation** ✅ · **Phase 02 — Design System & UI Shell** ✅ · **Phase 03 — Core UI Screens (Interactive Prototype)** ✅  
-> Phase 03 adds all product screens (Home, Discover/URL import, Manga Detail, Library, Favorites, Downloads, Sample Reader, Settings/Sources) on top of the Phase 02 shell, backed by **typed mock services with deterministic fixture data**. This is a prototype: no real search, downloading, CBZ export, or file storage. See `docs/phase-03/`.
+> **Phase 01 — Foundation** ✅ · **Phase 02 — Design System & UI Shell** ✅ · **Phase 03 — Core UI Screens (Interactive Prototype)** ✅ · **Phase 04 — Database & Backend Core** ✅  
+> Phase 04: migration `0002_domain.sql` + Rust repositories/services + 10 typed IPC commands. Settings/Library/Favorites now use **real SQLite** (initially empty until Phase 05); Discover/Detail/Downloads/Reader remain an explicitly labeled demo sandbox. Contract: `docs/IPC_CONTRACT.md`, schema: `docs/phase-04/schema.md`.  
+> Phase 03 added all product screens (Home, Discover/URL import, Manga Detail, Library, Favorites, Downloads, Sample Reader, Settings/Sources) on top of the Phase 02 shell, backed by **typed mock services with deterministic fixture data**. This is a prototype: no real search, downloading, CBZ export, or file storage. See `docs/phase-03/`.
 
 ---
 
@@ -92,11 +93,11 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 48/48 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix; counts updated at each self-review) |
+| `npm run test` | ✅ Pass | 51/51 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix; counts updated at each self-review) |
 | `npm run build` | ✅ Pass | Vite, 1952 modules → `dist/` (356 kB JS, gzip 109.7 kB) |
-| `cargo check` | ✅ Pass | 1 warning (dead_code: `Internal` variant, expected until business logic) |
-| `cargo clippy` | ✅ Pass | Same 1 warning |
-| `cargo test` | ✅ Pass | 2/2 DB tests (regression intact — Phase 03 changed no Rust) |
+| `cargo check` | ✅ Pass | clean (Phase 04 removed the old dead-code warning by using `Internal` in the error contract) |
+| `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
+| `cargo test` | ✅ Pass | 23/23 (Phase 01 bootstrap + Phase 04 fresh/upgrade/reopen, upsert idempotency, FK/CHECK, favorites/progress/settings persistence, bounded pagination, input validation) |
 | `npm run tauri dev` | ✅ Smoke | Phase 03 prototype runs in the Tauri window (compile + clean launch recorded in `docs/phase-03/implementation-notes.md` §7.1). Visual checks: drag/resize/scaling — human confirmation recommended |
 | `npm run tauri build` | ✅ Pass (2026-09-22) | Exit 0; artifacts MSI + NSIS trong `src-tauri/target/release/bundle/` (checksums ghi ở `docs/phase-02/self-review.md` F1). Chạy thử bản cài đặt: chờ user xác nhận |
 
@@ -141,6 +142,8 @@ manga-downloader-1989/
 │   │                            # MangaCard, ChapterRow, DownloadCard (presentation-only)
 │   ├── assets/
 │   │   └── sample-reader/           # Original neutral SVG pages + cover placeholder (no 3rd-party art)
+│   ├── types/
+│   │   └── backend.ts                   # DTO mirrors of Rust payloads (Phase 04)
 │   ├── domain/                      # Typed models
 │   │   ├── manga.ts                 # MangaSummary/Detail, ChapterSummary, MangaStatus
 │   │   ├── download.ts              # DemoDownloadTask + discriminated transitions
@@ -151,6 +154,9 @@ manga-downloader-1989/
 │   │   ├── download.service.ts
 │   │   ├── reader.service.ts
 │   │   ├── settings.service.ts
+│   │   ├── settings.api.ts               # REAL IPC adapter (Phase 04)
+│   │   ├── local-library.service.ts      # production-mode Local contract
+│   │   ├── local-library.api.ts          # REAL IPC adapter (Phase 04)
 │   │   ├── provider.ts              # Wires mock impls; Phase 04+ swaps to IPC here
 │   │   ├── windowService.ts         # Tauri window API wrapper (minimize/maximize/close/drag)
 │   │   └── mock/
@@ -188,14 +194,22 @@ manga-downloader-1989/
 │   │   └── 0001_init.sql        # Creates app_settings table only
 │   └── src/
 │       ├── main.rs              # Windows subsystem attr, calls lib::run()
-│       ├── lib.rs               # Builder: setup (DB init), invoke_handler (2 commands)
+│       ├── lib.rs               # Builder: setup (DB init + storage prep), 12 commands
 │       ├── app_state.rs         # AppState { db: SqlitePool }
 │       ├── error.rs             # AppError enum → serialized { code, message, retryable }
 │       ├── commands/
 │       │   ├── mod.rs
-│       │   └── system.rs        # app_get_info, app_health_check
+│       │   ├── system.rs        # app_get_info, app_health_check (+schemaVersion)
+│       │   ├── settings.rs      # get/update/reset — persisted in app_settings
+│       │   ├── local_catalog.rs # list/get local manga (bounded pagination)
+│       │   ├── favorites.rs     # set/list persisted favorites
+│       │   ├── reading_progress.rs # get/save with chapter-ownership check
+│       │   └── tasks.rs         # read-only task metadata (Phase 06 writes)
+│       ├── domain/              # typed DTOs + settings validation (Phase 04)
+│       ├── services/            # business invariants + storage prep (Phase 04)
 │       └── db/
-│           └── mod.rs           # init_pool: create_dir_all, SqlitePool, embedded migration
+│           ├── mod.rs           # init_pool: create_dir_all, SqlitePool, embedded migration
+│           └── repositories/    # parameterized SQLx repos (Phase 04)
 └── tests/
     ├── setup.ts                 # Testing Library cleanup; per-file mocks
     ├── app.test.tsx             # IPC states + routing/sidebar/404/dialog keyboard tests

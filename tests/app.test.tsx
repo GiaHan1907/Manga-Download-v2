@@ -30,7 +30,7 @@ function mockHealthySystem() {
       });
     }
     if (cmd === "app_health_check") {
-      return Promise.resolve({ status: "ok", database: "ready" });
+      return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 2 });
     }
     return Promise.reject(new Error("Unknown command"));
   });

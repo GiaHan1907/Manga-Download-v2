@@ -13,7 +13,7 @@ export default function Topbar() {
     <header className="topbar">
       <div>
         <p className="muted">
-          Manga Downloader 1989 <StatusBadge tone="warning">Demo · dữ liệu mẫu</StatusBadge>
+          Manga Downloader 1989 <StatusBadge tone="neutral">Prototype · Demo + Local</StatusBadge>
         </p>
         <h1 className="topbar__title">{pageTitle}</h1>
       </div>

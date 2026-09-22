@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { services, resetMockState } from "../src/services/provider";
+import { mockSettingsService } from "../src/services/mock/mockServices";
 import { ALL_CHAPTERS, MANGA_SUMMARIES, SEED_TASKS, getMangaSummary } from "../src/services/mock/fixtures";
 
 describe("mock fixture integrity", () => {
@@ -155,12 +156,12 @@ describe("reader service", () => {
   });
 });
 
-describe("settings service", () => {
+describe("settings mock service (sandbox backend, kept for demo screens)", () => {
   beforeEach(resetMockState);
 
   it("validates ranges and resets", async () => {
     await expect(
-      services.settings.save({
+      mockSettingsService.save({
         defaultReaderMode: "single",
         defaultReadingDirection: "ltr",
         chapterConcurrency: 99,
@@ -169,17 +170,17 @@ describe("settings service", () => {
       }),
     ).rejects.toThrow();
 
-    await services.settings.save({
+    await mockSettingsService.save({
       defaultReaderMode: "double",
       defaultReadingDirection: "ltr",
       chapterConcurrency: 3,
       imageConcurrency: 6,
       outputFormat: "folder",
     });
-    expect((await services.settings.get()).chapterConcurrency).toBe(3);
+    expect((await mockSettingsService.get()).chapterConcurrency).toBe(3);
 
-    await services.settings.reset();
-    expect((await services.settings.get()).chapterConcurrency).toBe(2);
+    await mockSettingsService.reset();
+    expect((await mockSettingsService.get()).chapterConcurrency).toBe(2);
   });
 });
 

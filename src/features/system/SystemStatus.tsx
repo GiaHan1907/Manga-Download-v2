@@ -67,6 +67,7 @@ export default function SystemStatus() {
         <StatusItem label="Nền tảng" value={status.info.platform} />
         <StatusItem label="Trạng thái" value={status.health.status} />
         <StatusItem label="Cơ sở dữ liệu" value={status.health.database} />
+        <StatusItem label="Phiên bản schema" value={String(status.health.schemaVersion)} />
       </div>
     </section>
   );

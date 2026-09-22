@@ -1,0 +1,67 @@
+import { normalizeIpcError } from "../shared/api/desktop";
+import * as desktop from "../shared/api/desktop";
+import type { AppSettingsDto, SettingsPatchDto } from "../types/backend";
+import { SETTINGS_LIMITS, type AppSettings, type SettingsService } from "./settings.service";
+
+function toDto(settings: AppSettings): AppSettingsDto {
+  return {
+    defaultReaderMode: settings.defaultReaderMode,
+    defaultReadingDirection: settings.defaultReadingDirection,
+    chapterConcurrency: settings.chapterConcurrency,
+    imageConcurrency: settings.imageConcurrency,
+    outputFormat: settings.outputFormat,
+  };
+}
+
+function rethrow(err: unknown): never {
+  throw new Error(normalizeIpcError(err).message);
+}
+
+/// Phase 04: settings persist through SQLite via IPC (survive app restart).
+/// Client-side bound checks mirror the Rust validation for snappy UX; the
+/// backend remains the authority.
+export const settingsApi: SettingsService = {
+  async get(): Promise<AppSettings> {
+    try {
+      return await desktop.getBackendSettings();
+    } catch (err) {
+      rethrow(err);
+    }
+  },
+
+  async save(settings: AppSettings): Promise<void> {
+    const { chapterConcurrency, imageConcurrency } = SETTINGS_LIMITS;
+    if (
+      !Number.isInteger(settings.chapterConcurrency) ||
+      settings.chapterConcurrency < chapterConcurrency.min ||
+      settings.chapterConcurrency > chapterConcurrency.max
+    ) {
+      throw new Error(
+        `Số chương đồng thời phải là số nguyên từ ${chapterConcurrency.min} đến ${chapterConcurrency.max}.`,
+      );
+    }
+    if (
+      !Number.isInteger(settings.imageConcurrency) ||
+      settings.imageConcurrency < imageConcurrency.min ||
+      settings.imageConcurrency > imageConcurrency.max
+    ) {
+      throw new Error(
+        `Số ảnh đồng thời phải là số nguyên từ ${imageConcurrency.min} đến ${imageConcurrency.max}.`,
+      );
+    }
+    try {
+      const patch: SettingsPatchDto = toDto(settings);
+      await desktop.updateBackendSettings(patch);
+    } catch (err) {
+      rethrow(err);
+    }
+  },
+
+  async reset(): Promise<void> {
+    try {
+      await desktop.resetBackendSettings();
+    } catch (err) {
+      rethrow(err);
+    }
+  },
+};

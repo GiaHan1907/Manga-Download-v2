@@ -38,7 +38,7 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
     setFeedback(null);
     try {
       await services.settings.save(draft);
-      setFeedback("Đã lưu vào mock state (chỉ trong phiên demo, không ghi xuống backend).");
+      setFeedback("Đã lưu vào SQLite — giá trị giữ nguyên qua khởi động lại.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Không thể lưu cài đặt.");
     }
@@ -47,7 +47,7 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
   async function reset() {
     await services.settings.reset();
     setDraft(await services.settings.get());
-    setFeedback("Đã khôi phục giá trị mặc định demo.");
+    setFeedback("Đã khôi phục giá trị mặc định trong database.");
   }
 
   return (
@@ -137,10 +137,10 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
           <p className="panel__description">Không đọc được thông tin app qua IPC — kiểm tra Console.</p>
         )}
         <p className="panel__description">
-          Phase 03 là interactive prototype: mọi cài đặt chỉ sống trong mock state của phiên này.
+          Cài đặt được lưu thật vào SQLite (Phase 04). Các giá trị export/URL worker chỉ là sở thích — engine thật thuộc Phase 05–07.
         </p>
         <div className="chip-row">
-          <StatusBadge tone="warning">Demo settings</StatusBadge>
+          <StatusBadge tone="success">Persisted — SQLite</StatusBadge>
           <StatusBadge tone="neutral">Session-scoped</StatusBadge>
         </div>
       </section>

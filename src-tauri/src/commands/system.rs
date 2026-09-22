@@ -17,6 +17,8 @@ pub struct AppInfo {
 pub struct AppHealth {
     pub status: String,
     pub database: String,
+    /// Highest applied SQLx migration version (0 only if history is empty).
+    pub schema_version: i64,
 }
 
 #[tauri::command]
@@ -40,8 +42,11 @@ pub async fn app_health_check(state: State<'_, AppState>) -> Result<AppHealth, A
         .await
         .map_err(AppError::DatabaseInit)?;
 
+    let schema_version = crate::db::schema_version(&state.db).await?;
+
     Ok(AppHealth {
         status: "ok".to_string(),
         database: "ready".to_string(),
+        schema_version,
     })
 }

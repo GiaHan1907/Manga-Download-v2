@@ -9,6 +9,7 @@
 |---|---|---|---|
 | 01 — Foundation | Tauri 2 + React 19 + Vite + SQLx/SQLite app-data, 2 IPC commands, CSP/capability chặt | `docs/phase-01/self-review.md` | ACCEPT (fix: bỏ serde_json unused, withGlobalTauri:false tường minh) |
 | 02 — Design System & UI Shell | 11 tokens Dark Purple, custom titlebar + windowService, AppShell, primitives | `docs/phase-02/self-review.md` | ACCEPT (packaged `tauri build` pass — MSI+NSIS, checksums ghi trong file) |
+| 04 — Database & Backend Core | Migration `0002_domain.sql`, Rust domain/services/repositories, 10 typed IPC commands; Settings/Library/Favorites = SQLite thật, phần còn lại sandbox demo có nhãn | `docs/phase-04/self-review.md` | ACCEPT (vòng 1; contract: `docs/IPC_CONTRACT.md`) |
 | 03 — Core UI Screens (prototype) | 9 màn hình + typed mock services + fixture deterministic + test matrix T03-01→13 | `docs/phase-03/self-review.md` — 2 vòng: vòng 1 (`dd5434c`, `13081ee`), vòng 2 (`d9f7ee1`: F6 — Discover tôn trọng nguồn đã tắt, test hành vi end-to-end) | ACCEPT (fix: dialog focus trap, offline filter, task seq vào MockState, bộ lọc source ∩ enabled) |
 
 **Gate hiện tại (toàn bộ xanh):** lint · typecheck · vitest 48/48 · vite build · cargo check/clippy/test (1 warning `Internal` dead_code — chủ đích) · tauri dev smoke exit 0 · tauri build artifacts OK. Remote `origin/master` đồng bộ tới `d9f7ee1`/`e60b06b`.
@@ -16,7 +17,7 @@
 ## 2. Phase 03 CHƯA phải là app thật
 
 - Toàn bộ dữ liệu là **mock fixture** (`src/services/mock/`), state mất khi reload. Không search/download/CBZ/reader thật, không bảng DB nghiệp vụ (chỉ `app_settings`).
-- **Điểm swap duy nhất sang backend:** `src/services/provider.ts` — thay mock bằng IPC-backed service cùng interface, không rework screens. Mapping chi tiết: `docs/phase-03/implementation-notes.md` §8.
+- **Điểm swap:** `src/services/provider.ts` — `settings` và `localServices.library` đã là IPC thật (Phase 04); catalog/downloads/reader vẫn mock chờ Phase 05–07. Mapping: `docs/phase-03/implementation-notes.md` §8 + `docs/IPC_CONTRACT.md`.
 
 ## 3. Bất biến kiến trúc (không được phá)
 
