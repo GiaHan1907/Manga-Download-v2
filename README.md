@@ -92,7 +92,7 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 47/47 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix; counts updated at each self-review) |
+| `npm run test` | ✅ Pass | 48/48 tests (Phase 01 IPC + Phase 02 shell + mock-services unit + Phase 03 integration matrix; counts updated at each self-review) |
 | `npm run build` | ✅ Pass | Vite, 1952 modules → `dist/` (356 kB JS, gzip 109.7 kB) |
 | `cargo check` | ✅ Pass | 1 warning (dead_code: `Internal` variant, expected until business logic) |
 | `cargo clippy` | ✅ Pass | Same 1 warning |
