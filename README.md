@@ -98,7 +98,7 @@ All gates should exit with code 0. Current status:
 | `cargo check` | ✅ Pass | clean |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
 | `cargo test` | ✅ Pass | 155/155 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
-| `npm run tauri dev` | ✅ Smoke | Last smoke after feature-plan review 4 vòng (2026-09-23): app chạy thật, không panic; DB reopen schema 7 không reset |
+| `npm run tauri dev` | ✅ Smoke | Last smoke before pre-push review (2026-09-23): app chạy thật, không panic; DB user thật upgrade schema 8 (image_hosts) không reset, reopen sạch |
 | `npm run tauri build` | ✅ Pass (2026-09-23, NSIS-only) | Exit 0; artifact + SHA-256 hiện hành trong `docs/phase-10/ARTIFACT_MANIFEST.md` (`2245f30e…a90674`). Chạy thử bản cài đặt trên VM sạch: chờ user xác nhận |
 
 ---
