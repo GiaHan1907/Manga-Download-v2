@@ -300,8 +300,18 @@ button {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  /* Four manga cards per row; auto-fit's 13rem floor only showed three in
+     the normal content width. minmax(0,…) prevents long titles overflowing
+     a column. The 700px fallback sits below the app's 1024px window floor,
+     so every real size shows exactly four across. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
+}
+
+@media (max-width: 700px) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .component-grid {
