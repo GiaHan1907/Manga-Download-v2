@@ -418,18 +418,34 @@ pub fn find_chapter_link(registry: &SourceRegistry, url: &str) -> Result<Chapter
 
 /// Ensure the manga exists locally (saving it through the normal discovery
 /// path on first sight — live validation included) and return the DB row id
-/// of the chapter the link points at.
+/// of the chapter the link points at. If the manga was already saved but the
+/// chapter is missing from the local catalog (source published it after the
+/// last save), ONE refresh-save runs before giving up.
 pub async fn ensure_chapter_row(
     registry: &SourceRegistry,
     pool: &SqlitePool,
     link: &ChapterLink,
 ) -> Result<String, AppError> {
+    async fn lookup(pool: &SqlitePool, manga_id: &str, link: &ChapterLink) -> Option<String> {
+        sqlx::query_as::<_, (String,)>(
+            "SELECT id FROM chapters WHERE manga_id = ?1 AND source_chapter_id = ?2",
+        )
+        .bind(manga_id)
+        .bind(&link.chapter_slug)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(id,)| id)
+    }
+
     let manga_id: Option<(String,)> =
         sqlx::query_as("SELECT id FROM mangas WHERE source_id = ?1 AND source_manga_id = ?2")
             .bind(&link.source_id)
             .bind(&link.manga_slug)
             .fetch_optional(pool)
             .await?;
+    let fresh_save = manga_id.is_none();
     let manga_id = match manga_id {
         Some((id,)) => id,
         None => {
@@ -438,14 +454,19 @@ pub async fn ensure_chapter_row(
                 .manga_id
         }
     };
-    let chapter: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM chapters WHERE manga_id = ?1 AND source_chapter_id = ?2")
-            .bind(&manga_id)
-            .bind(&link.chapter_slug)
-            .fetch_optional(pool)
-            .await?;
-    chapter
-        .map(|(id,)| id)
+    if let Some(id) = lookup(pool, &manga_id, link).await {
+        return Ok(id);
+    }
+    if fresh_save {
+        // Just saved from the live catalog and still absent → the link's
+        // chapter genuinely is not on the source.
+        return Err(AppError::not_found(
+            "chương tương ứng với link — nguồn có thể đã đổi slug",
+        ));
+    }
+    save(registry, pool, &link.source_id, &link.manga_slug).await?;
+    lookup(pool, &manga_id, link)
+        .await
         .ok_or_else(|| AppError::not_found("chương tương ứng với link — nguồn có thể đã đổi slug"))
 }
 
@@ -872,6 +893,18 @@ mod tests {
         assert_eq!(again, chapter_id);
         assert_eq!(count(&pool, "mangas").await, 1);
         let _ = manga_id;
+
+        // Source published after our last save: a miss on an EXISTING manga
+        // triggers exactly one refresh-save, then resolves the chapter.
+        sqlx::query("DELETE FROM chapters WHERE id = ?1")
+            .bind(&chapter_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let revived = ensure_chapter_row(&registry, &pool, &link)
+            .await
+            .expect("refresh-save must recover the chapter row");
+        assert_ne!(revived, chapter_id, "refresh re-inserted the catalog row");
 
         // Unknown chapter slug for a known manga → honest not-found.
         let bad = ChapterLink {
