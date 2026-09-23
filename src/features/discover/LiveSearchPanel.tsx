@@ -11,8 +11,29 @@ import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useDomainVersion } from "../../shared/hooks/useInvalidation";
-import type { SearchResultDto, SourceViewDto } from "../../types/source";
+import type { RemoteMangaSummaryDto, SearchResultDto, SourceViewDto } from "../../types/source";
+import { useCoverUrl } from "./hooks/useCoverUrl";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
+
+// Isolated so the cover hook runs per card (React rules of hooks forbid
+// calling it inline inside the results .map).
+function LiveSearchCard({ item }: { item: RemoteMangaSummaryDto }) {
+  const coverUrl = useCoverUrl(item.sourceId, item.sourceMangaId, item.coverKey);
+  return (
+    <Link
+      to={`/remote/${encodeURIComponent(item.sourceId)}/${encodeURIComponent(item.sourceMangaId)}`}
+      className="card-link"
+      aria-label={`Mở xem trước ${item.title}`}
+    >
+      <MangaCard
+        title={item.title}
+        subtitle={`Nguồn: ${item.sourceDisplayName}${item.author ? ` · ${item.author}` : ""}`}
+        status={item.status}
+        coverUrl={coverUrl ?? undefined}
+      />
+    </Link>
+  );
+}
 
 export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery);
@@ -139,18 +160,10 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
       {results.state === "success" && results.data !== null && results.data.items.length > 0 && (
         <div className="card-grid">
           {results.data.items.map((item) => (
-            <Link
+            <LiveSearchCard
               key={`${item.sourceId}:${item.sourceMangaId}`}
-              to={`/remote/${encodeURIComponent(item.sourceId)}/${encodeURIComponent(item.sourceMangaId)}`}
-              className="card-link"
-              aria-label={`Mở xem trước ${item.title}`}
-            >
-              <MangaCard
-                title={item.title}
-                subtitle={`Nguồn: ${item.sourceDisplayName}${item.author ? ` · ${item.author}` : ""}`}
-                status={item.status}
-              />
-            </Link>
+              item={item}
+            />
           ))}
         </div>
       )}

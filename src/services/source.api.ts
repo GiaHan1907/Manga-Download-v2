@@ -28,6 +28,11 @@ export interface SourceService {
   }): Promise<RemoteMangaDetailDto>;
   remoteChapters(args: { sourceId: string; sourceMangaId: string }): Promise<RemoteChapterDto[]>;
   save(args: { sourceId: string; sourceMangaId: string }): Promise<SaveResultDto>;
+  fetchCover(args: {
+    sourceId: string;
+    sourceMangaId: string;
+    coverKey: string;
+  }): Promise<Uint8Array>;
 }
 
 /// Real adapter over Tauri IPC — production discovery boundary (Phase 05).
@@ -41,4 +46,5 @@ export const sourceApi: SourceService = {
   remoteDetail: (args) => desktop.getRemoteMangaDetails(args),
   remoteChapters: (args) => desktop.getRemoteChapters(args),
   save: (args) => desktop.saveDiscoveredManga(args),
+  fetchCover: (args) => desktop.getMangaCover(args),
 };

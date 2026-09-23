@@ -170,6 +170,23 @@ export async function saveDiscoveredManga(args: {
   return invoke<SaveResultDto>("save_discovered_manga", args);
 }
 
+/// Cover bytes (Rust `ipc::Response`), normalized to Uint8Array like reader
+/// pages. Only opaque ids/keys are sent — no URL crosses this boundary.
+export async function getMangaCover(args: {
+  sourceId: string;
+  sourceMangaId: string;
+  coverKey: string;
+}): Promise<Uint8Array> {
+  const response = await invoke<ArrayBuffer | Uint8Array | number[]>("get_manga_cover", args);
+  if (response instanceof Uint8Array) {
+    return response;
+  }
+  if (response instanceof ArrayBuffer) {
+    return new Uint8Array(response);
+  }
+  return Uint8Array.from(response);
+}
+
 // --- Phase 06: download engine (chapter ids + actions only; no URLs/paths) ---
 
 export async function queueChapterDownloads(args: {

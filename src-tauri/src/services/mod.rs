@@ -1,4 +1,5 @@
 pub mod catalog_service;
+pub mod cover_service;
 pub mod discovery_service;
 pub mod download_history_service;
 pub mod favorites_service;

@@ -9,6 +9,8 @@ use url::Url;
 use super::adapter::SourceError;
 
 pub const MAX_BODY_BYTES: u64 = 2 * 1024 * 1024;
+/// Covers are decorative thumbnails — 2 MB is a deliberate hard cap.
+pub const COVER_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// Cap for a single page image (legitimately larger than HTML/JSON bodies).
 pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// Upper bound on pages per chapter manifest (malformed listings guard).
@@ -27,8 +29,6 @@ pub trait Transport: Send + Sync {
     async fn get_json(&self, url: &str) -> Result<Value, SourceError>;
     /// Plain-text GET (HTML pages). Size-capped and policy-guarded like JSON.
     async fn get_text(&self, url: &str) -> Result<String, SourceError>;
-    /// Form POST with XHR headers — used by WordPress/admin-ajax endpoints.
-    async fn post_form_json(&self, url: &str, form: &[(&str, &str)]) -> Result<Value, SourceError>;
     /// Form POST returning an HTML fragment (Madara `ajax/chapters/` list).
     /// Same host allowlist, pacing and size caps as every other request.
     async fn post_form_text(&self, url: &str, form: &[(&str, &str)])
@@ -251,11 +251,6 @@ impl Transport for GuardedHttp {
         String::from_utf8(bytes).map_err(|_| SourceError::Parse)
     }
 
-    async fn post_form_json(&self, url: &str, form: &[(&str, &str)]) -> Result<Value, SourceError> {
-        let bytes = self.post_form_bytes(url, form).await?;
-        serde_json::from_slice(&bytes).map_err(|_| SourceError::Parse)
-    }
-
     async fn post_form_text(
         &self,
         url: &str,
@@ -312,7 +307,10 @@ impl GuardedHttp {
 }
 
 pub fn mangadex_policy() -> HttpPolicy {
-    HttpPolicy::new(&["api.mangadex.org"])
+    // uploads.mangadex.org is MangaDex's own fixed cover CDN (no at-home
+    // hostname indirection for covers — only for chapter pages, which this
+    // adapter deliberately does not declare).
+    HttpPolicy::new(&["api.mangadex.org", "uploads.mangadex.org"])
 }
 
 #[cfg(test)]
@@ -358,13 +356,6 @@ pub mod mock {
         }
         async fn get_text(&self, url: &str) -> Result<String, SourceError> {
             self.pop_raw("GET-TEXT", url)
-        }
-        async fn post_form_json(
-            &self,
-            url: &str,
-            _: &[(&str, &str)],
-        ) -> Result<Value, SourceError> {
-            serde_json::from_str(&self.pop_raw("POST", url)?).map_err(|_| SourceError::Parse)
         }
         async fn post_form_text(
             &self,
@@ -464,7 +455,7 @@ mod tests {
             Err(SourceError::NotFound)
         ));
         assert!(matches!(
-            transport.post_form_json("x", &[]).await,
+            transport.post_form_text("x", &[]).await,
             Err(SourceError::RateLimited(_))
         ));
         assert!(matches!(

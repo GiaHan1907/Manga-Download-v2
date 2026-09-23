@@ -248,6 +248,35 @@ impl SourceAdapter for MangaDex {
             available_offline: false,
         })
     }
+
+    async fn fetch_cover(
+        &self,
+        source_manga_id: &str,
+        cover_key: &str,
+    ) -> Result<Vec<u8>, SourceError> {
+        // Covers live on MangaDex's fixed uploads CDN (documented public
+        // URL shape). The relation fileName must stay a bare token — any
+        // path separator or traversal is rejected before a request exists.
+        if !Self::is_uuid_like(source_manga_id) {
+            return Err(SourceError::MalformedUrl);
+        }
+        let token = cover_key.trim_start_matches('/');
+        let safe = !token.is_empty()
+            && token.len() <= 120
+            && !token.contains("..")
+            && token
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+        if !safe {
+            return Err(SourceError::MalformedUrl);
+        }
+        self.http
+            .get_bytes(
+                &format!("https://uploads.mangadex.org/covers/{source_manga_id}/{token}.250.jpg"),
+                crate::sources::http::COVER_MAX_BYTES,
+            )
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -365,6 +394,35 @@ mod tests {
         assert_eq!(
             provider.resolve_url(&ok).await.unwrap(),
             "2a692f23-dcbb-4bc1-9620-957d76d7abdd"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_cover_builds_documented_cdn_url_and_rejects_tokens() {
+        let transport = Arc::new(MockTransport::with(vec![Ok("img")]));
+        let provider = MangaDex::with_transport(transport.clone());
+        let uuid = "2a692f23-dcbb-4bc1-9620-957d76d7abdd";
+        let bytes = provider.fetch_cover(uuid, "cover.jpg").await.unwrap();
+        assert_eq!(bytes, b"img".to_vec());
+        assert_eq!(
+            transport.requested.lock().unwrap()[0].1,
+            format!("https://uploads.mangadex.org/covers/{uuid}/cover.jpg.250.jpg")
+        );
+        for (manga, key) in [
+            ("not-a-uuid", "cover.jpg"),
+            (uuid, "../etc/passwd"),
+            (uuid, "sub/dir.jpg"),
+            (uuid, ""),
+        ] {
+            assert!(
+                provider.fetch_cover(manga, key).await.is_err(),
+                "must reject {manga:?}/{key:?}"
+            );
+        }
+        assert_eq!(
+            transport.requested.lock().unwrap().len(),
+            1,
+            "only the valid call fired"
         );
     }
 }

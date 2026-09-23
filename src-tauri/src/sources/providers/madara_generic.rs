@@ -11,11 +11,13 @@ use crate::sources::dto::{
     Capability, PageDescriptor, PageManifest, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary,
     RemoteSearchPage, SourceInfo, SourceStatus,
 };
-use crate::sources::http::{GuardedHttp, HttpPolicy, Transport, IMAGE_MAX_BYTES, MAX_PAGE_COUNT};
+use crate::sources::http::{
+    GuardedHttp, HttpPolicy, Transport, COVER_MAX_BYTES, IMAGE_MAX_BYTES, MAX_PAGE_COUNT,
+};
 
 /// Generic WordPress/Madara adapter. Users register any Madara-based site by
 /// name + https base URL; only the fixed public endpoints the site's own
-/// frontend uses are called (admin-ajax search, /manga/<slug>/ pages).
+/// frontend uses are called (the `?s=` search page, /manga/<slug>/ pages).
 /// Chapter images may legitimately live on a separate CDN host, but ONLY one
 /// the user explicitly registered per source (`image_hosts`) — the transport
 /// allowlist stays exact-host and fail-closed (no wildcards, no IPs, cap 4).
@@ -111,6 +113,35 @@ impl MadaraGeneric {
         allowed
     }
 
+    /// Mint a cover key (path-only, base host only — theme thumbnails ship
+    /// with the site; CDN allowlist hosts serve chapter pages). A key never
+    /// carries scheme or host, so nothing fetchable leaks to the renderer.
+    fn cover_key_from_src(&self, raw: &str) -> Option<String> {
+        let parsed = self.base.join(raw.trim()).ok()?;
+        if parsed.scheme() != "https" || parsed.host_str() != Some(self.host.as_str()) {
+            return None;
+        }
+        let path = parsed.path();
+        (!path.starts_with("//") && !path.is_empty() && path.len() <= 480).then(|| path.to_string())
+    }
+
+    /// Re-derive the cover URL from a stored key, re-checking that joining
+    /// cannot escape the base host (dot segments, query, fragment, protocol
+    /// overrides all fail here).
+    fn cover_url_from_key(&self, cover_key: &str) -> Result<String, SourceError> {
+        let joined = self
+            .base
+            .join(cover_key)
+            .map_err(|_| SourceError::MalformedUrl)?;
+        if joined.scheme() != "https"
+            || joined.host_str() != Some(self.host.as_str())
+            || joined.path() != cover_key
+        {
+            return Err(SourceError::MalformedUrl);
+        }
+        Ok(joined.to_string())
+    }
+
     #[cfg(test)]
     pub fn with_transport(
         display_name: &str,
@@ -146,10 +177,6 @@ impl MadaraGeneric {
 
     fn manga_url(&self, slug: &str) -> String {
         format!("{}manga/{slug}/", self.base)
-    }
-
-    fn ajax_url(&self) -> String {
-        format!("{}wp-admin/admin-ajax.php", self.base)
     }
 
     fn owns_host(&self, candidate: &str) -> bool {
@@ -302,55 +329,72 @@ impl SourceAdapter for MadaraGeneric {
     }
 
     async fn search(&self, query: &str, page: u32) -> Result<RemoteSearchPage, SourceError> {
-        if page > 1 {
-            // The suggestion endpoint returns a single page of results.
-            return Ok(RemoteSearchPage {
-                items: vec![],
-                has_more: false,
-            });
-        }
-        let body = self
-            .http
-            .post_form_json(
-                &self.ajax_url(),
-                &[("action", "wp-manga-search-manga"), ("title", query)],
+        // The theme's own search results page — the admin-ajax suggest
+        // endpoint it replaced ships titles only, while every card here
+        // carries the cover thumbnail. `paged` is standard WP pagination.
+        let page = page.max(1);
+        let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
+        let search_url = if page == 1 {
+            format!("{}?s={}&post_type=wp-manga", self.base, encoded)
+        } else {
+            format!(
+                "{}?s={}&post_type=wp-manga&paged={}",
+                self.base, encoded, page
             )
-            .await?;
-        let entries = body["data"].as_array().ok_or(SourceError::Parse)?;
-        let mut items = Vec::new();
-        let mut seen = HashSet::new();
-        for entry in entries {
-            let Some(raw_url) = entry["url"].as_str() else {
+        };
+        let html = self.http.get_text(&search_url).await?;
+        let document = Html::parse_document(&html);
+        let row = Selector::parse("div.row.c-tabs-item__content").unwrap();
+        let title_link =
+            Selector::parse("div.post-title h3 a[href], div.post-title a[href]").unwrap();
+        let thumb = Selector::parse("div.tab-thumb img, .c-image img").unwrap();
+        let mut items: Vec<RemoteMangaSummary> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for node in document.select(&row) {
+            let Some(link) = node.select(&title_link).next() else {
                 continue;
             };
-            let Some(slug) = self.slug_from_manga_url(raw_url) else {
+            let Some(href) = link.value().attr("href") else {
+                continue;
+            };
+            let Some(slug) = self.slug_from_manga_url(href) else {
                 continue;
             };
             if !seen.insert(slug.clone()) {
                 continue;
             }
-            let title = entry["title"]
-                .as_str()
-                .unwrap_or(slug.as_str())
-                .trim()
-                .to_string();
-            if title.is_empty() {
-                continue;
-            }
+            let raw_title = link.text().collect::<String>().trim().to_string();
+            let title = if raw_title.is_empty() {
+                slug.clone()
+            } else {
+                raw_title
+            };
+            let cover_key = node.select(&thumb).find_map(|image| {
+                ["src", "data-src", "data-lazy-src", "data-original"]
+                    .iter()
+                    .find_map(|attr| image.value().attr(attr))
+                    .and_then(|raw| self.cover_key_from_src(raw))
+            });
             items.push(RemoteMangaSummary {
                 source_id: self.id.clone(),
                 source_manga_id: slug,
                 source_display_name: self.display_name.clone(),
                 title,
                 author: None,
-                cover_key: None,
+                cover_key,
                 status: "unknown".to_string(),
             });
+            if items.len() >= 50 {
+                break;
+            }
         }
-        Ok(RemoteSearchPage {
-            items,
-            has_more: false,
-        })
+        let has_more = document
+            .select(
+                &Selector::parse("a.next.page-numbers, .c-pagination a[href*='paged']").unwrap(),
+            )
+            .next()
+            .is_some();
+        Ok(RemoteSearchPage { items, has_more })
     }
 
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError> {
@@ -415,6 +459,15 @@ impl SourceAdapter for MadaraGeneric {
         self.http.get_bytes(url, IMAGE_MAX_BYTES).await
     }
 
+    async fn fetch_cover(
+        &self,
+        _source_manga_id: &str,
+        cover_key: &str,
+    ) -> Result<Vec<u8>, SourceError> {
+        let url = self.cover_url_from_key(cover_key)?;
+        self.http.get_bytes(&url, COVER_MAX_BYTES).await
+    }
+
     async fn manga_detail(&self, source_manga_id: &str) -> Result<RemoteMangaDetail, SourceError> {
         if !valid_slug(source_manga_id) {
             return Err(SourceError::MalformedUrl);
@@ -448,8 +501,7 @@ impl SourceAdapter for MadaraGeneric {
             .select(&og_image)
             .next()
             .and_then(|node| node.value().attr("content"))
-            .and_then(|content| Url::parse(content).ok())
-            .map(|parsed| parsed.path().to_string());
+            .and_then(|content| self.cover_key_from_src(content));
 
         let tag = Selector::parse("a[rel=\"tag\"]").unwrap();
         let mut genres: Vec<String> = Vec::new();
@@ -573,11 +625,32 @@ mod tests {
     use super::*;
     use crate::sources::http::mock::MockTransport;
 
-    const SEARCH_FIXTURE: &str = r#"{"success":true,"data":[
-      {"title":"Ninja Lo\u1ea1n Th\u1ecb","url":"https://truyentuoitho.com/manga/ninja-loan-thi/","type":"manga"},
-      {"title":"Tr\u1eabu\u1ed3","url":"https://truyentuoitho.com/manga/trau-boro/","type":"manga"},
-      {"title":"Kh\u00f4ng ph\u1ea3i manga","url":"https://truyentuoitho.com/about","type":"page"}
-    ]}"#;
+    const SEARCH_FIXTURE: &str = r#"<html><body>
+      <div class="row c-tabs-item__content">
+        <div class="tab-thumb c-image-hover"><a href="https://truyentuoitho.com/manga/ninja-loan-thi/" title="Ninja Loạn Thị">
+          <img width="193" height="278" src="https://truyentuoitho.com/wp-content/uploads/2024/05/ninja-193x278.jpg" class="img-responsive" alt="Ninja"/>
+        </a></div>
+        <div class="tab-summary"><div class="post-title"><h3 class="h4">
+          <a href="https://truyentuoitho.com/manga/ninja-loan-thi/">Ninja Loạn Thị</a>
+        </h3></div></div>
+      </div>
+      <div class="row c-tabs-item__content">
+        <div class="tab-thumb c-image-hover"><a href="https://truyentuoitho.com/manga/trau-boro/">
+          <img data-src="https://cdn-other.example/trau.jpg" class="img-responsive" alt="Trấu"/>
+        </a></div>
+        <div class="tab-summary"><div class="post-title"><h3 class="h4">
+          <a href="https://truyentuoitho.com/manga/trau-boro/">Trấu BorO</a>
+        </h3></div></div>
+      </div>
+      <div class="row c-tabs-item__content">
+        <div class="tab-summary"><div class="post-title"><h3 class="h4">
+          <a href="https://truyentuoitho.com/about">Không phải manga</a>
+        </h3></div></div>
+      </div>
+      <div class="c-pagination"><ul class="page-numbers"><li>
+        <a class="next page-numbers" href="https://truyentuoitho.com/?s=ninja&amp;post_type=wp-manga&amp;paged=2">→</a>
+      </li></ul></div>
+      </body></html>"#;
 
     const PAGE_FIXTURE: &str = r#"<html><head>
       <meta property="og:image" content="https://truyentuoitho.com/wp-content/uploads/2024/ninja.jpg"/>
@@ -607,16 +680,83 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_maps_ajax_results_to_slugs() {
+    async fn search_maps_html_cards_with_cover_keys() {
         let (provider, transport) = adapter(vec![Ok(SEARCH_FIXTURE)]);
         let page = provider.search("ninja", 1).await.unwrap();
-        assert_eq!(page.items.len(), 2, "non-manga URLs must be filtered");
+        assert_eq!(page.items.len(), 2, "non-manga rows must be filtered");
         assert_eq!(page.items[0].source_manga_id, "ninja-loan-thi");
         assert_eq!(page.items[0].source_id, "madara-truyentuoitho-com");
         assert_eq!(page.items[0].title, "Ninja Loạn Thị");
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/wp-content/uploads/2024/05/ninja-193x278.jpg")
+        );
+        assert_eq!(
+            page.items[1].cover_key, None,
+            "thumbnails hosted outside the base host are dropped"
+        );
+        assert!(page.has_more, "next-page marker present in fixture");
         let requested = transport.requested.lock().unwrap();
-        assert_eq!(requested[0].0, "POST");
-        assert!(requested[0].1.ends_with("/wp-admin/admin-ajax.php"));
+        assert_eq!(requested[0].0, "GET-TEXT");
+        assert_eq!(
+            requested[0].1,
+            "https://truyentuoitho.com/?s=ninja&post_type=wp-manga"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_encodes_query_and_pagination() {
+        let (provider, transport) = adapter(vec![Ok(SEARCH_FIXTURE)]);
+        provider.search("đô thị", 2).await.unwrap();
+        let requested = transport.requested.lock().unwrap();
+        assert!(
+            requested[0]
+                .1
+                .ends_with("?s=%C4%91%C3%B4+th%E1%BB%8B&post_type=wp-manga&paged=2"),
+            "url was {}",
+            requested[0].1
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_cover_requests_base_host_path_within_cap() {
+        let (provider, transport) = adapter(vec![Ok("cover-bytes")]);
+        let bytes = provider
+            .fetch_cover("ninja-loan-thi", "/wp-content/uploads/2024/ninja.jpg")
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"cover-bytes".to_vec());
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(
+            requested[0],
+            (
+                "GET-BYTES".to_string(),
+                "https://truyentuoitho.com/wp-content/uploads/2024/ninja.jpg".to_string()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_cover_rejects_keys_that_escape_the_base_host() {
+        let (provider, transport) = adapter(vec![]);
+        for key in [
+            "//evil.com/x.jpg",
+            "https://evil.com/x.jpg",
+            "/../secrets",
+            "/ok/../../etc/passwd",
+            "?next=x",
+            "#frag",
+            "",
+        ] {
+            assert!(
+                provider.fetch_cover("m", key).await.is_err(),
+                "key {key:?} must be rejected"
+            );
+        }
+        assert!(
+            transport.requested.lock().unwrap().is_empty(),
+            "rejected keys must never reach the transport"
+        );
     }
 
     #[tokio::test]

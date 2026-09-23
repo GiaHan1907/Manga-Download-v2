@@ -123,6 +123,7 @@ pub fn run() {
             commands::discovery::get_remote_manga_details,
             commands::discovery::get_remote_chapters,
             commands::discovery::save_discovered_manga,
+            commands::discovery::get_manga_cover,
             commands::system::app_get_info,
             commands::system::app_health_check,
             commands::settings::app_get_settings,

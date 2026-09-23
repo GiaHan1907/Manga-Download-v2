@@ -9,6 +9,7 @@ import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain } from "../../shared/hooks/useInvalidation";
+import { useCoverUrl } from "./hooks/useCoverUrl";
 import type { SaveResultDto } from "../../types/source";
 
 type SaveState =
@@ -31,6 +32,12 @@ export default function RemoteDetailPage() {
   const detail = useAsyncData(
     () => localServices.source.remoteDetail({ sourceId, sourceMangaId }),
     [sourceId, sourceMangaId, refresh],
+  );
+
+  const coverUrl = useCoverUrl(
+    sourceId,
+    sourceMangaId,
+    detail.state === "success" ? detail.data.coverKey : null,
   );
 
   async function saveToLibrary() {
@@ -76,11 +83,20 @@ export default function RemoteDetailPage() {
 
   return (
     <div className="page-stack">
-      <div>
+      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
+        {coverUrl && (
+          <img
+            src={coverUrl}
+            alt={`Ảnh bìa ${manga.title}`}
+            width={160}
+            style={{ borderRadius: 8, objectFit: "cover" }}
+          />
+        )}
         <div>
           <h2>{manga.title}</h2>
           <p className="muted">Nguồn: {manga.sourceDisplayName}</p>
         </div>
+      </div>
         <div className="chip-row">
           <StatusBadge>{STATUS_LABELS[manga.status] ?? manga.status}</StatusBadge>
           <StatusBadge tone="warning">Remote preview</StatusBadge>
@@ -91,7 +107,6 @@ export default function RemoteDetailPage() {
           )}
           <StatusBadge tone="neutral">Chưa tải — Phase 06</StatusBadge>
         </div>
-      </div>
 
       {manga.genres.length > 0 && (
         <div className="chip-row" aria-label="Thể loại">

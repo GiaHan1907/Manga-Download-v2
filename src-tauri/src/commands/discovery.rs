@@ -125,3 +125,27 @@ pub async fn save_discovered_manga(
     let registry = snapshot(&state)?;
     discovery_service::save(&registry, &state.db, &source_id, &source_manga_id).await
 }
+
+/// Cover bytes for a (source, manga, key) triple previously published by an
+/// adapter. Binary like reader pages — neither a URL nor a path ever
+/// crosses the boundary in either direction.
+#[tauri::command]
+pub async fn get_manga_cover(
+    source_id: String,
+    source_manga_id: String,
+    cover_key: String,
+    state: State<'_, AppState>,
+) -> Result<tauri::ipc::Response, AppError> {
+    validate_id(&source_id, "sourceId")?;
+    validate_text_len(&source_manga_id, 200, "sourceMangaId")?;
+    let registry = snapshot(&state)?;
+    let bytes = crate::services::cover_service::cover_bytes(
+        &registry,
+        &state.app_data_dir,
+        &source_id,
+        &source_manga_id,
+        &cover_key,
+    )
+    .await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
