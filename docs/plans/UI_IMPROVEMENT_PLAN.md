@@ -1,5 +1,6 @@
 # Kế hoạch cải thiện UI — "Reader-first Polish"
 
+> **Trạng thái:** ✅ ĐÃ TRIỂN KHAI C1→C5 (commit UI polish này) — kết quả + lệch so với plan ghi ở §7 cuối file.
 > **Loại:** plan cải tiến UI thuần frontend (không phase engine mới)
 > **Tác giả:** Codex Planner · **Ngày:** 2026-09-23
 > **Baseline:** `master` @ `3f4eda2` (sau review toàn project 4 vòng; trạng thái `RC_TESTED — PUBLICATION BLOCKED`)
@@ -108,3 +109,17 @@ Gates như hiện hành: `npm run typecheck · lint · test · build` + `cargo` 
 | C5 | UI-4.1/4.4 toast + ErrorState retry + polish + docs reconcile (HANDOFF, README §UI) | S–M |
 
 Mỗi C = 1 round "implement → review N vòng của user → gates → commit".
+
+---
+
+## 7. Nhật ký triển khai (C1→C5, 2026-09-23)
+
+| Cung | Trạng thái | Ghi chú lệch plan (thành thật) |
+|---|---|---|
+| C1 a11y | ✅ | Tooltip thêm `focusableWhenDisabled` (wrapper tabindex=0 khi trigger disabled) tại 3 call-site; CommandPalette: input giờ `role=combobox` + `aria-expanded/controls/activedescendant`, option có `id`. RemoteDetailPage tooltip "Phase 06–07" stale → thay hint đúng hành vi hiện hành. Outline active đã có sẵn (`--focus-ring`). |
+| C2 reader | ✅ | Auto-hide 2.5s + clear timer unmount + KHÔNG ẩn khi focus đang trong toolbar; pager dưới cũng ẩn; `ReaderProgressRing` mới (reuse `progressPercent`, aria-hidden vì đã có page indicator thật); 3 lamp theme persist `localStorage["reader.theme"]` (try/catch), scope bằng `data-reader-theme` + CSS var cục bộ shell (không đụng tokens toàn cục); gutter double = gap 6px + shadow; focus-return khi Esc thoát fullscreen. Không đổi logic `usePageImages`/`useReaderProgress`. |
+| C3 downloads | ✅ | `useDownloadQueue`: `speedHistory` ring ≤30 mẫu/task (terminal tự xóa), `etaSeconds` từ page-progression thật, `actionErrors` per-task — lỗi action hiển thị inline tại card (role=alert), TỰ CLEAR khi revision mới về; banner top-page chỉ còn cho lỗi snapshot. Sparkline SVG trong `DownloadCard`. Filter trạng thái client-side ĐÃ TỒN từ trước → không thêm mới. Group-theo-manga bị chính plan bác (không có mangaId trong DTO) — giữ flat + filter, đúng fallback plan ghi. |
+| C4 home | ✅ | Hero Continue Reading (bìa chữ cái đầu + progress bar + 2 CTA) + strip các mục sau; rail ngang `scroll-snap` cho tác vụ gần đây (badge + mini-bar + đếm trang); skeleton theo layout thật. Data logic giữ nguyên 100% (test cũ T03/T04/T08 PASS không sửa). |
+| C5 feedback | ✅ | `toastStore.ts` (store tách file vì react-refresh) + `ToastViewport` mount 1 lần trong AppShell, `role=status`/`aria-live=polite`, max 3, tự tan 4s; wire: 4 action Downloads + queue thành công LocalMangaPage. `ErrorState` thêm `onRetry`/`retryLabel` (custom `action` vẫn thắng) — đã dùng ở DownloadsPage; chuyển hết các màn khác để phase sau (plan cho phép incremental). |
+| Test mới | 7 case | `tests/uiPlan.test.tsx`: formatEtaSeconds guards, sparkline math, ring-buffer cap + terminal clear, action-error placement/self-clear, toast cap/lifetime/auto-dismiss. |
+| Gates | ✅ | typecheck 0 · lint 0 warning · vitest **92/92** (85 cũ nguyên vẹn + 7 mới) · vite build OK · `tauri dev` smoke xem §HANDOFF. Zero diff Rust/IPC/CSP/capabilities/package.json — đúng ràng buộc §1. |

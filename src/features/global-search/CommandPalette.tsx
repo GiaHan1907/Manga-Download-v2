@@ -203,6 +203,13 @@ export default function CommandPalette() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Tìm truyện cục bộ hoặc lệnh… (Esc đóng)"
             aria-label="Nhập từ khóa tìm kiếm cục bộ"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="palette-listbox"
+            aria-activedescendant={
+              items.length > 0 ? `palette-option-${items[safeSelected]?.id ?? ""}` : undefined
+            }
+            autoComplete="off"
           />
         </div>
         {loading && <p className="muted palette__status">Đang tìm trong library…</p>}
@@ -217,10 +224,11 @@ export default function CommandPalette() {
         {items.length === 0 && (
           <p className="muted palette__status">Không có kết quả cục bộ cho “{trimmed}”.</p>
         )}
-        <ul className="palette__list" role="listbox" aria-label="Kết quả">
+        <ul className="palette__list" role="listbox" id="palette-listbox" aria-label="Kết quả">
           {items.map((item, index) => (
             <li
               key={item.id}
+              id={`palette-option-${item.id}`}
               role="option"
               aria-selected={index === safeSelected}
               className={`palette__item${index === safeSelected ? " palette__item--active" : ""}`}

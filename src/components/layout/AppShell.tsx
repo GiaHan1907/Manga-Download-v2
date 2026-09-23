@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import AppEventBridge from "../../app/AppEventBridge";
 import ErrorBoundary from "../../app/ErrorBoundary";
 import CommandPalette from "../../features/global-search/CommandPalette";
+import ToastViewport from "../ui/Toast";
 import PageContainer from "./PageContainer";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
@@ -27,6 +28,7 @@ export default function AppShell() {
         </section>
       </div>
       <CommandPalette />
+      <ToastViewport />
     </div>
   );
 }

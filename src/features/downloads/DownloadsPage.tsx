@@ -5,10 +5,12 @@ import DownloadCard from "../../components/ui/DownloadCard";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
+import { pushToast } from "../../components/ui/toastStore";
 import type { DownloadTaskDto } from "../../types/backend";
 import {
   allowedDownloadActions,
   formatBytes,
+  formatEtaSeconds,
   formatSpeed,
   isActiveStatus,
   progressPercent,
@@ -66,12 +68,34 @@ const actionLabel: Record<"pause" | "resume" | "retry" | "cancel", string> = {
   cancel: "Hủy",
 };
 
+const actionSuccessToast: Record<"pause" | "resume" | "retry" | "cancel", string> = {
+  pause: "Đã tạm dừng tác vụ.",
+  resume: "Đã tiếp tục tác vụ.",
+  retry: "Đã xếp hàng lại tác vụ.",
+  cancel: "Đã hủy tác vụ.",
+};
+
 function runAction(actions: ReturnType<typeof useDownloadQueue>["actions"], taskId: string, action: "pause" | "resume" | "retry" | "cancel") {
-  void actions[action](taskId).catch(() => undefined);
+  void actions[action](taskId)
+    .then(() => pushToast(actionSuccessToast[action]))
+    .catch(() => undefined); // inline per-card feedback handles rejection
 }
 
 export default function DownloadsPage() {
-  const { tasks, live, loading, error, actions, refresh, total, offset, goPage } = useDownloadQueue();
+  const {
+    tasks,
+    live,
+    speedHistory,
+    etaSeconds,
+    actionErrors,
+    loading,
+    error,
+    actions,
+    refresh,
+    total,
+    offset,
+    goPage,
+  } = useDownloadQueue();
   const [filter, setFilter] = useState<FilterId>("all");
 
   const visible = useMemo(() => {
@@ -93,7 +117,7 @@ export default function DownloadsPage() {
     );
   }
   if (error && tasks.length === 0) {
-    return <ErrorState title="Không tải được hàng đợi tải" description={error} action={<Button onClick={refresh}>Thử lại</Button>} />;
+    return <ErrorState title="Không tải được hàng đợi tải" description={error} onRetry={refresh} />;
   }
 
   return (
@@ -150,6 +174,7 @@ export default function DownloadsPage() {
               `${task.completedPages}/${task.totalPages} trang`,
               liveInfo && liveInfo.bytes > 0 ? formatBytes(liveInfo.bytes) : null,
               speed,
+              etaSeconds[task.id] !== undefined ? formatEtaSeconds(etaSeconds[task.id]) : null,
               task.targetFormat === "folder" ? "thư mục ảnh" : "CBZ",
             ].filter(Boolean);
             return (
@@ -160,6 +185,8 @@ export default function DownloadsPage() {
                 progress={progressPercent(task)}
                 status={statusLabel[task.status]}
                 statusTone={statusTone[task.status]}
+                speedHistory={speedHistory[task.id]}
+                actionError={actionErrors[task.id]}
               >
                 {task.status === "failed" && task.errorMessage && (
                   <p className="download-card__error" role="status">

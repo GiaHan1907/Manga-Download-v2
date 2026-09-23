@@ -133,9 +133,12 @@ export default function RemoteDetailPage() {
               ? "Làm mới metadata & chương"
               : "Lưu vào Library"}
         </Button>
-        <Tooltip content="Tải chương và đọc offline cần engine ở Phase 06–07 — Phase 05 chỉ khám phá và lưu metadata.">
-          <Button disabled aria-label="Tải chương (Phase 06)">
-            Tải chương (Phase 06)
+        <Tooltip
+          content="Lưu truyện vào Library trước — sau đó chọn chương để tải ngay trong trang chi tiết Library."
+          focusableWhenDisabled
+        >
+          <Button disabled aria-label="Tải chương (chỉ khả dụng với truyện đã lưu)">
+            Tải chương
           </Button>
         </Tooltip>
       </div>

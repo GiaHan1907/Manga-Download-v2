@@ -95,7 +95,10 @@ function RealSources() {
                 {source.enabled ? "Tắt" : "Bật"}
               </Button>
               {source.builtin ? (
-                <Tooltip content="Nguồn tích hợp sẵn của app — không thể xoá, chỉ có thể tắt.">
+                <Tooltip
+                  content="Nguồn tích hợp sẵn của app — không thể xoá, chỉ có thể tắt."
+                  focusableWhenDisabled
+                >
                   <Button disabled aria-label={`${source.displayName}: không xoá được (nguồn tích hợp)`}>
                     Xoá
                   </Button>

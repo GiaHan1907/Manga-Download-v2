@@ -45,7 +45,10 @@ export default function ChapterSelectRow({ chapter, selected, onSelectChange, qu
             Read sample
           </Button>
         ) : (
-          <Tooltip content="Chương này chưa có trang mẫu đóng gói — khả dụng sau Phase 04 (downloader thật).">
+          <Tooltip
+            content="Chương này chưa có trang mẫu trong demo (dev-only) — truyện thật đã tải thì đọc ở Reader offline."
+            focusableWhenDisabled
+          >
             <Button disabled aria-label={`Read sample không khả dụng cho ${chapter.title}`}>
               <Play size={14} aria-hidden="true" />
               Read sample

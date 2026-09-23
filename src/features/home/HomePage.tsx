@@ -35,9 +35,10 @@ export default function HomePage() {
   if (stats.state === "loading" || recentTasks.state === "loading") {
     return (
       <div className="page-stack" aria-busy="true" aria-label="Đang tải bảng điều khiển">
-        <Skeleton height="3rem" />
-        <Skeleton height="8rem" />
-        <Skeleton height="10rem" />
+        {/* Layout-shaped skeleton (UI plan C4): hero + stats row + rail. */}
+        <Skeleton height="12rem" label="Đang tải continue reading" />
+        <Skeleton height="5rem" />
+        <Skeleton height="9rem" label="Đang tải tác vụ gần đây" />
       </div>
     );
   }
@@ -111,17 +112,30 @@ export default function HomePage() {
           <p className="muted">Chưa có tác vụ tải nào. Lưu truyện từ Discover rồi chọn chương để tải.</p>
         )}
         {recentTasks.state === "success" && recentTasks.data.length > 0 && (
-          <ul className="queue-preview">
-            {recentTasks.data.map((task) => (
-              <li key={task.id}>
-                <div className="queue-preview__item">
-                  <span>
-                    {task.mangaTitle ?? task.chapterId} — {task.chapterTitle ?? task.chapterId}
+          <ul className="home-rail" aria-label="Bảng ngang tác vụ tải gần đây">
+            {recentTasks.data.map((task) => {
+              const pct =
+                task.totalPages > 0
+                  ? Math.min(100, Math.round((task.completedPages / task.totalPages) * 100))
+                  : 0;
+              return (
+                <li key={task.id} className="home-rail__card">
+                  <span className="home-rail__title">
+                    {task.mangaTitle ?? task.chapterId}
                   </span>
-                  <StatusBadge tone={STAT_TONE[task.status] ?? "warning"}>{task.status}</StatusBadge>
-                </div>
-              </li>
-            ))}
+                  <span className="muted home-rail__chapter">{task.chapterTitle ?? task.chapterId}</span>
+                  <StatusBadge tone={STAT_TONE[task.status] ?? "warning"}>
+                    {task.status}
+                  </StatusBadge>
+                  <span className="home-rail__bar" role="presentation">
+                    <span style={{ width: `${pct}%` }} />
+                  </span>
+                  <span className="muted">
+                    {task.completedPages}/{task.totalPages} trang
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

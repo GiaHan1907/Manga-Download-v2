@@ -94,3 +94,30 @@ export function formatSpeed(bytesPerSecond: number | null): string | null {
   }
   return `${formatBytes(bytesPerSecond)}/s`;
 }
+
+/// ETA from measured page progression. Guards the non-meaningful values:
+/// null (no measurement yet), non-finite/negative (never show "∞"/NaN),
+/// and sub-minute waits (hide instead of flickering "còn ~0s").
+export function formatEtaSeconds(seconds: number | null | undefined): string | null {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 60) {
+    return null;
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `còn ~${minutes}p`;
+  }
+  return `còn ~${Math.floor(minutes / 60)}h${minutes % 60}p`;
+}
+
+/// Normalized polyline points for a 100x28 sparkline box; null when fewer
+/// than two samples carry no shape information.
+export function sparklinePoints(samples: number[]): string | null {
+  if (samples.length < 2) {
+    return null;
+  }
+  const max = Math.max(...samples, 1);
+  const step = 100 / (samples.length - 1);
+  return samples
+    .map((value, index) => `${(index * step).toFixed(1)},${(28 - (value / max) * 26).toFixed(1)}`)
+    .join(" ");
+}

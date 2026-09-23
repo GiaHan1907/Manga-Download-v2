@@ -15,6 +15,12 @@ export function useDownloadQueue() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [live, setLive] = useState<Record<string, { bytes: number; speed: number | null }>>({});
+  // Ring buffer (≤30 samples/task) of measured speeds for sparklines;
+  // terminal tasks drop their samples (bounded memory, page lifetime only).
+  const [speedHistory, setSpeedHistory] = useState<Record<string, number[]>>({});
+  const [etaSeconds, setEtaSeconds] = useState<Record<string, number | null>>({});
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+  const progressSample = useRef<Map<string, { pages: number; ts: number }>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -78,10 +84,54 @@ export function useDownloadQueue() {
         if (merged !== event.task) {
           return; // stale frame — authoritative snapshot wins
         }
+        const { id, completedPages, totalPages, status } = event.task;
         setLive((prev) => ({
           ...prev,
-          [event.task.id]: { bytes: event.downloadedBytes, speed: event.speedBytesPerSecond },
+          [id]: { bytes: event.downloadedBytes, speed: event.speedBytesPerSecond },
         }));
+        // A newer revision means the previous action rejection is obsolete.
+        setActionErrors((prev) => {
+          if (prev[id] === undefined) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        const terminal = status === "completed" || status === "failed" || status === "cancelled";
+        if (terminal) {
+          progressSample.current.delete(id);
+          setSpeedHistory((prev) => {
+            if (prev[id] === undefined) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+          setEtaSeconds((prev) => {
+            if (prev[id] === undefined) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        } else {
+          if (event.speedBytesPerSecond !== null) {
+            const sample = event.speedBytesPerSecond;
+            setSpeedHistory((prev) => ({
+              ...prev,
+              [id]: [...(prev[id] ?? []), sample].slice(-30),
+            }));
+          }
+          // ETA from page progression (rate of completedPages over wall time).
+          const now = Date.now();
+          const last = progressSample.current.get(id);
+          progressSample.current.set(id, { pages: completedPages, ts: now });
+          if (last && completedPages > last.pages && totalPages > completedPages) {
+            const elapsedSeconds = (now - last.ts) / 1000;
+            const pagesPerSecond = (completedPages - last.pages) / elapsedSeconds;
+            if (pagesPerSecond > 0) {
+              const remaining = totalPages - completedPages;
+              setEtaSeconds((prev) => ({ ...prev, [id]: Math.ceil(remaining / pagesPerSecond) }));
+            }
+          }
+        }
         setTasks((prev) => {
           const next = prev.map((task) => (task.id === event.task.id ? event.task : task));
           if (!prev.some((task) => task.id === event.task.id)) {
@@ -113,7 +163,9 @@ export function useDownloadQueue() {
         await refresh();
         return updated;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Thao tác bị từ chối.");
+        const message = err instanceof Error ? err.message : "Thao tác bị từ chối.";
+        // Inline per-card feedback (self-clears on the task's next event).
+        setActionErrors((prev) => ({ ...prev, [taskId]: message }));
         throw err;
       }
     },
@@ -135,6 +187,9 @@ export function useDownloadQueue() {
   return {
     tasks,
     live,
+    speedHistory,
+    etaSeconds,
+    actionErrors,
     loading,
     error,
     actions,

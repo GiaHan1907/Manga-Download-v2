@@ -964,6 +964,125 @@ button {
   font-size: var(--font-size-sm);
 }
 
+.download-card__sparkline {
+  align-self: flex-start;
+  opacity: 0.85;
+}
+
+/* ---------- UI plan C4: home hierarchy (hero + rail) ---------- */
+.continue-hero {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--elevated);
+}
+.continue-hero__cover {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 132px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(160deg, var(--primary), var(--primary-hover));
+  color: var(--primary-foreground);
+  font-size: 2rem;
+  font-weight: 700;
+}
+.continue-hero__body {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.continue-hero__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+}
+.continue-hero__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.continue-hero__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+.continue-hero__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.home-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-1) var(--space-2);
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+}
+.home-rail__card {
+  scroll-snap-align: start;
+  flex: 0 0 220px;
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.home-rail__title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-rail__chapter {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-rail__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.home-rail__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+/* ---------- UI plan C5: success toast stack ---------- */
+.toast-stack {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 60;
+  display: grid;
+  gap: var(--space-2);
+  max-width: min(22rem, 90vw);
+}
+.toast {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--elevated);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 .chapter-select-list {
   list-style: none;
   margin: var(--space-3) 0 0;
@@ -1268,12 +1387,27 @@ button {
 
 /* ---------- Phase 07 offline reader ---------- */
 .reader-shell {
+  --reader-bg: #0b0713;
+  --reader-chrome-bg: rgba(17, 11, 28, 0.85);
+  --reader-chrome-fg: var(--text-primary);
   position: fixed;
   inset: var(--titlebar-height, 40px) 0 0 0;
   display: flex;
   flex-direction: column;
-  background: #0b0713;
+  background: var(--reader-bg);
+  color: var(--reader-chrome-fg);
   z-index: 40;
+}
+/* Lamp themes: scoped presentation only — no global token changes, no
+   settings round-trip (persisted in localStorage by ReadPage). */
+.reader-shell[data-reader-theme="sepia"] {
+  --reader-bg: #e9dcc3;
+  --reader-chrome-bg: rgba(233, 220, 195, 0.92);
+  --reader-chrome-fg: #3a2f21;
+}
+.reader-shell[data-reader-theme="night"] {
+  --reader-bg: #000004;
+  --reader-chrome-bg: rgba(5, 4, 10, 0.88);
 }
 .reader-shell--full {
   inset: 0;
@@ -1283,7 +1417,8 @@ button {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
-  background: rgba(17, 11, 28, 0.85);
+  background: var(--reader-chrome-bg);
+  color: var(--reader-chrome-fg);
   backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--border-subtle);
   transition: transform var(--transition-fast), opacity var(--transition-fast);
@@ -1377,10 +1512,13 @@ button {
 .reader-spread {
   display: flex;
   height: 100%;
-  gap: 2px;
+  /* Visible gutter between the two pages of a spread (the shell background
+     shows through) — replaced the old 2px seam. */
+  gap: 6px;
 }
 .reader-spread .reader-page__img {
   max-height: 100%;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.35);
 }
 .reader-page--empty {
   width: 40%;
@@ -1396,7 +1534,34 @@ button {
   justify-content: center;
   gap: var(--space-3);
   padding: var(--space-2);
-  background: rgba(17, 11, 28, 0.85);
+  background: var(--reader-chrome-bg);
+  color: var(--reader-chrome-fg);
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
+}
+.reader-pager--hidden {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+}
+.reader-progress-ring {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-6);
+  display: grid;
+  place-items: center;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.reader-progress-ring__label {
+  position: absolute;
+  font-size: 10px;
+  color: var(--reader-chrome-fg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-toolbar,
+  .reader-pager {
+    transition: none;
+  }
 }
 
 /* ---------- Phase 07 library list view ---------- */

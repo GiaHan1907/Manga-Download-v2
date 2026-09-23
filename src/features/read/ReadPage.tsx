@@ -17,9 +17,11 @@ import { clampPage, nextPage, prevPage } from "./readerLogic";
 import { usePageImages } from "./usePageImages";
 import { useReaderProgress } from "./useReaderProgress";
 import ReaderModes from "./ReaderModes";
+import ReaderProgressRing from "./components/ReaderProgressRing";
 
 type ReaderMode = "single" | "double" | "vertical";
 type Direction = "ltr" | "rtl";
+type ReaderTheme = "default" | "sepia" | "night";
 
 const MODES: ReaderMode[] = ["single", "double", "vertical"];
 const MODE_LABELS: Record<ReaderMode, string> = {
@@ -27,6 +29,22 @@ const MODE_LABELS: Record<ReaderMode, string> = {
   double: "Hai trang",
   vertical: "Cuộn dọc",
 };
+const THEME_LABELS: Record<ReaderTheme, string> = {
+  default: "Nền tối mặc định",
+  sepia: "Nền giấy ấm",
+  night: "Nền đen sâu",
+};
+const THEME_ORDER: ReaderTheme[] = ["default", "sepia", "night"];
+const CHROME_HIDE_AFTER_MS = 2500;
+
+function readStoredTheme(): ReaderTheme {
+  try {
+    const raw = window.localStorage.getItem("reader.theme");
+    return THEME_ORDER.includes(raw as ReaderTheme) ? (raw as ReaderTheme) : "default";
+  } catch {
+    return "default";
+  }
+}
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -62,8 +80,11 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
   const [direction, setDirection] = useState<Direction>("rtl");
   const [zoom, setZoom] = useState(1);
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [theme, setTheme] = useState<ReaderTheme>(readStoredTheme);
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const fullscreenBtnRef = useRef<HTMLButtonElement>(null);
   const hideTimer = useRef<number | null>(null);
   const initialized = useRef(false);
   // Last scroll-derived position (vertical mode) for progress persistence.
@@ -192,8 +213,32 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
     if (hideTimer.current) {
       window.clearTimeout(hideTimer.current);
     }
-    hideTimer.current = window.setTimeout(() => setChromeVisible(false), 3000);
+    hideTimer.current = window.setTimeout(() => {
+      // Keep the chrome while the user is operating its controls (keyboard
+      // focus inside toolbar) — hiding mid-interaction would trap focus.
+      const active = document.activeElement;
+      if (headerRef.current && active && headerRef.current.contains(active)) {
+        return;
+      }
+      setChromeVisible(false);
+    }, CHROME_HIDE_AFTER_MS);
   }
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("reader.theme", theme);
+    } catch {
+      // Storage unavailable (private mode) — theme stays session-only.
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) {
+        window.clearTimeout(hideTimer.current);
+      }
+    };
+  }, []);
 
   async function toggleFullscreen() {
     try {
@@ -209,7 +254,17 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
   }
 
   useEffect(() => {
-    const sync = () => setFullscreen(Boolean(document.fullscreenElement));
+    let wasFullscreen = Boolean(document.fullscreenElement);
+    const sync = () => {
+      const now = Boolean(document.fullscreenElement);
+      setFullscreen(now);
+      // OS/Esc exits fullscreen without our button — hand focus back so
+      // keyboard users don't land on <body>.
+      if (wasFullscreen && !now && document.activeElement === document.body) {
+        fullscreenBtnRef.current?.focus();
+      }
+      wasFullscreen = now;
+    };
     document.addEventListener("fullscreenchange", sync);
     return () => document.removeEventListener("fullscreenchange", sync);
   }, []);
@@ -242,11 +297,15 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
     <div
       ref={containerRef}
       className={`reader-shell${fullscreen || document.fullscreenElement ? " reader-shell--full" : ""}`}
+      data-reader-theme={theme}
       onMouseMove={toggleChromeWithActivity}
       onClick={toggleChromeWithActivity}
       data-testid="reader-shell"
     >
-      <header className={`reader-toolbar${chromeVisible ? "" : " reader-toolbar--hidden"}`}>
+      <header
+        ref={headerRef}
+        className={`reader-toolbar${chromeVisible ? "" : " reader-toolbar--hidden"}`}
+      >
         <button
           type="button"
           className="reader-tool"
@@ -292,6 +351,15 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
           <button
             type="button"
             className="reader-tool"
+            onClick={() => setTheme((value) => THEME_ORDER[(THEME_ORDER.indexOf(value) + 1) % THEME_ORDER.length])}
+            aria-label={`Nền đọc: ${THEME_LABELS[theme]} — bấm để đổi`}
+          >
+            Nền: {THEME_LABELS[theme]}
+          </button>
+          <button
+            ref={fullscreenBtnRef}
+            type="button"
+            className="reader-tool"
             onClick={() => void toggleFullscreen()}
             aria-label={fullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
           >
@@ -315,7 +383,12 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
         consumeResumeFraction={consumeResumeFraction}
       />
 
-      <nav className="reader-pager" aria-label="Điều hướng trang">
+      <ReaderProgressRing page={page} pageCount={data.pageCount} />
+
+      <nav
+        className={`reader-pager${chromeVisible ? "" : " reader-pager--hidden"}`}
+        aria-label="Điều hướng trang"
+      >
         <button type="button" className="reader-tool" onClick={stepBack} disabled={page <= 0} aria-label="Trang trước">
           ← Trước
         </button>

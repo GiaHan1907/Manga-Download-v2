@@ -6,6 +6,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
+import { pushToast } from "../../components/ui/toastStore";
 import type { LocalMangaDetailDto } from "../../types/backend";
 import type { SourceViewDto } from "../../types/source";
 import type { DownloadedChapterDto } from "../../types/library";
@@ -112,6 +113,13 @@ export default function LocalMangaPage() {
       setSelected(new Set());
       bumpDomain("downloads");
       bumpDomain("home");
+      if (outcome.tasks.length > 0 || outcome.reused.length > 0) {
+        pushToast(
+          outcome.reused.length > 0 && outcome.tasks.length === 0
+            ? `${outcome.reused.length} chương đã có sẵn trong hàng đợi.`
+            : `Đã xếp hàng ${outcome.tasks.length} chương${outcome.reused.length > 0 ? ` (${outcome.reused.length} trùng đã có)` : ""}.`,
+        );
+      }
       setNonce((value) => value + 1);
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Không xếp hàng được.");
