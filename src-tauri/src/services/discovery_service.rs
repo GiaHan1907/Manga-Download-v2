@@ -402,9 +402,18 @@ pub fn find_chapter_link(registry: &SourceRegistry, url: &str) -> Result<Chapter
             });
         }
     }
-    Err(AppError::validation(
-        "Link không thuộc nguồn đã đăng ký, hoặc không phải link chương (dạng /manga/<truyện>/<chương>/).",
-    ))
+    // Distinguish the two failure shapes so the user knows WHAT to fix:
+    // missing source registration vs wrong link level.
+    let host_owned = registry.adapters().iter().any(|a| a.owns_url(&parsed));
+    if host_owned {
+        Err(AppError::validation(
+            "Nguồn đã đăng ký nhưng đây không phải link chương — hãy mở một chương rồi copy URL (dạng /manga/<truyện>/<chương>/).",
+        ))
+    } else {
+        Err(AppError::validation(
+            "Link không thuộc nguồn nào đã đăng ký — vào Settings → Nguồn để thêm site trước (kèm host ảnh nếu ảnh nằm ở CDN khác).",
+        ))
+    }
 }
 
 /// Ensure the manga exists locally (saving it through the normal discovery
@@ -872,17 +881,25 @@ mod tests {
         };
         assert!(ensure_chapter_row(&registry, &pool, &bad).await.is_err());
 
-        // Rejections at classification time: foreign host, http, manga-level.
+        // Rejections carry distinct, actionable hints: unregistered host vs
+        // wrong link level.
+        let foreign =
+            find_chapter_link(&registry, "https://evil.example/manga/fx-01/fx-01-c1/").unwrap_err();
         assert!(
-            find_chapter_link(&registry, "https://evil.example/manga/fx-01/fx-01-c1/").is_err()
+            matches!(&foreign, AppError::Validation(m) if m.contains("Settings")),
+            "unregistered host must point at Settings → Nguồn: {foreign:?}"
+        );
+        let wrong_level =
+            find_chapter_link(&registry, "https://fixture.manga1989.invalid/manga/fx-01/")
+                .unwrap_err();
+        assert!(
+            matches!(&wrong_level, AppError::Validation(m) if m.contains("không phải link chương")),
+            "registered host + manga-level link must ask for a chapter URL: {wrong_level:?}"
         );
         assert!(find_chapter_link(
             &registry,
             "http://fixture.manga1989.invalid/manga/fx-01/fx-01-c1/"
         )
         .is_err());
-        assert!(
-            find_chapter_link(&registry, "https://fixture.manga1989.invalid/manga/fx-01/").is_err()
-        );
     }
 }
