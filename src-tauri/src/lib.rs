@@ -6,6 +6,8 @@ mod downloader;
 mod error;
 #[cfg(test)]
 mod perf;
+#[cfg(test)]
+mod probe;
 mod reader;
 mod services;
 mod sources;
