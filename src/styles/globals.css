@@ -1440,7 +1440,8 @@ button {
   text-overflow: ellipsis;
 }
 .reader-toolbar__chapter {
-  color: var(--text-muted);
+  color: var(--reader-chrome-fg);
+  opacity: 0.75;
   font-size: var(--font-size-sm);
 }
 .reader-toolbar__controls {
@@ -1456,7 +1457,9 @@ button {
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
   background: transparent;
-  color: var(--text-primary);
+  /* Follows the active reader chrome theme (C2 lamp themes) — a fixed
+     light color would be unreadable on the sepia background. */
+  color: var(--reader-chrome-fg);
   cursor: pointer;
   font-size: var(--font-size-sm);
 }
@@ -1494,7 +1497,9 @@ button {
 }
 .reader-page--loading {
   width: 100%;
-  background: #131022;
+  /* Neutral tone works on all three reader themes (was a hard-coded dark
+     block that clashed with the sepia background). */
+  background: rgba(128, 128, 128, 0.22);
   animation: reader-pulse 1.4s ease-in-out infinite;
 }
 @keyframes reader-pulse {
@@ -1546,7 +1551,9 @@ button {
 .reader-progress-ring {
   position: absolute;
   right: var(--space-4);
-  bottom: var(--space-6);
+  /* Clear the bottom pager (button row + padding) instead of overlapping
+     the "Sau →" control. */
+  bottom: calc(3.5rem + var(--space-2));
   display: grid;
   place-items: center;
   opacity: 0.85;

@@ -123,3 +123,16 @@ Mỗi C = 1 round "implement → review N vòng của user → gates → commit"
 | C5 feedback | ✅ | `toastStore.ts` (store tách file vì react-refresh) + `ToastViewport` mount 1 lần trong AppShell, `role=status`/`aria-live=polite`, max 3, tự tan 4s; wire: 4 action Downloads + queue thành công LocalMangaPage. `ErrorState` thêm `onRetry`/`retryLabel` (custom `action` vẫn thắng) — đã dùng ở DownloadsPage; chuyển hết các màn khác để phase sau (plan cho phép incremental). |
 | Test mới | 7 case | `tests/uiPlan.test.tsx`: formatEtaSeconds guards, sparkline math, ring-buffer cap + terminal clear, action-error placement/self-clear, toast cap/lifetime/auto-dismiss. |
 | Gates | ✅ | typecheck 0 · lint 0 warning · vitest **92/92** (85 cũ nguyên vẹn + 7 mới) · vite build OK · `tauri dev` smoke xem §HANDOFF. Zero diff Rust/IPC/CSP/capabilities/package.json — đúng ràng buộc §1. |
+
+### 7.1 Review 3 vòng (2026-09-23, sau `f106cb0`)
+
+| Vòng | Finding | Sửa |
+|---|---|---|
+| 1 | ETA hiển thị cả task paused/queued (giá trị cũ misleading) | `DownloadsPage`: ETA chỉ khi `resolving|downloading` |
+| 1 | Tooltip `role=tooltip` không được screen reader đọc nếu thiếu association | `useId` + `aria-describedby` trên wrapper (khi `focusableWhenDisabled`) |
+| 1 | Progress ring đè lên nút "Sau →" của pager | `bottom: calc(3.5rem + var(--space-2))` |
+| 2 | **Sepia theme làm chrome không đọc được**: `.reader-tool` hardcode `--text-primary` (sáng trên nền kem), `.reader-toolbar__chapter` hardcode `--text-muted` | Chuyển sang `var(--reader-chrome-fg)` (+opacity cho chapter) — cả 3 theme đều tương phản đúng |
+| 2 | Placeholder trang đang tải hardcode `#131022` lệch nền sepia | `rgba(128,128,128,.22)` trung tính |
+| 3 | Đối chiếu claims ↔ diff: 7/7 test case đúng số khai, `f106cb0` zero-diff `src-tauri`+`package.json` đúng cam kết, test cũ không sửa assert | — |
+
+Gates sau mỗi vòng 1/2: typecheck 0 · lint 0 · vitest 92/92 · build OK.

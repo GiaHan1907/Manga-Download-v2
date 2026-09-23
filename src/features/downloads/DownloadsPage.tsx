@@ -170,11 +170,14 @@ export default function DownloadsPage() {
           {visible.map((task) => {
             const liveInfo = live[task.id];
             const speed = statusTone[task.status] === "warning" ? formatSpeed(liveInfo?.speed ?? null) : null;
+            // ETA is only truthful while pages are actively advancing —
+            // a paused/queued task must not keep showing a stale estimate.
+            const etaActive = task.status === "resolving" || task.status === "downloading";
             const parts = [
               `${task.completedPages}/${task.totalPages} trang`,
               liveInfo && liveInfo.bytes > 0 ? formatBytes(liveInfo.bytes) : null,
               speed,
-              etaSeconds[task.id] !== undefined ? formatEtaSeconds(etaSeconds[task.id]) : null,
+              etaActive ? formatEtaSeconds(etaSeconds[task.id]) : null,
               task.targetFormat === "folder" ? "thư mục ảnh" : "CBZ",
             ].filter(Boolean);
             return (
