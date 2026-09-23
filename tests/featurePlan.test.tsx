@@ -103,6 +103,36 @@ describe("reveal-download IPC wrapper", () => {
   });
 });
 
+import { downloadsApi } from "../src/services/downloads.api";
+
+describe("queueMany chunking (Rust caps 100 ids per call)", () => {
+  it("splits 250 ids into 100/100/50 and aggregates one result", async () => {
+    const ids = Array.from({ length: 250 }, (_, index) => `c${index}`);
+    const calls: string[][] = [];
+    vi.mocked(invoke).mockImplementation(async (_cmd: string, args?: Record<string, unknown>) => {
+      const chunk = (args as { chapterIds: string[] }).chapterIds;
+      calls.push(chunk);
+      return {
+        tasks: chunk.map((id) => ({ id, chapterId: id })),
+        reused: [],
+        errors: [],
+        queuedAt: "2026-09-23T00:00:00.000Z",
+      };
+    });
+    const out = await downloadsApi.queueMany({ chapterIds: ids });
+    expect(calls.map((chunk) => chunk.length)).toEqual([100, 100, 50]);
+    expect(calls.flat()).toEqual(ids);
+    expect(out.tasks).toHaveLength(250);
+  });
+
+  it("empty selection performs no IPC at all", async () => {
+    vi.mocked(invoke).mockReset();
+    const out = await downloadsApi.queueMany({ chapterIds: [] });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(out.tasks).toEqual([]);
+  });
+});
+
 import {
   libraryGetWatch,
   librarySetWatch,

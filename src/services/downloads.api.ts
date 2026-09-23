@@ -11,6 +11,9 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 export interface DownloadManagerService {
   listTasks(args: { status?: string; limit: number; offset: number }): Promise<PagedResult<DownloadTaskDto>>;
   queue(args: { chapterIds: string[]; format?: "cbz" | "folder"; priority?: number }): Promise<QueueResultDto>;
+  /// Queue an arbitrary number of chapters: the Rust gate allows 100 ids per
+  /// call, so this chunks sequentially and aggregates one honest result.
+  queueMany(args: { chapterIds: string[]; format?: "cbz" | "folder" }): Promise<QueueResultDto>;
   pause(taskId: string): Promise<DownloadTaskDto>;
   resume(taskId: string): Promise<DownloadTaskDto>;
   cancel(taskId: string): Promise<DownloadTaskDto>;
@@ -26,6 +29,30 @@ function rethrow(err: unknown): never {
   throw new Error(normalizeIpcError(err).message);
 }
 
+/// Mirror of Rust `download_repo::MAX_BATCH_SIZE` — keep in sync.
+const QUEUE_BATCH_LIMIT = 100;
+
+async function queueMany(args: {
+  chapterIds: string[];
+  format?: "cbz" | "folder";
+}): Promise<QueueResultDto> {
+  const aggregated: QueueResultDto = {
+    tasks: [],
+    reused: [],
+    errors: [],
+    queuedAt: new Date().toISOString(),
+  };
+  for (let offset = 0; offset < args.chapterIds.length; offset += QUEUE_BATCH_LIMIT) {
+    const chunk = args.chapterIds.slice(offset, offset + QUEUE_BATCH_LIMIT);
+    const outcome = await downloadsApi.queue({ chapterIds: chunk, format: args.format });
+    aggregated.tasks.push(...outcome.tasks);
+    aggregated.reused.push(...outcome.reused);
+    aggregated.errors.push(...outcome.errors);
+    aggregated.queuedAt = outcome.queuedAt;
+  }
+  return aggregated;
+}
+
 export const downloadsApi: DownloadManagerService = {
   listTasks: (args) => desktop.listLocalDownloadTasks(args).catch(rethrow),
   queue: (args) =>
@@ -36,6 +63,7 @@ export const downloadsApi: DownloadManagerService = {
         priority: args.priority,
       })
       .catch(rethrow),
+  queueMany: (args) => queueMany(args).catch(rethrow),
   pause: (taskId) => desktop.pauseDownload(taskId).catch(rethrow),
   resume: (taskId) => desktop.resumeDownload(taskId).catch(rethrow),
   cancel: (taskId) => desktop.cancelDownload(taskId).catch(rethrow),

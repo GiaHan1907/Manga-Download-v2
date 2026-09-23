@@ -20,8 +20,6 @@ import { formatBytes } from "../../types/downloads";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 
-const MAX_BATCH = 100;
-
 export default function LocalMangaPage() {
   const { mangaId = "" } = useParams();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -119,18 +117,22 @@ export default function LocalMangaPage() {
     });
   }
   function toggleAll(on: boolean) {
-    setSelected(
-      on ? new Set(actionable.slice(0, MAX_BATCH).map((chapter) => chapter.id)) : new Set(),
-    );
+    // queueMany chunking removed the old 100-per-call cap on batch size.
+    setSelected(on ? new Set(actionable.map((chapter) => chapter.id)) : new Set());
   }
 
-  async function submit() {
-    if (selected.size === 0) return;
+  // Shared queue path for the manual selection AND the quick 5/10/all
+  // buttons — downloadsApi.queueMany chunks past the 100-per-call Rust cap.
+  async function queueChapters(chapterIds: string[], label: string) {
+    if (chapterIds.length === 0) {
+      pushToast("Không còn chương nào chưa tải để xếp hàng.");
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     setResult(null);
     try {
-      const outcome = await localServices.downloads.queue({ chapterIds: [...selected] });
+      const outcome = await localServices.downloads.queueMany({ chapterIds });
       setResult(outcome);
       setSelected(new Set());
       bumpDomain("downloads");
@@ -138,9 +140,11 @@ export default function LocalMangaPage() {
       if (outcome.tasks.length > 0 || outcome.reused.length > 0) {
         pushToast(
           outcome.reused.length > 0 && outcome.tasks.length === 0
-            ? `${outcome.reused.length} chương đã có sẵn trong hàng đợi.`
-            : `Đã xếp hàng ${outcome.tasks.length} chương${outcome.reused.length > 0 ? ` (${outcome.reused.length} trùng đã có)` : ""}.`,
+            ? `${outcome.reused.length} chương đã có sẵn trong hàng đợi (${label}).`
+            : `Đã xếp hàng ${outcome.tasks.length} chương${outcome.reused.length > 0 ? ` (${outcome.reused.length} trùng đã có)` : ""} — ${label}.`,
         );
+      } else if (outcome.errors.length > 0) {
+        pushToast(`Không xếp hàng được: ${outcome.errors[0].message}`);
       }
       setNonce((value) => value + 1);
     } catch (error) {
@@ -148,6 +152,18 @@ export default function LocalMangaPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function submit() {
+    if (selected.size === 0) return;
+    void queueChapters([...selected], "theo chọn");
+  }
+
+  function quickDownload(count: number | null) {
+    const targets = (count === null ? actionable : actionable.slice(0, count)).map(
+      (chapter) => chapter.id,
+    );
+    void queueChapters(targets, count === null ? "toàn bộ chương chưa tải" : `${count} chương tiếp`);
   }
 
   async function toggleFavorite() {
@@ -485,6 +501,35 @@ export default function LocalMangaPage() {
               <Download size={16} aria-hidden="true" />
               {submitting ? "Đang xếp hàng…" : `Tải ${selected.size} chương`}
             </Button>
+            {actionable.length > 0 && (
+              <span
+                className="chip-row"
+                role="group"
+                aria-label="Tải nhanh chương chưa tải"
+              >
+                <Button
+                  variant="secondary"
+                  disabled={!canDownload || submitting}
+                  onClick={() => quickDownload(5)}
+                >
+                  Tải 5 chương tiếp
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!canDownload || submitting}
+                  onClick={() => quickDownload(10)}
+                >
+                  Tải 10 chương tiếp
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!canDownload || submitting}
+                  onClick={() => quickDownload(null)}
+                >
+                  Tải tất cả ({actionable.length})
+                </Button>
+              </span>
+            )}
             <Button
               variant="ghost"
               disabled={cancelAllBusy}
