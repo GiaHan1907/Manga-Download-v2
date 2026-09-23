@@ -1,4 +1,4 @@
-import { Ban, Eraser, Pause, Play, RotateCcw } from "lucide-react";
+import { Ban, Eraser, Link, Pause, Play, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import Button from "../../components/ui/Button";
 import Dialog from "../../components/ui/Dialog";
@@ -7,6 +7,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import { pushToast } from "../../components/ui/toastStore";
+import { normalizeIpcError, queueChapterDownloadByUrl } from "../../shared/api/desktop";
 import type { DownloadTaskDto } from "../../types/backend";
 import {
   allowedDownloadActions,
@@ -110,6 +111,8 @@ export default function DownloadsPage() {
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeStatuses, setPurgeStatuses] = useState<string[]>(["failed", "cancelled"]);
   const [purgeOlderThanDays, setPurgeOlderThanDays] = useState<number | null>(7);
+  const [linkText, setLinkText] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
 
   const visible = useMemo(() => {
     const matcher = FILTERS.find((item) => item.id === filter) ?? FILTERS[0];
@@ -147,6 +150,35 @@ export default function DownloadsPage() {
       })
       .catch((err: unknown) => pushToast(err instanceof Error ? err.message : "Không xóa được lịch sử."))
       .finally(() => setBulkBusy(false));
+  }
+
+  // Paste-a-chapter-link quick download — resolution, auto-save of an
+  // unseen manga and queueing all happen in Rust; this only shows the
+  // path-free result.
+  async function downloadViaLink() {
+    const url = linkText.trim();
+    if (url === "") {
+      pushToast("Dán link chương truyện trước đã.");
+      return;
+    }
+    setLinkBusy(true);
+    try {
+      const result = await queueChapterDownloadByUrl({ url });
+      if (result.tasks.length > 0) {
+        pushToast("Đã xếp hàng 1 chương từ link.");
+        setLinkText("");
+      } else if (result.reused.length > 0) {
+        pushToast("Chương này đã có trong hàng đợi.");
+        setLinkText("");
+      } else {
+        pushToast(result.errors[0]?.message ?? "Không xếp hàng được từ link này.");
+      }
+      refresh();
+    } catch (err) {
+      pushToast(normalizeIpcError(err).message);
+    } finally {
+      setLinkBusy(false);
+    }
   }
 
   if (loading && tasks.length === 0) {
@@ -196,6 +228,23 @@ export default function DownloadsPage() {
           <Button variant="ghost" disabled={bulkBusy} onClick={() => setPurgeOpen(true)}>
             <Eraser size={14} aria-hidden="true" />
             Dọn lịch sử
+          </Button>
+        </div>
+        <div className="discover-controls" style={{ marginTop: "var(--space-3)" }}>
+          <input
+            className="input-field"
+            type="url"
+            value={linkText}
+            onChange={(event) => setLinkText(event.target.value)}
+            placeholder="Dán link chương (VD: https://site/manga/truyen/chuong-1/)"
+            aria-label="Link chương cần tải"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void downloadViaLink();
+            }}
+          />
+          <Button variant="secondary" disabled={linkBusy} onClick={() => void downloadViaLink()}>
+            <Link size={14} aria-hidden="true" />
+            {linkBusy ? "Đang xử lý…" : "Tải từ link"}
           </Button>
         </div>
       </section>

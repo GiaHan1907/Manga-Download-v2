@@ -140,6 +140,24 @@ impl SourceAdapter for FixtureProvider {
         url.host_str() == Some("fixture.manga1989.invalid") && url.path().starts_with("/manga/")
     }
 
+    /// Chapter grammar /manga/<known-id>/<chapter> — mirrors the Madara shape
+    /// so the paste-a-link service path is testable offline.
+    fn chapter_from_url(&self, url: &Url) -> Option<(String, String)> {
+        if !self.owns_url(url) {
+            return None;
+        }
+        let mut segments = url.path_segments()?.filter(|segment| !segment.is_empty());
+        if segments.next()? != "manga" {
+            return None;
+        }
+        let manga = segments.next()?;
+        let chapter = segments.next()?;
+        if segments.next().is_some() || !catalog().iter().any(|(known, _)| *known == manga) {
+            return None;
+        }
+        Some((manga.to_string(), chapter.to_string()))
+    }
+
     async fn search(&self, query: &str, page: u32) -> Result<RemoteSearchPage, SourceError> {
         match query {
             q if q.contains("__net") => return Err(SourceError::Network),

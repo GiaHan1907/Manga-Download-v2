@@ -283,6 +283,24 @@ impl SourceAdapter for MadaraGeneric {
         url.host_str() == Some(self.host.as_str()) && url.path().starts_with("/manga/")
     }
 
+    fn chapter_from_url(&self, url: &Url) -> Option<(String, String)> {
+        if !self.owns_url(url) {
+            return None;
+        }
+        let mut segments = url.path_segments()?.filter(|segment| !segment.is_empty());
+        if segments.next()? != "manga" {
+            return None;
+        }
+        let manga = segments.next()?;
+        let chapter = segments.next()?;
+        // Exactly /manga/<manga>/<chapter>/ — deeper paths and bad slugs are
+        // not chapter links.
+        if segments.next().is_some() || !valid_slug(manga) || !valid_slug(chapter) {
+            return None;
+        }
+        Some((manga.to_string(), chapter.to_string()))
+    }
+
     async fn search(&self, query: &str, page: u32) -> Result<RemoteSearchPage, SourceError> {
         if page > 1 {
             // The suggestion endpoint returns a single page of results.
@@ -628,6 +646,32 @@ mod tests {
         assert_eq!(
             detail.canonical_url.as_deref(),
             Some("https://truyentuoitho.com/manga/ninja-loan-thi/")
+        );
+    }
+
+    #[test]
+    fn chapter_from_url_maps_wellformed_chapter_links_only() {
+        let (provider, _) = adapter(vec![]);
+        let ok = |u: &str| provider.chapter_from_url(&Url::parse(u).unwrap());
+        assert_eq!(
+            ok("https://truyentuoitho.com/manga/ninja-loan-thi/tap-1/"),
+            Some(("ninja-loan-thi".to_string(), "tap-1".to_string()))
+        );
+        assert_eq!(
+            ok("https://truyentuoitho.com/manga/ninja-loan-thi/tap-1"),
+            Some(("ninja-loan-thi".to_string(), "tap-1".to_string())),
+            "trailing slash optional"
+        );
+        assert!(
+            ok("https://truyentuoitho.com/manga/ninja-loan-thi/tap-1/?x=1").is_some(),
+            "query strings do not affect the path grammar"
+        );
+        assert!(ok("https://truyentuoitho.com/manga/ninja-loan-thi/").is_none());
+        assert!(ok("https://truyentuoitho.com/manga/ninja-loan-thi/tap-1/extra/").is_none());
+        assert!(ok("https://evil.test/manga/ninja-loan-thi/tap-1/").is_none());
+        assert!(
+            ok("https://truyentuoitho.com/manga/ninja-loan-thi/tap%201/").is_none(),
+            "space in slug is not a valid slug"
         );
     }
 

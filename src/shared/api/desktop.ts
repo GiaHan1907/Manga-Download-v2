@@ -230,6 +230,17 @@ export async function cancelDownloadsForManga(mangaId: string): Promise<number> 
   return invoke<number>("cancel_downloads_for_manga", { mangaId });
 }
 
+/// Paste-a-chapter-link quick download: the URL is one the USER provided
+/// (same documented exception as resolveMangaUrl); Rust resolves it against
+/// registered adapters, saves the manga if needed and queues through the
+/// standard gate. Response is the normal path-free QueueResultDto.
+export async function queueChapterDownloadByUrl(args: {
+  url: string;
+  format?: string;
+}): Promise<QueueResultDto> {
+  return invoke<QueueResultDto>("queue_chapter_download_by_url", args);
+}
+
 /// Subscribe to coalesced task updates. Returns an unsubscribe function that
 /// MUST be called on teardown (design §8.2 listener cleanup).
 export async function subscribeDownloadTask(

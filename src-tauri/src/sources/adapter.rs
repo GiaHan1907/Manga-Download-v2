@@ -77,6 +77,12 @@ pub trait SourceAdapter: Send + Sync {
     async fn search(&self, query: &str, page: u32) -> Result<RemoteSearchPage, SourceError>;
     /// Extracts the stable manga id from a URL this adapter already owns.
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError>;
+    /// Recognizes a CHAPTER link of this source and returns
+    /// (source_manga_id, source_chapter_id). Default: not supported — manga
+    /// level import keeps using `resolve_url`.
+    fn chapter_from_url(&self, _url: &Url) -> Option<(String, String)> {
+        None
+    }
     async fn manga_detail(&self, source_manga_id: &str) -> Result<RemoteMangaDetail, SourceError>;
     /// Ordered page manifest for one chapter. Adapters override only when the
     /// source lawfully exposes page images; the default refuses so an

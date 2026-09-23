@@ -73,6 +73,21 @@ describe("F3b CBZ import IPC wrapper", () => {
   });
 });
 
+import { queueChapterDownloadByUrl } from "../src/shared/api/desktop";
+
+describe("paste-a-link IPC wrapper", () => {
+  it("sends the user-pasted url and returns the standard queue result", async () => {
+    const result = { tasks: [], reused: [], errors: [], queuedAt: "2026-09-23T00:00:00.000Z" };
+    vi.mocked(invoke).mockResolvedValue(result);
+    await expect(
+      queueChapterDownloadByUrl({ url: "https://site.test/manga/m/ch-1/" }),
+    ).resolves.toEqual(result);
+    expect(invoke).toHaveBeenCalledWith("queue_chapter_download_by_url", {
+      url: "https://site.test/manga/m/ch-1/",
+    });
+  });
+});
+
 import {
   libraryGetWatch,
   librarySetWatch,

@@ -9,7 +9,7 @@ use crate::domain::{
 };
 use crate::downloader::progress::TaskSink;
 use crate::error::AppError;
-use crate::services::{download_history_service, settings_service};
+use crate::services::{discovery_service, download_history_service, settings_service};
 use crate::sources::dto::Capability;
 
 /// Production sink: forwards engine events to the renderer on a fixed
@@ -76,6 +76,18 @@ pub async fn queue_chapter_downloads(
     format: Option<String>,
     priority: Option<i64>,
     state: tauri::State<'_, AppState>,
+) -> Result<QueueResultDto, AppError> {
+    submit_chapter_ids(&state, chapter_ids, format, priority).await
+}
+
+/// Shared queue path for the id-batch command AND the paste-a-link command,
+/// so capability gating, format validation and dedup semantics can never
+/// drift between entry points.
+async fn submit_chapter_ids(
+    state: &AppState,
+    chapter_ids: Vec<String>,
+    format: Option<String>,
+    priority: Option<i64>,
 ) -> Result<QueueResultDto, AppError> {
     if chapter_ids.len() > download_repo::MAX_BATCH_SIZE {
         return Err(AppError::validation("Tối đa 100 chương mỗi lần xếp hàng."));
@@ -168,6 +180,28 @@ pub async fn queue_chapter_downloads(
         errors,
         queued_at: now_iso(),
     })
+}
+
+/// Paste-a-chapter-link quick download. The renderer sends a URL the USER
+/// typed/pasted (same documented exception class as `resolve_manga_url`);
+/// Rust resolves it through registered adapters only (exact host + the
+/// adapter's path grammar), saves the manga through the normal discovery
+/// path if it is not in the library yet, then queues the chapter through
+/// the SAME gate as `queue_chapter_downloads`. No URL ever returns; the
+/// response is the standard path-free QueueResultDto.
+#[tauri::command]
+pub async fn queue_chapter_download_by_url(
+    url: String,
+    format: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<QueueResultDto, AppError> {
+    let registry = {
+        let guard = state.registry.lock().map_err(|_| AppError::Internal)?;
+        guard.clone()
+    };
+    let link = discovery_service::find_chapter_link(&registry, &url)?;
+    let chapter_id = discovery_service::ensure_chapter_row(&registry, &state.db, &link).await?;
+    submit_chapter_ids(&state, vec![chapter_id], format, None).await
 }
 
 #[tauri::command]

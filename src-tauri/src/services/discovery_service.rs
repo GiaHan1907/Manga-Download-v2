@@ -375,6 +375,71 @@ async fn fetch_detail(
 
 /// Explicit save: re-fetch from the trusted provider (never trusts renderer
 /// metadata), then one transaction upserting source/manga/chapters.
+/// A chapter link resolved by one registered adapter: which source and which
+/// stable ids inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChapterLink {
+    pub source_id: String,
+    pub manga_slug: String,
+    pub chapter_slug: String,
+}
+
+/// Classify a user-pasted URL through the registered adapters WITHOUT any
+/// network: exact https host of a registered source plus that adapter's own
+/// path grammar (`chapter_from_url`). Manga-level URLs intentionally do NOT
+/// match here — they belong to the Save-in-Discover flow.
+pub fn find_chapter_link(registry: &SourceRegistry, url: &str) -> Result<ChapterLink, AppError> {
+    let parsed = Url::parse(url.trim()).map_err(|_| AppError::validation("URL không hợp lệ."))?;
+    if parsed.scheme() != "https" {
+        return Err(AppError::validation("Chỉ hỗ trợ liên kết HTTPS."));
+    }
+    for adapter in registry.adapters() {
+        if let Some((manga_slug, chapter_slug)) = adapter.chapter_from_url(&parsed) {
+            return Ok(ChapterLink {
+                source_id: adapter.info().id,
+                manga_slug,
+                chapter_slug,
+            });
+        }
+    }
+    Err(AppError::validation(
+        "Link không thuộc nguồn đã đăng ký, hoặc không phải link chương (dạng /manga/<truyện>/<chương>/).",
+    ))
+}
+
+/// Ensure the manga exists locally (saving it through the normal discovery
+/// path on first sight — live validation included) and return the DB row id
+/// of the chapter the link points at.
+pub async fn ensure_chapter_row(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    link: &ChapterLink,
+) -> Result<String, AppError> {
+    let manga_id: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM mangas WHERE source_id = ?1 AND source_manga_id = ?2")
+            .bind(&link.source_id)
+            .bind(&link.manga_slug)
+            .fetch_optional(pool)
+            .await?;
+    let manga_id = match manga_id {
+        Some((id,)) => id,
+        None => {
+            save(registry, pool, &link.source_id, &link.manga_slug)
+                .await?
+                .manga_id
+        }
+    };
+    let chapter: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM chapters WHERE manga_id = ?1 AND source_chapter_id = ?2")
+            .bind(&manga_id)
+            .bind(&link.chapter_slug)
+            .fetch_optional(pool)
+            .await?;
+    chapter
+        .map(|(id,)| id)
+        .ok_or_else(|| AppError::not_found("chương tương ứng với link — nguồn có thể đã đổi slug"))
+}
+
 pub async fn save(
     registry: &SourceRegistry,
     pool: &SqlitePool,
@@ -768,5 +833,56 @@ mod tests {
             remove_manga_source(&pool, "mangadex").await,
             Err(AppError::Unsupported)
         ));
+    }
+
+    #[tokio::test]
+    async fn chapter_link_saves_unsaved_manga_then_resolves_chapter_row() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+
+        let link = find_chapter_link(
+            &registry,
+            "https://fixture.manga1989.invalid/manga/fx-01/fx-01-c1/",
+        )
+        .unwrap();
+        assert_eq!(link.source_id, "fixture");
+        assert_eq!(link.manga_slug, "fx-01");
+        assert_eq!(link.chapter_slug, "fx-01-c1");
+
+        // Manga not saved yet → ensure_chapter_row runs the normal save first.
+        assert_eq!(count(&pool, "mangas").await, 0);
+        let chapter_id = ensure_chapter_row(&registry, &pool, &link).await.unwrap();
+        assert_eq!(count(&pool, "mangas").await, 1);
+        let (manga_id,): (String,) = sqlx::query_as("SELECT manga_id FROM chapters WHERE id = ?1")
+            .bind(&chapter_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        // Second call is pure lookup — no duplicate manga.
+        let again = ensure_chapter_row(&registry, &pool, &link).await.unwrap();
+        assert_eq!(again, chapter_id);
+        assert_eq!(count(&pool, "mangas").await, 1);
+        let _ = manga_id;
+
+        // Unknown chapter slug for a known manga → honest not-found.
+        let bad = ChapterLink {
+            source_id: "fixture".to_string(),
+            manga_slug: "fx-01".to_string(),
+            chapter_slug: "no-such-chapter".to_string(),
+        };
+        assert!(ensure_chapter_row(&registry, &pool, &bad).await.is_err());
+
+        // Rejections at classification time: foreign host, http, manga-level.
+        assert!(
+            find_chapter_link(&registry, "https://evil.example/manga/fx-01/fx-01-c1/").is_err()
+        );
+        assert!(find_chapter_link(
+            &registry,
+            "http://fixture.manga1989.invalid/manga/fx-01/fx-01-c1/"
+        )
+        .is_err());
+        assert!(
+            find_chapter_link(&registry, "https://fixture.manga1989.invalid/manga/fx-01/").is_err()
+        );
     }
 }

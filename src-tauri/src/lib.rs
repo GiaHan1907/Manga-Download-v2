@@ -138,6 +138,7 @@ pub fn run() {
             commands::reading_progress::app_clear_read_history,
             commands::tasks::app_list_local_download_tasks,
             commands::downloads::queue_chapter_downloads,
+            commands::downloads::queue_chapter_download_by_url,
             commands::downloads::get_download_task,
             commands::downloads::pause_download,
             commands::downloads::resume_download,
