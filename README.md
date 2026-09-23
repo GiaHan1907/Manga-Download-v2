@@ -176,7 +176,7 @@ manga-downloader-1989/
 │   ├── shared/
 │   │   ├── api/
 │   │   │   ├── contracts.ts         # AppInfo, AppHealth, AppError types
-│   │   │   └── desktop.ts           # Sole IPC boundary: typed wrappers for all 38 commands + event listeners + binary page normalization
+│   │   │   └── desktop.ts           # Sole IPC boundary: typed wrappers for all 41 commands + event listeners + binary page normalization
 │   │   └── hooks/                   # useAsyncData, useServices (store), useInvalidation (6-domain bus), useDebouncedValue helpers
 │   └── styles/
 │       ├── tokens.css           # Semantic Dark Purple design tokens (colors, type, spacing, radii)
@@ -194,7 +194,7 @@ manga-downloader-1989/
 │   │   └── 0001_init.sql … 0005_library_reader.sql   # Forward-only chain; 0004 executed as runtime-repaired SQL (src/db/migrations_repaired/, original checksum kept)
 │   └── src/
 │       ├── main.rs              # Windows subsystem attr, calls lib::run()
-│       ├── lib.rs               # Builder: setup (DB init + storage prep + recovery pass + tray/notifications), 38 commands
+│       ├── lib.rs               # Builder: setup (DB init + storage prep + recovery pass + tray/notifications), 41 commands
 │       ├── app_state.rs         # AppState { db, registry, coordinator, events, … }
 │       ├── error.rs             # AppError enum → serialized { code, message, retryable }
 │       ├── commands/

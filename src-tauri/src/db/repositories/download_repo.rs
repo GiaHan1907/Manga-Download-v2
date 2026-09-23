@@ -605,6 +605,89 @@ pub async fn tasks_in_status(pool: &SqlitePool, status: &str) -> Result<Vec<Task
     Ok(rows)
 }
 
+/// Feature plan F2: history rows eligible for purge — status inside the
+/// requested TERMINAL set and `updated_at` at or before the cutoff. Timestamps
+/// are all `now_iso()`-normalized (fixed-width, UTC `Z`), so a lexicographic
+/// comparison is the correct chronological one.
+pub const TERMINAL_STATES: &[&str] = &["completed", "failed", "cancelled"];
+
+pub async fn history_candidates(
+    pool: &SqlitePool,
+    statuses: &[&str],
+    cutoff_iso: Option<&str>,
+) -> Result<Vec<TaskRow>, AppError> {
+    if statuses.is_empty() || !statuses.iter().all(|s| TERMINAL_STATES.contains(s)) {
+        return Err(AppError::validation("Trạng thái xóa không hợp lệ."));
+    }
+    let mut sql = format!(
+        "{TASK_SELECT} WHERE t.status IN ({})",
+        placeholders(1, statuses.len())
+    );
+    if cutoff_iso.is_some() {
+        sql.push_str(&format!(" AND t.updated_at <= ?{}", statuses.len() + 1));
+    }
+    sql.push_str(" ORDER BY t.updated_at ASC LIMIT 5000");
+    // Anonymous placeholders bind in textual order: statuses, then cutoff.
+    let mut query = sqlx::query_as::<_, TaskRow>(&sql);
+    for status in statuses {
+        query = query.bind(status);
+    }
+    if let Some(cutoff) = cutoff_iso {
+        query = query.bind(cutoff);
+    }
+    let rows = query.fetch_all(pool).await?;
+    Ok(rows)
+}
+
+/// Feature plan F2: delete ONE terminal row by id. The status guard is part
+/// of the DELETE so a task a user just retried can never be purged mid-run.
+/// `download_pages` follow via their ON DELETE CASCADE (schema 4 contract).
+pub async fn delete_terminal_task(pool: &SqlitePool, task_id: &str) -> Result<bool, AppError> {
+    crate::domain::validate_id(task_id, "taskId")?;
+    let changed = sqlx::query(
+        "DELETE FROM download_tasks WHERE id = ?1 AND status IN ('completed', 'failed', 'cancelled')",
+    )
+    .bind(task_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(changed == 1)
+}
+
+/// Feature plan F5: ids of `failed` tasks, FIFO (fair ordering with the
+/// dispatcher), capped so one bulk click cannot flood the queue.
+pub async fn retryable_failed_ids(
+    pool: &SqlitePool,
+    limit: usize,
+) -> Result<Vec<String>, AppError> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT id FROM download_tasks WHERE status = 'failed' ORDER BY created_at ASC LIMIT ?1",
+    )
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Feature plan F5: every NON-finished task id owned by any chapter of one
+/// manga (worker-active, queued or paused — terminal states excluded).
+pub async fn active_task_ids_for_manga(
+    pool: &SqlitePool,
+    manga_id: &str,
+) -> Result<Vec<String>, AppError> {
+    crate::domain::validate_id(manga_id, "mangaId")?;
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT t.id FROM download_tasks t JOIN chapters c ON c.id = t.chapter_id \
+         WHERE c.manga_id = ?1 AND t.status IN \
+         ('queued','resolving','downloading','pausing','paused','verifying','exporting') \
+         ORDER BY t.created_at ASC LIMIT 5000",
+    )
+    .bind(manga_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// Startup reconciliation of persisted lifecycle (crash-safe intent):
 /// queued/paused survive; `pausing` honors the user's pause intent; active
 /// worker states return to `queued` (checkpoints remain — resume is
@@ -738,6 +821,81 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(busy.reused[0].target_format, "folder");
+    }
+
+    #[tokio::test]
+    async fn t11_bulk_helpers_select_exactly_their_states_fifo_and_cap() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let chapter = seed_chapter(&pool, "c1").await;
+        let first = queue_batch(&pool, std::slice::from_ref(&chapter), "cbz", 0)
+            .await
+            .unwrap()
+            .created[0]
+            .clone();
+        // A second failed task on a sibling chapter, older created_at first.
+        let (manga_id,) =
+            sqlx::query_as::<_, (String,)>("SELECT manga_id FROM chapters WHERE id = ?1")
+                .bind(&chapter)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let (other_chapter, _) = upsert_chapter(&pool, &manga_id, "c2", "C2", None, None)
+            .await
+            .unwrap();
+        let second = queue_batch(&pool, std::slice::from_ref(&other_chapter), "cbz", 0)
+            .await
+            .unwrap()
+            .created[0]
+            .clone();
+        for task in [&first, &second] {
+            transition(&pool, &task.id, &["queued"], "failed")
+                .await
+                .unwrap();
+        }
+        // Third task stays queued — must not appear in retryable ids.
+        let (third_chapter, _) = upsert_chapter(&pool, &manga_id, "c3", "C3", None, None)
+            .await
+            .unwrap();
+        let third = queue_batch(&pool, std::slice::from_ref(&third_chapter), "cbz", 0)
+            .await
+            .unwrap()
+            .created[0]
+            .clone();
+
+        let failed_ids = retryable_failed_ids(&pool, 10).await.unwrap();
+        assert_eq!(failed_ids, vec![first.id.clone(), second.id.clone()]);
+        assert_eq!(
+            retryable_failed_ids(&pool, 1).await.unwrap().len(),
+            1,
+            "cap honored"
+        );
+
+        // Active-for-manga covers everything unfinished EXCEPT failed…
+        transition(&pool, &third.id, &["queued"], "paused")
+            .await
+            .unwrap();
+        let active = active_task_ids_for_manga(&pool, &manga_id).await.unwrap();
+        assert_eq!(
+            active,
+            vec![third.id.clone()],
+            "failed rows are not cancel targets"
+        );
+        // Guarded delete: non-terminal rows are refused, terminal ones go.
+        assert!(
+            !delete_terminal_task(&pool, &third.id).await.unwrap(),
+            "paused is not terminal — purge must never delete it"
+        );
+        assert!(delete_terminal_task(&pool, &first.id).await.unwrap());
+        assert_eq!(
+            retryable_failed_ids(&pool, 10).await.unwrap(),
+            vec![second.id.clone()]
+        );
+        assert!(
+            active_task_ids_for_manga(&pool, "bogus/../id")
+                .await
+                .is_err(),
+            "mangaId must pass id validation before SQL"
+        );
     }
 
     #[tokio::test]

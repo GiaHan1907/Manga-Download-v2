@@ -1,6 +1,7 @@
-import { Ban, Pause, Play, RotateCcw } from "lucide-react";
+import { Ban, Eraser, Pause, Play, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import Button from "../../components/ui/Button";
+import Dialog from "../../components/ui/Dialog";
 import DownloadCard from "../../components/ui/DownloadCard";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
@@ -81,6 +82,12 @@ function runAction(actions: ReturnType<typeof useDownloadQueue>["actions"], task
     .catch(() => undefined); // inline per-card feedback handles rejection
 }
 
+const PURGE_STATUS_LABELS: Record<string, string> = {
+  completed: "Hoàn tất",
+  failed: "Lỗi",
+  cancelled: "Đã hủy",
+};
+
 export default function DownloadsPage() {
   const {
     tasks,
@@ -91,12 +98,18 @@ export default function DownloadsPage() {
     loading,
     error,
     actions,
+    retryAllFailed,
+    clearHistory,
     refresh,
     total,
     offset,
     goPage,
   } = useDownloadQueue();
   const [filter, setFilter] = useState<FilterId>("all");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purgeStatuses, setPurgeStatuses] = useState<string[]>(["failed", "cancelled"]);
+  const [purgeOlderThanDays, setPurgeOlderThanDays] = useState<number | null>(7);
 
   const visible = useMemo(() => {
     const matcher = FILTERS.find((item) => item.id === filter) ?? FILTERS[0];
@@ -107,6 +120,34 @@ export default function DownloadsPage() {
     () => Object.fromEntries(FILTERS.map((item) => [item.id, tasks.filter((task) => item.match(task.status)).length])) as Record<FilterId, number>,
     [tasks],
   );
+
+  function retryEverythingFailed() {
+    setBulkBusy(true);
+    void retryAllFailed()
+      .then((count) => pushToast(count > 0 ? `Đã xếp hàng lại ${count} tác vụ lỗi.` : "Không còn tác vụ lỗi nào."))
+      .catch((err: unknown) => pushToast(err instanceof Error ? err.message : "Bulk retry thất bại."))
+      .finally(() => setBulkBusy(false));
+  }
+
+  function confirmPurge() {
+    if (purgeStatuses.length === 0) {
+      return;
+    }
+    setBulkBusy(true);
+    void clearHistory({
+      statuses: purgeStatuses,
+      olderThanDays: purgeOlderThanDays ?? undefined,
+    })
+      .then((outcome) => {
+        pushToast(
+          `Đã xóa ${outcome.deleted} mục lịch sử` +
+            (outcome.skippedArtifact > 0 ? ` · giữ ${outcome.skippedArtifact} mục còn file.` : "."),
+        );
+        setPurgeOpen(false);
+      })
+      .catch((err: unknown) => pushToast(err instanceof Error ? err.message : "Không xóa được lịch sử."))
+      .finally(() => setBulkBusy(false));
+  }
 
   if (loading && tasks.length === 0) {
     return (
@@ -145,6 +186,16 @@ export default function DownloadsPage() {
           ))}
           <Button variant="ghost" onClick={refresh}>
             Làm mới
+          </Button>
+          {counts.failed > 0 && (
+            <Button variant="secondary" disabled={bulkBusy} onClick={retryEverythingFailed}>
+              <RotateCcw size={14} aria-hidden="true" />
+              Thử lại tất cả lỗi ({counts.failed})
+            </Button>
+          )}
+          <Button variant="ghost" disabled={bulkBusy} onClick={() => setPurgeOpen(true)}>
+            <Eraser size={14} aria-hidden="true" />
+            Dọn lịch sử
           </Button>
         </div>
       </section>
@@ -238,6 +289,62 @@ export default function DownloadsPage() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={purgeOpen}
+        title="Dọn lịch sử tải"
+        description="Chỉ xóa dòng lịch sử trong DB — không bao giờ xóa file truyện đã tải. Các mục hoàn tất còn artifact trên đĩa được GIỮ LẠI (chúng là bằng chứng offline)."
+        onClose={() => setPurgeOpen(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPurgeOpen(false)}>
+              Hủy
+            </Button>
+            <Button
+              variant="primary"
+              disabled={bulkBusy || purgeStatuses.length === 0}
+              onClick={confirmPurge}
+            >
+              Xóa đã chọn
+            </Button>
+          </>
+        }
+      >
+        <div className="settings-actions" role="group" aria-label="Chọn trạng thái cần dọn">
+          {Object.entries(PURGE_STATUS_LABELS).map(([status, label]) => (
+            <label key={status} className="input-field input-field--check">
+              <input
+                type="checkbox"
+                checked={purgeStatuses.includes(status)}
+                onChange={(event) =>
+                  setPurgeStatuses((prev) =>
+                    event.target.checked ? [...prev, status] : prev.filter((s) => s !== status),
+                  )
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <label className="input-field" style={{ marginTop: "var(--space-3)" }}>
+          Cũ hơn
+          <select
+            className="input-field"
+            value={purgeOlderThanDays === null ? "all" : String(purgeOlderThanDays)}
+            onChange={(event) =>
+              setPurgeOlderThanDays(
+                event.target.value === "all" ? null : Number(event.target.value),
+              )
+            }
+            aria-label="Giới hạn tuổi của lịch sử bị xóa"
+          >
+            <option value="all">Toàn bộ thời gian</option>
+            <option value="7">7 ngày trước</option>
+            <option value="30">30 ngày trước</option>
+            <option value="90">90 ngày trước</option>
+          </select>
+        </label>
+      </Dialog>
     </div>
   );
 }

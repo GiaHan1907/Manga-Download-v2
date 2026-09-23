@@ -13,7 +13,7 @@ import type {
   SettingsPatchDto,
   StorageStatusDto,
 } from "../../types/backend";
-import type { QueueResultDto, DownloadTaskEvent } from "../../types/downloads";
+import type { QueueResultDto, DownloadTaskEvent, ClearHistoryDto } from "../../types/downloads";
 import type {
   DownloadedChapterDto,
   LibraryMangaDto,
@@ -187,6 +187,29 @@ export async function setDownloadPriority(args: {
   priority: number;
 }): Promise<DownloadTaskDto> {
   return invoke<DownloadTaskDto>("set_download_priority", args);
+}
+
+/// Feature plan F2: purge terminal history rows (Rust decides what is safe —
+/// completed-with-artifact rows are never deleted there).
+export async function clearDownloadHistory(args: {
+  statuses?: string[];
+  olderThanDays?: number;
+}): Promise<ClearHistoryDto> {
+  return invoke<ClearHistoryDto>("clear_download_history", {
+    statuses: args.statuses,
+    olderThanDays: args.olderThanDays,
+  });
+}
+
+/// Feature plan F5: bulk requeue of `failed` tasks (cap server-side, 200).
+export async function retryAllFailedDownloads(): Promise<number> {
+  return invoke<number>("retry_all_failed_downloads");
+}
+
+/// Feature plan F5: request cancel for every unfinished task of a manga.
+/// Returns the accepted count; final states arrive via task events.
+export async function cancelDownloadsForManga(mangaId: string): Promise<number> {
+  return invoke<number>("cancel_downloads_for_manga", { mangaId });
 }
 
 /// Subscribe to coalesced task updates. Returns an unsubscribe function that

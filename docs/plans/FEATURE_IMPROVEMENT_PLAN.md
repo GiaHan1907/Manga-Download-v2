@@ -1,5 +1,6 @@
 # Kế hoạch cải thiện Tính năng — Feature Roadmap v1.1+
 
+> **Trạng thái (2026-09-23):** **F2 + F5 ĐÃ TRIỂN KHAI** (tranche v1.0.x) — 3 lệnh IPC mới (registry 41), `download_history_service` + guard tests, UI Dialog dọn lịch sử + bulk retry/cancel, phản hồi toast. Gates: vitest 95/95 · cargo 138/138 · clippy sạch. Còn lại: **F1** (v1.1, đợt tiếp), **F3a/F3b** chờ user duyệt dependency flate2/dialog, **F4** (v1.2), **F6** owner-gate.
 > **Loại:** plan tính năng (khác `UI_IMPROVEMENT_PLAN.md` — tài liệu đó thuần presentation)
 > **Tác giả:** Codex Planner · **Ngày:** 2026-09-23
 > **Baseline:** `master` @ `3a0c255` (sau review toàn project 4 vòng; `v1.0.0` đang `RC_TESTED — PUBLICATION BLOCKED`)

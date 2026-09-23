@@ -1,7 +1,7 @@
 import * as desktop from "../shared/api/desktop";
 import { normalizeIpcError } from "../shared/api/desktop";
 import type { DownloadTaskDto, PagedResult } from "../types/backend";
-import type { QueueResultDto, DownloadTaskEvent } from "../types/downloads";
+import type { QueueResultDto, DownloadTaskEvent, ClearHistoryDto } from "../types/downloads";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 /// Phase 06 production boundary for the download engine — the single place
@@ -16,6 +16,9 @@ export interface DownloadManagerService {
   cancel(taskId: string): Promise<DownloadTaskDto>;
   retry(taskId: string): Promise<DownloadTaskDto>;
   setPriority(taskId: string, priority: number): Promise<DownloadTaskDto>;
+  clearHistory(args: { statuses?: string[]; olderThanDays?: number }): Promise<ClearHistoryDto>;
+  retryAllFailed(): Promise<number>;
+  cancelForManga(mangaId: string): Promise<number>;
   subscribe(handler: (event: DownloadTaskEvent) => void): Promise<UnlistenFn>;
 }
 
@@ -38,5 +41,8 @@ export const downloadsApi: DownloadManagerService = {
   cancel: (taskId) => desktop.cancelDownload(taskId).catch(rethrow),
   retry: (taskId) => desktop.retryDownload(taskId).catch(rethrow),
   setPriority: (taskId, priority) => desktop.setDownloadPriority({ taskId, priority }).catch(rethrow),
+  clearHistory: (args) => desktop.clearDownloadHistory(args).catch(rethrow),
+  retryAllFailed: () => desktop.retryAllFailedDownloads().catch(rethrow),
+  cancelForManga: (mangaId) => desktop.cancelDownloadsForManga(mangaId).catch(rethrow),
   subscribe: (handler) => desktop.subscribeDownloadTask(handler),
 };

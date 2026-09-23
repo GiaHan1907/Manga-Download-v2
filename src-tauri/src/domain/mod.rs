@@ -167,6 +167,19 @@ pub struct QueueResultDto {
     pub queued_at: String,
 }
 
+/// Feature plan F2 — result of a download-history purge. `skipped_artifact`
+/// counts completed tasks whose verified artifact is still on disk (their
+/// history row doubles as the offline proof, so it is never deleted);
+/// `skipped_other` counts rows a concurrent action moved out of the
+/// deletable state mid-purge.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearHistoryDto {
+    pub deleted: i64,
+    pub skipped_artifact: i64,
+    pub skipped_other: i64,
+}
+
 /// Phase 07 — reader manifest. Deliberately path-free: pages are addressed by
 /// index and served through `reader_get_page_bytes`.
 #[derive(Debug, Clone, Serialize)]

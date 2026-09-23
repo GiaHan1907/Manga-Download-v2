@@ -22,6 +22,7 @@ export default function LocalMangaPage() {
   const { mangaId = "" } = useParams();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [cancelAllBusy, setCancelAllBusy] = useState(false);
   const [result, setResult] = useState<QueueResultDto | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -306,6 +307,31 @@ export default function LocalMangaPage() {
             >
               <Download size={16} aria-hidden="true" />
               {submitting ? "Đang xếp hàng…" : `Tải ${selected.size} chương`}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={cancelAllBusy}
+              onClick={() => {
+                setCancelAllBusy(true);
+                void localServices.downloads
+                  .cancelForManga(mangaId)
+                  .then((accepted) =>
+                    pushToast(
+                      accepted > 0
+                        ? `Đã yêu cầu hủy ${accepted} tác vụ đang chạy.`
+                        : "Không có tác vụ nào đang chạy cho truyện này.",
+                    ),
+                  )
+                  .catch((error: unknown) =>
+                    pushToast(error instanceof Error ? error.message : "Không hủy được tác vụ."),
+                  )
+                  .finally(() => {
+                    setCancelAllBusy(false);
+                    bumpDomain("downloads");
+                  });
+              }}
+            >
+              Hủy mọi tác vụ của truyện
             </Button>
           </div>
         </div>

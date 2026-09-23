@@ -4,10 +4,12 @@ use tauri::Emitter;
 
 use crate::app_state::{AppState, RuntimeFlags};
 use crate::db::repositories::{download_repo, task_repo};
-use crate::domain::{now_iso, DownloadTaskDto, DownloadTaskEvent, QueueErrorDto, QueueResultDto};
+use crate::domain::{
+    now_iso, ClearHistoryDto, DownloadTaskDto, DownloadTaskEvent, QueueErrorDto, QueueResultDto,
+};
 use crate::downloader::progress::TaskSink;
 use crate::error::AppError;
-use crate::services::settings_service;
+use crate::services::{download_history_service, settings_service};
 use crate::sources::dto::Capability;
 
 /// Production sink: forwards engine events to the renderer on a fixed
@@ -218,4 +220,53 @@ pub async fn set_download_priority(
     state: tauri::State<'_, AppState>,
 ) -> Result<DownloadTaskDto, AppError> {
     state.downloads.set_priority(&task_id, priority).await
+}
+
+/// Feature plan F2 — purge download-history rows (terminal states only).
+/// Completed tasks whose verified artifact still exists on disk are skipped
+/// by design; no file is ever deleted here (that is Library's job).
+#[tauri::command]
+pub async fn clear_download_history(
+    statuses: Option<Vec<String>>,
+    older_than_days: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<ClearHistoryDto, AppError> {
+    download_history_service::clear(&state.db, &state.app_data_dir, statuses, older_than_days).await
+}
+
+/// Feature plan F5 — bulk-requeue every `failed` task (FIFO, capped).
+/// Each row goes through the same guarded retry transition as a single
+/// retry, so races with the dispatcher or a concurrent cancel are safe.
+#[tauri::command]
+pub async fn retry_all_failed_downloads(
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, AppError> {
+    const CAP: usize = 200;
+    let ids = download_repo::retryable_failed_ids(&state.db, CAP).await?;
+    let mut requeued = 0i64;
+    for id in ids {
+        if state.downloads.retry(&id).await.is_ok() {
+            requeued += 1;
+        }
+    }
+    Ok(requeued)
+}
+
+/// Feature plan F5 — request cancellation of every unfinished task owned by
+/// one manga. Active workers observe the same cooperative cancel flag as a
+/// per-task cancel (the response counts accepted requests, not settled
+/// states; the authoritative result arrives via task events).
+#[tauri::command]
+pub async fn cancel_downloads_for_manga(
+    manga_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, AppError> {
+    let ids = download_repo::active_task_ids_for_manga(&state.db, &manga_id).await?;
+    let mut accepted = 0i64;
+    for id in ids {
+        if state.downloads.cancel(&id).await.is_ok() {
+            accepted += 1;
+        }
+    }
+    Ok(accepted)
 }

@@ -184,6 +184,24 @@ export function useDownloadQueue() {
     [applyAction],
   );
 
+  /// Feature plan F5 bulk retry — server caps and guards every row; the
+  /// snapshot refetch afterwards is authoritative regardless of the count.
+  const retryAllFailed = useCallback(async (): Promise<number> => {
+    const count = await downloadsApi.retryAllFailed();
+    await refresh();
+    return count;
+  }, [refresh]);
+
+  /// Feature plan F2 purge — Rust decides what is safe to delete.
+  const clearHistory = useCallback(
+    async (opts: { statuses?: string[]; olderThanDays?: number }) => {
+      const outcome = await downloadsApi.clearHistory(opts);
+      await refresh();
+      return outcome;
+    },
+    [refresh],
+  );
+
   return {
     tasks,
     live,
@@ -193,6 +211,8 @@ export function useDownloadQueue() {
     loading,
     error,
     actions,
+    retryAllFailed,
+    clearHistory,
     total,
     offset,
     goPage: (nextOffset: number) => setOffset(Math.max(0, nextOffset)),

@@ -19,6 +19,15 @@ export type QueueResultDto = {
   queuedAt: string;
 };
 
+/// Feature plan F2 — purge result mirror (camelCase via serde).
+/// `skippedArtifact`: completed rows whose artifact is still on disk (kept on
+/// purpose); `skippedOther`: rows a concurrent action moved out of scope.
+export type ClearHistoryDto = {
+  deleted: number;
+  skippedArtifact: number;
+  skippedOther: number;
+};
+
 export const DOWNLOAD_EVENT = "download-task-updated";
 
 export type DownloadTaskEvent = {
