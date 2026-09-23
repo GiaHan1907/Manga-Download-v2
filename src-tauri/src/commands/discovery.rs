@@ -141,6 +141,7 @@ pub async fn get_manga_cover(
     let registry = snapshot(&state)?;
     let bytes = crate::services::cover_service::cover_bytes(
         &registry,
+        &state.db,
         &state.app_data_dir,
         &source_id,
         &source_manga_id,

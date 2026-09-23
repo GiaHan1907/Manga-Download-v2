@@ -197,7 +197,7 @@ pub async fn set_source_enabled(
     Ok(enabled)
 }
 
-fn require_enabled(
+pub(crate) fn require_enabled(
     registry: &SourceRegistry,
     rows: &[source_repo::SourceRow],
     source_id: &str,

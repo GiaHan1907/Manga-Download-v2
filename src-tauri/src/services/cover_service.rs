@@ -5,8 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
+use sqlx::SqlitePool;
+
+use crate::db::repositories::source_repo;
 use crate::downloader::image_validate;
 use crate::error::AppError;
+use crate::services::discovery_service::require_enabled;
 use crate::sources::http::COVER_MAX_BYTES;
 use crate::sources::registry::SourceRegistry;
 
@@ -46,21 +50,23 @@ fn cache_file(app_data_dir: &Path, source_id: &str, cover_key: &str) -> PathBuf 
 
 pub async fn cover_bytes(
     registry: &SourceRegistry,
+    pool: &SqlitePool,
     app_data_dir: &Path,
     source_id: &str,
     source_manga_id: &str,
     cover_key: &str,
 ) -> Result<Vec<u8>, AppError> {
     validate_cover_key(cover_key)?;
+    // Same gate every other discovery path uses, checked BEFORE the cache:
+    // disabling a source must hide its covers even when a copy is cached.
+    let rows = source_repo::list_sources(pool).await?;
+    let adapter = require_enabled(registry, &rows, source_id)?;
     let path = cache_file(app_data_dir, source_id, cover_key);
     if let Ok(cached) = std::fs::read(&path) {
         if !cached.is_empty() && cached.len() as u64 <= COVER_MAX_BYTES {
             return Ok(cached);
         }
     }
-    let adapter = registry
-        .get(source_id)
-        .ok_or_else(|| AppError::not_found("nguồn của ảnh bìa"))?;
     let bytes = adapter.fetch_cover(source_manga_id, cover_key).await?;
     image_validate::validate(&bytes, COVER_MAX_BYTES as usize)
         .map_err(|_| AppError::validation("Nguồn không trả về ảnh bìa hợp lệ."))?;
@@ -82,6 +88,7 @@ pub async fn cover_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::repositories::source_repo;
     use crate::sources::adapter::{SourceAdapter, SourceError};
     use crate::sources::dto::{
         Capability, RemoteMangaDetail, RemoteSearchPage, SourceInfo, SourceStatus,
@@ -151,14 +158,29 @@ mod tests {
 
     #[tokio::test]
     async fn first_call_fetches_second_call_serves_from_cache() {
+        let (_db, pool) = crate::db::test_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let (registry, adapter) = registry_with(png_like(7));
-        let first = cover_bytes(&registry, dir.path(), "covertest", "m1", "/a/cover.jpg")
-            .await
-            .unwrap();
-        let second = cover_bytes(&registry, dir.path(), "covertest", "m1", "/a/cover.jpg")
-            .await
-            .unwrap();
+        let first = cover_bytes(
+            &registry,
+            &pool,
+            dir.path(),
+            "covertest",
+            "m1",
+            "/a/cover.jpg",
+        )
+        .await
+        .unwrap();
+        let second = cover_bytes(
+            &registry,
+            &pool,
+            dir.path(),
+            "covertest",
+            "m1",
+            "/a/cover.jpg",
+        )
+        .await
+        .unwrap();
         assert_eq!(first, second);
         assert_eq!(
             adapter.calls.load(Ordering::SeqCst),
@@ -178,9 +200,10 @@ mod tests {
 
     #[tokio::test]
     async fn non_image_payload_is_refused_and_not_cached() {
+        let (_db, pool) = crate::db::test_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let (registry, _adapter) = registry_with(b"<html>nope</html>".to_vec());
-        let error = cover_bytes(&registry, dir.path(), "covertest", "m1", "/a/x.jpg")
+        let error = cover_bytes(&registry, &pool, dir.path(), "covertest", "m1", "/a/x.jpg")
             .await
             .unwrap_err();
         assert!(matches!(error, AppError::Validation(_)));
@@ -188,19 +211,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabled_source_is_refused_even_with_a_cached_copy() {
+        let (_db, pool) = crate::db::test_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (registry, adapter) = registry_with(png_like(9));
+        let bytes = cover_bytes(&registry, &pool, dir.path(), "covertest", "m1", "/a/c.jpg")
+            .await
+            .unwrap();
+        assert!(!bytes.is_empty());
+        source_repo::upsert_source(&pool, "covertest", "Cover Test", "fixture", None, None)
+            .await
+            .unwrap();
+        source_repo::set_enabled(&pool, "covertest", false)
+            .await
+            .unwrap();
+        let error = cover_bytes(&registry, &pool, dir.path(), "covertest", "m1", "/a/c.jpg")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            AppError::Source(SourceError::SourceDisabled)
+        ));
+        assert_eq!(
+            adapter.calls.load(Ordering::SeqCst),
+            1,
+            "the guard must run before any cache/adapter work"
+        );
+    }
+
+    #[tokio::test]
     async fn invalid_keys_and_unknown_sources_fail_before_fetch() {
+        let (_db, pool) = crate::db::test_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let (registry, adapter) = registry_with(png_like(1));
-        assert!(cover_bytes(&registry, dir.path(), "covertest", "m1", "")
-            .await
-            .is_err());
         assert!(
-            cover_bytes(&registry, dir.path(), "covertest", "m1", "/x\u{1}y")
+            cover_bytes(&registry, &pool, dir.path(), "covertest", "m1", "")
+                .await
+                .is_err()
+        );
+        assert!(
+            cover_bytes(&registry, &pool, dir.path(), "covertest", "m1", "/x\u{1}y")
                 .await
                 .is_err()
         );
         assert!(cover_bytes(
             &registry,
+            &pool,
             dir.path(),
             "covertest",
             "m1",
@@ -209,7 +265,7 @@ mod tests {
         .await
         .is_err());
         assert!(
-            cover_bytes(&registry, dir.path(), "othersrc", "m1", "/ok.jpg")
+            cover_bytes(&registry, &pool, dir.path(), "othersrc", "m1", "/ok.jpg")
                 .await
                 .is_err()
         );
@@ -218,9 +274,10 @@ mod tests {
 
     #[tokio::test]
     async fn adapter_errors_propagate_without_caching() {
+        let (_db, pool) = crate::db::test_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let (registry, _adapter) = registry_with(png_like(2));
-        let error = cover_bytes(&registry, dir.path(), "covertest", "m1", "__fail")
+        let error = cover_bytes(&registry, &pool, dir.path(), "covertest", "m1", "__fail")
             .await
             .unwrap_err();
         assert!(matches!(error, AppError::Source(SourceError::NotFound)));
