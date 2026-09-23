@@ -93,7 +93,7 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 111/111 tests (14 files: Phase 01 IPC → Phase 08 integration + reader logic + UI/feature-plan + cover-art boundary + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
+| `npm run test` | ✅ Pass | 112/112 tests (14 files: Phase 01 IPC → Phase 08 integration + reader logic + UI/feature-plan + cover-art boundary + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
 | `npm run build` | ✅ Pass | Vite → `dist/` (~408 kB JS; exact size in HANDOFF gate line) |
 | `cargo check` | ✅ Pass | clean |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |

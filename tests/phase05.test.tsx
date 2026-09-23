@@ -175,6 +175,45 @@ describe("T05 live search", () => {
     expect(await screen.findByText("<img src=x onerror=alert(1)>")).toBeDefined();
     expect(document.querySelector("img[src='x']")).toBeNull();
   });
+
+  it("appends page 2 via 'Xem thêm' without losing page 1, then hides the button", async () => {
+    const pages: Array<Record<string, unknown> | undefined> = [];
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_supported_sources") {
+        return Promise.resolve([TTT_SOURCE]);
+      }
+      if (cmd === "search_manga") {
+        pages.push(args);
+        const page = Number(args?.page ?? 1);
+        const item = (n: number) => ({
+          ...SEARCH_ITEM,
+          sourceMangaId: `m-${n}`,
+          title: page === 2 && n === 2 ? "Trang hai" : `Truyện ${n}`,
+        });
+        return Promise.resolve(
+          page === 1
+            ? { items: [item(1)], sourceErrors: [], hasMore: true }
+            : { items: [item(2)], sourceErrors: [], hasMore: false },
+        );
+      }
+      return Promise.resolve([]);
+    });
+    renderAt("/discover");
+    const input = await screen.findByPlaceholderText(/tối thiểu 2 ký tự/);
+    fireEvent.change(input, { target: { value: "ninja" } });
+
+    expect(await screen.findByText("Truyện 1")).toBeDefined();
+    const more = await screen.findByRole("button", { name: "Xem thêm" });
+    fireEvent.click(more);
+
+    expect(await screen.findByText("Trang hai")).toBeDefined();
+    // Page 1 stays visible while page 2 is appended below it.
+    expect(screen.getByText("Truyện 1")).toBeDefined();
+    // Exhausted hasMore hides the button; the second call carried page: 2.
+    expect(screen.queryByRole("button", { name: "Xem thêm" })).toBeNull();
+    expect(pages[0]).toEqual(expect.objectContaining({ page: 1 }));
+    expect(pages[1]).toEqual(expect.objectContaining({ page: 2 }));
+  });
 });
 
 describe("T05 URL import", () => {

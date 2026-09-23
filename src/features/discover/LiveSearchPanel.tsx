@@ -11,7 +11,11 @@ import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useDomainVersion } from "../../shared/hooks/useInvalidation";
-import type { RemoteMangaSummaryDto, SearchResultDto, SourceViewDto } from "../../types/source";
+import type {
+  RemoteMangaSummaryDto,
+  SearchResultDto,
+  SourceViewDto,
+} from "../../types/source";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 
@@ -35,6 +39,27 @@ function LiveSearchCard({ item }: { item: RemoteMangaSummaryDto }) {
   );
 }
 
+/// Append one page of results to what the user already sees, dropping items
+/// already present (adapters dedupe within a page, not across pages).
+function mergeUnique(
+  prev: RemoteMangaSummaryDto[],
+  next: RemoteMangaSummaryDto[],
+): RemoteMangaSummaryDto[] {
+  const seen = new Set(prev.map((item) => `${item.sourceId}:${item.sourceMangaId}`));
+  return [...prev, ...next.filter((item) => !seen.has(`${item.sourceId}:${item.sourceMangaId}`))];
+}
+
+/// Pages loaded via "Xem thêm" plus their transient UI state. Keyed by the
+/// search identity so a query/filter change drops stale pages immediately.
+type MoreState = {
+  key: string;
+  pages: SearchResultDto[];
+  loading: boolean;
+  error: string | null;
+};
+
+const EMPTY_MORE: MoreState = { key: "", pages: [], loading: false, error: null };
+
 export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState<string[]>([]);
@@ -54,15 +79,61 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   const effectiveIds =
     selected.length > 0 ? selected.filter((id) => searchable.some((s) => s.id === id)) : undefined;
 
+  // One search identity: query + source filter + manual reload. Page 1 is
+  // always refetched on change; extra pages are dropped render-side (the
+  // React derived-state pattern — no effect, no stale-frame flash).
+  const searchKey = ["q", debounced, effectiveIds?.join(",") ?? "all", "r", reload].join("|");
+  const [more, setMore] = useState<MoreState>(EMPTY_MORE);
+  if (more.key !== searchKey) {
+    setMore({ key: searchKey, pages: [], loading: false, error: null });
+  }
+
   const results = useAsyncData<SearchResultDto | null>(
     () =>
       debounced.length < 2
         ? Promise.resolve(null)
-        : localServices.source.search({ query: debounced, sourceIds: effectiveIds }),
+        : localServices.source.search({ query: debounced, sourceIds: effectiveIds, page: 1 }),
     // effectiveIds key: disabling/removing a source must invalidate rendered
     // results that were gathered from sources which are no longer searchable.
     [debounced, selected.join(","), effectiveIds?.join(",") ?? "all", reload],
   );
+
+  // Everything below is derived during render — accumulating in an effect
+  // would only add cascading renders.
+  const firstPage = results.state === "success" ? results.data : null;
+  const allPages: SearchResultDto[] = firstPage ? [firstPage, ...more.pages] : [];
+  const items = allPages.reduce(
+    (acc, page) => (page === firstPage ? page.items : mergeUnique(acc, page.items)),
+    [] as RemoteMangaSummaryDto[],
+  );
+  const sourceErrors = allPages.length > 0 ? allPages[allPages.length - 1].sourceErrors : [];
+  const hasMore = allPages.length > 0 ? allPages[allPages.length - 1].hasMore : false;
+
+  async function loadMore() {
+    if (more.loading || debounced.length < 2) {
+      return;
+    }
+    const key = searchKey;
+    const nextPage = more.pages.length + 2;
+    setMore((current) => (current.key === key ? { ...current, loading: true, error: null } : current));
+    try {
+      const page = await localServices.source.search({
+        query: debounced,
+        sourceIds: effectiveIds,
+        page: nextPage,
+      });
+      // A stale response (query changed mid-flight) must not leak in.
+      setMore((current) =>
+        current.key === key ? { ...current, pages: [...current.pages, page], loading: false } : current,
+      );
+    } catch (error: unknown) {
+      setMore((current) =>
+        current.key === key
+          ? { ...current, loading: false, error: normalizeIpcError(error).message }
+          : current,
+      );
+    }
+  }
 
   function toggleSource(sourceId: string) {
     setSelected((current) =>
@@ -84,7 +155,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
     );
   }
 
-  const failedSources = results.state === "success" ? results.data?.sourceErrors ?? [] : [];
+  const failedSources = sourceErrors;
 
   return (
     <div className="page-stack">
@@ -128,7 +199,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
         </ul>
       )}
 
-      {results.state === "loading" && (
+      {results.state === "loading" && items.length === 0 && (
         <div className="card-grid" aria-busy="true">
           <Skeleton height="18rem" />
           <Skeleton height="18rem" />
@@ -149,7 +220,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
       )}
       {results.state === "success" &&
         results.data !== null &&
-        results.data.items.length === 0 &&
+        items.length === 0 &&
         failedSources.length === 0 && (
           <EmptyState
             title="Không có kết quả"
@@ -157,15 +228,27 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
             action={<Button onClick={() => setQuery("")}>Xóa từ khóa</Button>}
           />
         )}
-      {results.state === "success" && results.data !== null && results.data.items.length > 0 && (
+      {items.length > 0 && (
         <div className="card-grid">
-          {results.data.items.map((item) => (
+          {items.map((item) => (
             <LiveSearchCard
               key={`${item.sourceId}:${item.sourceMangaId}`}
               item={item}
             />
           ))}
         </div>
+      )}
+      {items.length > 0 && hasMore && (
+        <div className="settings-actions">
+          <Button variant="secondary" disabled={more.loading} onClick={() => void loadMore()}>
+            {more.loading ? "Đang tải trang tiếp…" : "Xem thêm"}
+          </Button>
+        </div>
+      )}
+      {more.error && (
+        <p className="queue-error" role="alert">
+          Không tải được trang tiếp theo ({more.error}) — bấm "Xem thêm" để thử lại.
+        </p>
       )}
       <p className="muted">
         Kết quả là metadata từ xa — chưa có gì được lưu hay tải về. Mở một mục để xem trước chi tiết.
