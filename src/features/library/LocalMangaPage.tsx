@@ -245,23 +245,42 @@ export default function LocalMangaPage() {
                   : ""}
               </p>
             </div>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                const effective = watch.data.state.enabled ?? true;
-                void localServices.libraryV2
-                  .setWatch({ mangaId, enabled: !effective })
-                  .then(() => {
-                    pushToast(effective ? "Đã tắt theo dõi chương mới." : "Đã bật theo dõi chương mới.");
-                    setAlertsNonce((value) => value + 1);
-                  })
-                  .catch((error: unknown) =>
-                    pushToast(error instanceof Error ? error.message : "Không đổi được theo dõi."),
-                  );
-              }}
-            >
-              {(watch.data.state.enabled ?? true) ? "Tắt theo dõi" : "Bật theo dõi"}
-            </Button>
+            {/* Security-review follow-up: tri-state control — the old binary
+                toggle could never restore "follow the global setting" (NULL). */}
+            <div className="settings-actions" role="group" aria-label="Chế độ theo dõi chương mới">
+              {(
+                [
+                  { value: true, label: "Bật theo dõi" },
+                  { value: false, label: "Tắt theo dõi" },
+                  { value: null, label: "Theo cài đặt chung" },
+                ] as const
+              ).map((option) => (
+                <Button
+                  key={option.label}
+                  variant={watch.data.state.enabled === option.value ? "primary" : "secondary"}
+                  disabled={watch.data.state.enabled === option.value}
+                  onClick={() => {
+                    void localServices.libraryV2
+                      .setWatch({ mangaId, enabled: option.value })
+                      .then(() => {
+                        pushToast(
+                          option.value === null
+                            ? "Đã đặt theo cài đặt chung."
+                            : option.value
+                              ? "Đã bật theo dõi chương mới cho truyện này."
+                              : "Đã tắt theo dõi chương mới cho truyện này.",
+                        );
+                        setAlertsNonce((value) => value + 1);
+                      })
+                      .catch((error: unknown) =>
+                        pushToast(error instanceof Error ? error.message : "Không đổi được theo dõi."),
+                      );
+                  }}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
           </div>
           {watch.data.alerts.length > 0 && (
             <div className="queue-result" role="status">

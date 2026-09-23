@@ -3,8 +3,8 @@
 //! selection, adapter pacing, per-manga backoff, and ONE aggregate native
 //! notification + `library-alerts` event per tick — never per chapter.
 
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
@@ -14,9 +14,10 @@ use crate::error::AppError;
 use crate::services::{settings_service, watch_service};
 
 /// Manual checks are rate-limited so a clicking user cannot outpace the
-/// per-host pacing the adapters enforce.
-const MANUAL_MIN_INTERVAL_SECS: i64 = 60;
-static LAST_MANUAL: AtomicI64 = AtomicI64::new(0);
+/// per-host pacing the adapters enforce. Monotonic clock (`Instant`) —
+/// wall-clock steps/NTP must never widen or shrink the window.
+const MANUAL_MIN_INTERVAL: Duration = Duration::from_secs(60);
+static LAST_MANUAL: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,20 +78,17 @@ pub async fn watch_run_now(
     state: tauri::State<'_, AppState>,
     handle: tauri::AppHandle,
 ) -> Result<WatchTickDto, AppError> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    // CAS so two concurrent clicks cannot both start a tick.
-    LAST_MANUAL
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |last| {
-            if now - last >= MANUAL_MIN_INTERVAL_SECS {
-                Some(now)
-            } else {
-                None
+    {
+        // Hold the lock only for the check-and-stamp (no await inside), so
+        // two concurrent clicks serialize and exactly one wins.
+        let mut last = LAST_MANUAL.lock().map_err(|_| AppError::Internal)?;
+        if let Some(previous) = *last {
+            if previous.elapsed() < MANUAL_MIN_INTERVAL {
+                return Err(AppError::Conflict);
             }
-        })
-        .map_err(|_| AppError::Conflict)?;
+        }
+        *last = Some(Instant::now());
+    }
     perform_tick(&handle, state.inner(), true).await
 }
 

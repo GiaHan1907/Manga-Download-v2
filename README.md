@@ -93,12 +93,12 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 85/85 tests (Phase 01 IPC → Phase 08 integration + reader logic + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
-| `npm run build` | ✅ Pass | Vite → `dist/` (~386 kB JS; exact size in HANDOFF gate line) |
+| `npm run test` | ✅ Pass | 97/97 tests (13 files: Phase 01 IPC → Phase 08 integration + reader logic + UI/feature-plan + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
+| `npm run build` | ✅ Pass | Vite → `dist/` (~402 kB JS; exact size in HANDOFF gate line) |
 | `cargo check` | ✅ Pass | clean |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
-| `cargo test` | ✅ Pass | 134/134 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
-| `npm run tauri dev` | ✅ Smoke | Last smoke after whole-project review 4 vòng (2026-09-23): app chạy thật, DB reopen schema 5 không reset |
+| `cargo test` | ✅ Pass | 143/143 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
+| `npm run tauri dev` | ✅ Smoke | Last smoke after feature-plan review 4 vòng (2026-09-23): app chạy thật, không panic; DB reopen schema 7 không reset |
 | `npm run tauri build` | ✅ Pass (2026-09-23, NSIS-only) | Exit 0; artifact + SHA-256 hiện hành trong `docs/phase-10/ARTIFACT_MANIFEST.md` (`2245f30e…a90674`). Chạy thử bản cài đặt trên VM sạch: chờ user xác nhận |
 
 ---

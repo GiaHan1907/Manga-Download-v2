@@ -28,6 +28,8 @@
 
 Toàn bộ dữ liệu (DB, library, cache) nằm trong `%APPDATA%\com.manga1989.downloader`. Không có telemetry, không upload thư viện, không account. Gỡ cài đặt **không** xóa dữ liệu người dùng.
 
+- **Theo dõi chương mới (mặc định BẬT cho người dùng mới và sau nâng cấp — chủ đích, nêu rõ ở đây):** app định kỳ (~6 giờ khi đang chạy) chỉ lấy *metadata* danh sách chương của truyện bạn đã lưu, đúng qua host nguồn đã đăng ký với pacing sẵn có; không tải chương, không gửi gì đi. Tắt toàn cục trong Settings hoặc từng truyện trong trang chi tiết ("Theo cài đặt chung" = theo khóa toàn cục).
+
 ## Attribution
 
 Stack: React + TypeScript + Vite · Tauri 2 (Rust/Tokio) · SQLite/SQLx. Binary chứa các crate/npm dependency nguồn mở theo license tương ứng (manifest trong `ARTIFACT_MANIFEST.md`).

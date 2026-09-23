@@ -67,6 +67,10 @@ describe("F1 watch IPC wrappers", () => {
     await librarySetWatch({ mangaId: "m1", enabled: false });
     expect(invoke).toHaveBeenCalledWith("library_set_watch", { mangaId: "m1", enabled: false });
 
+    // Security-review follow-up: NULL restores "follow the global setting".
+    await librarySetWatch({ mangaId: "m1", enabled: null });
+    expect(invoke).toHaveBeenCalledWith("library_set_watch", { mangaId: "m1", enabled: null });
+
     vi.mocked(invoke).mockResolvedValue([]);
     await libraryListAlerts("m1");
     expect(invoke).toHaveBeenCalledWith("library_list_alerts", { mangaId: "m1" });
