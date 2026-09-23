@@ -228,6 +228,58 @@ impl MadaraGeneric {
         Some(chapter.to_string())
     }
 
+    /// One search-results card (any Madara container variant) → summary.
+    /// Non-manga links, duplicate slugs and foreign-host thumbnails are
+    /// dropped; the cover stays a path key on the base host only.
+    fn collect_cards(
+        &self,
+        document: &Html,
+        containers: &Selector,
+        title_link: &Selector,
+        thumb: &Selector,
+        seen: &mut HashSet<String>,
+        items: &mut Vec<RemoteMangaSummary>,
+    ) {
+        for node in document.select(containers) {
+            let Some(link) = node.select(title_link).next() else {
+                continue;
+            };
+            let Some(href) = link.value().attr("href") else {
+                continue;
+            };
+            let Some(slug) = self.slug_from_manga_url(href) else {
+                continue;
+            };
+            if !seen.insert(slug.clone()) {
+                continue;
+            }
+            let raw_title = link.text().collect::<String>().trim().to_string();
+            let title = if raw_title.is_empty() {
+                slug.clone()
+            } else {
+                raw_title
+            };
+            let cover_key = node.select(thumb).find_map(|image| {
+                ["src", "data-src", "data-lazy-src", "data-original"]
+                    .iter()
+                    .find_map(|attr| image.value().attr(attr))
+                    .and_then(|raw| self.cover_key_from_src(raw))
+            });
+            items.push(RemoteMangaSummary {
+                source_id: self.id.clone(),
+                source_manga_id: slug,
+                source_display_name: self.display_name.clone(),
+                title,
+                author: None,
+                cover_key,
+                status: "unknown".to_string(),
+            });
+            if items.len() >= 50 {
+                return;
+            }
+        }
+    }
+
     /// Extract chapter links from any fragment (page or AJAX markup). Only
     /// same-manga, same-host slugs survive — sidebar/related links for other
     /// series are filtered out by `chapter_slug_from_url`.
@@ -344,49 +396,32 @@ impl SourceAdapter for MadaraGeneric {
         };
         let html = self.http.get_text(&search_url).await?;
         let document = Html::parse_document(&html);
-        let row = Selector::parse("div.row.c-tabs-item__content").unwrap();
-        let title_link =
-            Selector::parse("div.post-title h3 a[href], div.post-title a[href]").unwrap();
-        let thumb = Selector::parse("div.tab-thumb img, .c-image img").unwrap();
         let mut items: Vec<RemoteMangaSummary> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        for node in document.select(&row) {
-            let Some(link) = node.select(&title_link).next() else {
-                continue;
-            };
-            let Some(href) = link.value().attr("href") else {
-                continue;
-            };
-            let Some(slug) = self.slug_from_manga_url(href) else {
-                continue;
-            };
-            if !seen.insert(slug.clone()) {
-                continue;
-            }
-            let raw_title = link.text().collect::<String>().trim().to_string();
-            let title = if raw_title.is_empty() {
-                slug.clone()
-            } else {
-                raw_title
-            };
-            let cover_key = node.select(&thumb).find_map(|image| {
-                ["src", "data-src", "data-lazy-src", "data-original"]
-                    .iter()
-                    .find_map(|attr| image.value().attr(attr))
-                    .and_then(|raw| self.cover_key_from_src(raw))
-            });
-            items.push(RemoteMangaSummary {
-                source_id: self.id.clone(),
-                source_manga_id: slug,
-                source_display_name: self.display_name.clone(),
-                title,
-                author: None,
-                cover_key,
-                status: "unknown".to_string(),
-            });
-            if items.len() >= 50 {
-                break;
-            }
+        // Primary: the tabbed search layout most Madara sites ship.
+        self.collect_cards(
+            &document,
+            &Selector::parse("div.row.c-tabs-item__content").unwrap(),
+            &Selector::parse("div.post-title h3 a[href], div.post-title a[href]").unwrap(),
+            &Selector::parse("div.tab-thumb img, .c-image img").unwrap(),
+            &mut seen,
+            &mut items,
+        );
+        if items.is_empty() {
+            // Fallback: grid forks (.page-item-detail). Scoped to the two
+            // listing wrappers so sidebar "popular" widgets can never
+            // masquerade as search results.
+            self.collect_cards(
+                &document,
+                &Selector::parse(
+                    ".page-content-listing .page-item-detail, .tab-content-wrap .page-item-detail",
+                )
+                .unwrap(),
+                &Selector::parse("div.post-title a[href], h3 a[href]").unwrap(),
+                &Selector::parse(".poster img, .c-image img, img").unwrap(),
+                &mut seen,
+                &mut items,
+            );
         }
         let has_more = document
             .select(
@@ -716,6 +751,45 @@ mod tests {
             "url was {}",
             requested[0].1
         );
+    }
+
+    const SEARCH_GRID_FIXTURE: &str = r#"<html><body>
+      <div class="page-content-listing single-page">
+        <div class="row page-item-detail">
+          <div class="poster"><a href="https://truyentuoitho.com/manga/dao-hai-tac/">
+            <img src="https://truyentuoitho.com/wp-content/dht-193x278.jpg"/>
+          </a></div>
+          <h3 class="h4"><a href="https://truyentuoitho.com/manga/dao-hai-tac/">Đảo Hải Tặc</a></h3>
+        </div>
+        <div class="row page-item-detail">
+          <h3 class="h4"><a href="https://truyentuoitho.com/manga/ninja-loan-thi/">Ninja Loạn Thị</a></h3>
+        </div>
+      </div>
+      <div class="widget c-popular"><div class="row page-item-detail">
+        <h3 class="h4"><a href="https://truyentuoitho.com/manga/sidebar-spam/">Không phải kết quả</a></h3>
+      </div></div>
+      </body></html>"#;
+
+    #[tokio::test]
+    async fn search_falls_back_to_grid_variant_without_sidebar_pollution() {
+        let (provider, _) = adapter(vec![Ok(SEARCH_GRID_FIXTURE)]);
+        let page = provider.search("dao", 1).await.unwrap();
+        let slugs: Vec<&str> = page
+            .items
+            .iter()
+            .map(|item| item.source_manga_id.as_str())
+            .collect();
+        assert_eq!(
+            slugs,
+            vec!["dao-hai-tac", "ninja-loan-thi"],
+            "grid containers parse; popular-widget copy is excluded"
+        );
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/wp-content/dht-193x278.jpg")
+        );
+        assert_eq!(page.items[1].cover_key, None);
+        assert!(!page.has_more);
     }
 
     #[tokio::test]
