@@ -36,6 +36,30 @@ const WINDOWS_RESERVED: &[&str] = &[
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// Transliterate one accented Latin (Vietnamese-first) letter to its ASCII
+/// base, so slugs read as words instead of consonant soup: "Loạn Thị" ->
+/// "loan-thi". Unknown letters fall through to the caller's existing rules.
+fn latinize(ch: char) -> Option<&'static str> {
+    Some(match ch.to_lowercase().next()? {
+        'à' | 'á' | 'ạ' | 'ả' | 'ã' | 'â' | 'ầ' | 'ấ' | 'ẩ' | 'ẫ' | 'ậ' | 'ă' | 'ằ' | 'ắ' | 'ẳ'
+        | 'ẵ' | 'ặ' | 'ā' | 'å' | 'ä' => "a",
+        'è' | 'é' | 'ẹ' | 'ẻ' | 'ẽ' | 'ê' | 'ề' | 'ế' | 'ể' | 'ễ' | 'ệ' | 'ē' | 'ĕ' | 'ė' | 'ę' => {
+            "e"
+        }
+        'ì' | 'í' | 'ỉ' | 'ĩ' | 'ị' | 'ī' | 'ĭ' | 'ï' => "i",
+        'ò' | 'ó' | 'ọ' | 'ỏ' | 'õ' | 'ô' | 'ồ' | 'ố' | 'ổ' | 'ỗ' | 'ộ' | 'ơ' | 'ờ' | 'ớ' | 'ở'
+        | 'ỡ' | 'ợ' | 'ø' | 'ō' | 'ŏ' | 'ö' => "o",
+        'ù' | 'ú' | 'ủ' | 'ũ' | 'ụ' | 'ư' | 'ừ' | 'ứ' | 'ử' | 'ữ' | 'ự' | 'ū' | 'ŭ' | 'ü' => {
+            "u"
+        }
+        'ỳ' | 'ý' | 'ỷ' | 'ỹ' | 'ỵ' => "y",
+        'đ' => "d",
+        'ç' => "c",
+        'ñ' => "n",
+        _ => return None,
+    })
+}
+
 /// Sanitize one free-text label (manga/chapter title) for safe use as a file
 /// or directory name component on Windows: ASCII-ish slug, no separators,
 /// no reserved device names, no trailing dots/spaces, bounded length.
@@ -43,6 +67,18 @@ pub fn sanitize_label(raw: &str) -> String {
     let mut out: String = String::new();
     let mut last_dash = true; // suppress leading/duplicate separators
     for ch in raw.trim().chars() {
+        // Vietnamese-first transliteration: push the ASCII folding instead of
+        // dropping the letter outright.
+        if let Some(folded) = latinize(ch) {
+            for mapped in folded.chars() {
+                out.push(mapped);
+            }
+            last_dash = false;
+            if out.len() >= 80 {
+                break;
+            }
+            continue;
+        }
         let mapped = match ch {
             c if c.is_ascii_alphanumeric() => Some(c.to_ascii_lowercase()),
             // Separators and punctuation collapse into a single dash; other
@@ -102,36 +138,27 @@ pub fn manga_dir_name(manga_title: &str, manga_id: &str) -> String {
     format!("{}-{token}", sanitize_label(manga_title))
 }
 
-/// Library-relative file name for a chapter artifact. The task token makes
-/// each artifact traceable to exactly one task (crash recovery + collision
-/// policy); no user text ever reaches the name unsanitized.
-pub fn chapter_file_name(
-    chapter_title: &str,
-    chapter_id: &str,
-    task_id: &str,
-    format: &str,
-) -> String {
-    let chapter_token = id_token(chapter_id);
-    let task_token = id_token(task_id);
-    let extension = if format == "folder" {
-        String::new()
+/// Feature: clean artifact stem for NEW downloads — `chapter-<number>`
+/// (dots in fractional numbers become dashes; 1.5 -> `chapter-1-5`).
+/// Unnumbered/absurd chapters keep a token-traceable name so the
+/// collision/adopt policy still holds.
+pub fn chapter_artifact_stem(number: Option<f64>, chapter_id: &str) -> String {
+    let numbered = number.filter(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0e7);
+    match numbered {
+        Some(value) if value.fract() == 0.0 => format!("chapter-{}", value as i64),
+        Some(value) => format!("chapter-{}", value.to_string().replace('.', "-")),
+        None => format!("chapter-{}", id_token(chapter_id)),
+    }
+}
+
+/// Full clean artifact name (file with extension, folder without).
+pub fn chapter_artifact_name(number: Option<f64>, chapter_id: &str, format: &str) -> String {
+    let stem = chapter_artifact_stem(number, chapter_id);
+    if format == "folder" {
+        stem
     } else {
-        format!(".{format}")
-    };
-    format!(
-        "ch-{}-{}-t{}{extension}",
-        sanitize_label(chapter_title),
-        if chapter_token.is_empty() {
-            "c".to_string()
-        } else {
-            chapter_token
-        },
-        if task_token.is_empty() {
-            "t".to_string()
-        } else {
-            task_token
-        },
-    )
+        format!("{stem}.{format}")
+    }
 }
 
 /// Task ids are app-generated uuid-ish tokens; staging directory names must
@@ -228,6 +255,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clean_artifact_names_are_safe_and_predictable() {
+        assert_eq!(chapter_artifact_stem(Some(1.0), "abc"), "chapter-1");
+        assert_eq!(chapter_artifact_stem(Some(1.5), "abc"), "chapter-1-5");
+        assert_eq!(
+            chapter_artifact_stem(None, "id-xyz"),
+            format!("chapter-{}", id_token("id-xyz"))
+        );
+        assert_eq!(
+            chapter_artifact_stem(Some(f64::NAN), "id-xyz"),
+            format!("chapter-{}", id_token("id-xyz"))
+        );
+        assert_eq!(
+            chapter_artifact_name(Some(2.0), "c", "cbz"),
+            "chapter-2.cbz"
+        );
+        assert_eq!(chapter_artifact_name(Some(2.0), "c", "folder"), "chapter-2");
+        assert!(assert_safe_name_component(&chapter_artifact_name(Some(1.5), "c", "cbz")).is_ok());
+    }
+
+    #[test]
     fn t06_19_sanitizer_neutralizes_windows_hazards() {
         assert_eq!(sanitize_label("../../etc/passwd"), "etc-passwd");
         assert_eq!(sanitize_label("CON"), "_con");
@@ -244,8 +291,9 @@ mod tests {
         assert_eq!(sanitize_label("D:\\evil"), "d-evil");
         let long = sanitize_label(&"a".repeat(500));
         assert!(long.len() <= 80);
-        // Vietnamese titles degrade to deterministic ascii slugs.
-        assert_eq!(sanitize_label("Ninja Loạn Thị"), "ninja-lon-th");
+        // Vietnamese titles transliterate to readable ascii slugs.
+        assert_eq!(sanitize_label("Ninja Loạn Thị"), "ninja-loan-thi");
+        assert_eq!(sanitize_label("Đảo Hải Tặc"), "dao-hai-tac");
     }
 
     #[test]

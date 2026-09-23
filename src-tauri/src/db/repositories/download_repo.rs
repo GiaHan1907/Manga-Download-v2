@@ -72,7 +72,7 @@ pub struct PageRow {
 #[derive(Debug, Clone, FromRow)]
 pub struct ChapterContext {
     pub chapter_id: String,
-    pub chapter_title: String,
+    pub chapter_number: Option<f64>,
     pub manga_id: String,
     pub manga_title: String,
     pub source_id: String,
@@ -356,12 +356,61 @@ pub async fn claim_next(pool: &SqlitePool) -> Result<Option<TaskRow>, AppError> 
     Ok(Some(task))
 }
 
+/// Claim (once, then stable) the library folder a manga owns for NEW
+/// downloads: `library/<title-slug>/`. Two different manga whose titles slug
+/// identically cannot share one directory — the loser gets the tokenized
+/// fallback — and a later title edit never orphans the folder because the
+/// claim is persisted in `mangas.library_dir`.
+pub async fn claim_library_dir(
+    pool: &SqlitePool,
+    manga_id: &str,
+    preferred: &str,
+    fallback: &str,
+) -> Result<String, AppError> {
+    crate::domain::validate_id(manga_id, "mangaId")?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let current: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT library_dir FROM mangas WHERE id = ?1")
+            .bind(manga_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some((Some(dir),)) = current {
+        tx.commit().await?;
+        return Ok(dir);
+    }
+    if current.is_none() {
+        tx.rollback().await?;
+        return Err(AppError::not_found("manga"));
+    }
+    let ts = crate::domain::now_iso();
+    for candidate in [preferred, fallback] {
+        let changed = sqlx::query(
+            "UPDATE mangas SET library_dir = ?2, updated_at = ?3 \
+             WHERE id = ?1 AND library_dir IS NULL \
+               AND NOT EXISTS (SELECT 1 FROM mangas other WHERE other.library_dir = ?2 AND other.id <> ?1)",
+        )
+        .bind(manga_id)
+        .bind(candidate)
+        .bind(&ts)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if changed == 1 {
+            tx.commit().await?;
+            return Ok(candidate.to_string());
+        }
+    }
+    tx.rollback().await?;
+    Err(AppError::Conflict)
+}
+
 pub async fn chapter_context(
     pool: &SqlitePool,
     chapter_id: &str,
 ) -> Result<Option<ChapterContext>, AppError> {
     let ctx = sqlx::query_as::<_, ChapterContext>(
-        "SELECT c.id AS chapter_id, c.title AS chapter_title, c.source_chapter_id, \
+        "SELECT c.id AS chapter_id, c.number AS chapter_number, \
+         c.source_chapter_id, \
                 m.id AS manga_id, m.title AS manga_title, m.source_id, m.source_manga_id \
          FROM chapters c JOIN mangas m ON m.id = c.manga_id WHERE c.id = ?1",
     )
@@ -821,6 +870,57 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(busy.reused[0].target_format, "folder");
+    }
+
+    #[tokio::test]
+    async fn t13_library_dir_claim_is_unique_and_stable() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        crate::db::repositories::manga_repo::ensure_source(&pool, "src-c", "C")
+            .await
+            .unwrap();
+        let (manga_a, _) = crate::db::repositories::manga_repo::upsert_manga(
+            &pool,
+            "src-c",
+            "ma",
+            "Ninja Loạn Thị",
+            None,
+            None,
+            "ongoing",
+        )
+        .await
+        .unwrap();
+        let (manga_b, _) = crate::db::repositories::manga_repo::upsert_manga(
+            &pool,
+            "src-c",
+            "mb",
+            "Ninja Loạn Thị",
+            None,
+            None,
+            "ongoing",
+        )
+        .await
+        .unwrap();
+        let a = claim_library_dir(&pool, &manga_a, "ninja-loan-thi", "ninja-loan-thi-aaa")
+            .await
+            .unwrap();
+        let b = claim_library_dir(&pool, &manga_b, "ninja-loan-thi", "ninja-loan-thi-bbb")
+            .await
+            .unwrap();
+        assert_eq!(a, "ninja-loan-thi");
+        assert_eq!(
+            b, "ninja-loan-thi-bbb",
+            "slug collision takes the tokenized fallback"
+        );
+        let again = claim_library_dir(&pool, &manga_a, "renamed-title", "whatever")
+            .await
+            .unwrap();
+        assert_eq!(
+            again, "ninja-loan-thi",
+            "claims are stable across title edits"
+        );
+        assert!(claim_library_dir(&pool, "ghost-manga", "x", "y")
+            .await
+            .is_err());
     }
 
     #[tokio::test]

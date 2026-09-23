@@ -360,18 +360,21 @@ async fn attempt_run(
     }
     let library_root = storage::library_root(&deps.app_data_dir);
     std::fs::create_dir_all(&library_root)?;
-    let manga_dir_name = storage::manga_dir_name(&ctx.manga_title, &ctx.manga_id);
+    // Clean layout: library/<title-slug>/chapter-<number>.cbz. The dir claim
+    // keeps two manga with colliding slugs from sharing one folder, and once
+    // claimed the name is stable across title edits.
+    let clean_slug = storage::sanitize_label(&ctx.manga_title);
+    let fallback_dir = storage::manga_dir_name(&ctx.manga_title, &ctx.manga_id);
+    let manga_dir_name =
+        download_repo::claim_library_dir(&deps.pool, &ctx.manga_id, &clean_slug, &fallback_dir)
+            .await?;
     storage::assert_safe_name_component(&manga_dir_name)?;
     let manga_dir = library_root.join(&manga_dir_name);
     storage::ensure_under_root(&library_root, &manga_dir)?;
     std::fs::create_dir_all(&manga_dir)?;
 
-    let base = storage::chapter_file_name(
-        &ctx.chapter_title,
-        &ctx.chapter_id,
-        &task_id,
-        &task.target_format,
-    );
+    let base =
+        storage::chapter_artifact_name(ctx.chapter_number, &ctx.chapter_id, &task.target_format);
     storage::assert_safe_name_component(&base)?;
     let relpath = match task.target_format.as_str() {
         "folder" => {

@@ -28,13 +28,7 @@ pub const MAX_IMPORT_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Library-relative path + absolute destination for a freshly generated
 /// canonical file name under the app-owned library root.
-fn canonical_dest(
-    app_data_dir: &Path,
-    manga_title: &str,
-    manga_id: &str,
-    file_name: &str,
-) -> (String, PathBuf) {
-    let dir = storage::manga_dir_name(manga_title, manga_id);
+fn canonical_dest(app_data_dir: &Path, dir: &str, file_name: &str) -> (String, PathBuf) {
     let relpath = format!("{dir}/{file_name}");
     let abs = storage::library_root(app_data_dir)
         .join(dir)
@@ -100,9 +94,20 @@ pub async fn import_cbz(
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("Chương {resolved_number}"));
 
-    let base = storage::chapter_file_name(&chapter_title, &chapter_id, &task_id, "cbz");
+    // Same clean layout as downloads: <title-slug>/chapter-<n>.cbz with a
+    // one-time DB claim so colliding slugs can never share a folder.
+    let base = storage::chapter_artifact_name(Some(resolved_number), &chapter_id, "cbz");
     storage::assert_safe_name_component(&base)?;
-    let (relpath, dest) = canonical_dest(app_data_dir, &manga_title, manga_id, &base);
+    let clean_slug = storage::sanitize_label(&manga_title);
+    let fallback_dir = storage::manga_dir_name(&manga_title, manga_id);
+    let claimed_dir = crate::db::repositories::download_repo::claim_library_dir(
+        pool,
+        manga_id,
+        &clean_slug,
+        &fallback_dir,
+    )
+    .await?;
+    let (relpath, dest) = canonical_dest(app_data_dir, &claimed_dir, &base);
     // Re-assert the destination stays under the library root before writing.
     storage::ensure_under_root(&storage::library_root(app_data_dir), &dest)?;
 
@@ -258,8 +263,8 @@ mod tests {
         assert!(storage::library_root(hx.data.path())
             .join(&relpath)
             .is_file());
-        // Its name is fully sanitized + traceable, never the source name.
-        assert!(relpath.ends_with(".cbz") && !relpath.contains("incoming"));
+        // Its name is the clean canonical form, never the source name.
+        assert_eq!(relpath, "title/chapter-9-5.cbz");
 
         // A synthetic 'completed' task backs it (Library/Downloads parity).
         let (task_status,): (String,) = sqlx::query_as(
