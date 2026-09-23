@@ -74,4 +74,15 @@ export type ReaderManifestDto = {
   startScrollOffset: number | null;
 };
 
+/// Feature plan F3b — result of importing an external CBZ (path-free: only
+/// generated ids + archive metadata; `null` from the command means cancelled).
+export type ImportResultDto = {
+  mangaId: string;
+  chapterId: string;
+  number: number;
+  title: string;
+  pageCount: number;
+  sizeBytes: number;
+};
+
 export type { ReadingProgressDto };

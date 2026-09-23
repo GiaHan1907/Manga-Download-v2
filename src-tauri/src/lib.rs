@@ -24,6 +24,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" && window_flags.close_to_tray() {
@@ -155,6 +156,7 @@ pub fn run() {
             commands::library::library_reconcile,
             commands::library::library_remove_chapter,
             commands::library::library_remove_manga_files,
+            commands::import::library_import_cbz,
             commands::reader::reader_open_chapter,
             commands::reader::reader_get_page_bytes,
             commands::storage::storage_status,

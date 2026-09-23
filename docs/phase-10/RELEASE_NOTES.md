@@ -19,7 +19,8 @@
 
 - **Chưa ký số (unsigned):** SmartScreen có thể cảnh báo "unknown publisher". Bỏ qua bằng "More info → Run anyway" chỉ khi bạn tin nguồn file.
 - **Không auto-update:** upgrade = tải installer mới và cài đè (data giữ nguyên). Updater sẽ chỉ bật khi có endpoint + key custody + test N→N+1 thật.
-- **CBZ chỉ STORE** (định dạng app tự xuất); archive deflate từ nguồn ngoài báo `CBZ_INVALID` có kiểm soát.
+- **Doc CBZ phổ thông hơn (F3a):** CBZ đọc được cả STORE và DEFLATE; app vẫn *xuất* STORE. Zip-bomb/entry lạ bị chặn có kiểm soát (`CBZ_INVALID`).
+- **Nhập CBZ ngoài (F3b):** nút “Nhập CBZ” trong trang chi tiết truyện mở ộp chọn file native; tập tin được kiểm tra và chép vào thư viện dưới tên chuẩn hóa (người dùng tự chọn file hợp lệ — app không tự kiểm bản quyền nội dung đó).
 - **Nguồn truyện:** app chỉ chuyện động tới host user đã đăng ký/allowlist; tôn trọng giới hạn nguồn (pace, retry budget). Không hỗ trợ DRM/paywall/login-wall.
 - **Live-source + manual Windows checklist** chưa chạy trên máy sạch — xem ma trận trạng thái `RELEASE_TEST_MATRIX.md` (các mục BLOCKED/NOT RUN khai thẳng).
 - Downgrade app sau khi DB đã migration forward-only **không được bảo đảm**; khôi phục bằng backup (runbook §Backup).

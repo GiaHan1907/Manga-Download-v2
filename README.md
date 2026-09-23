@@ -93,11 +93,11 @@ All gates should exit with code 0. Current status:
 | `npm ci` | ✅ Pass | 234 packages, 0 vulnerabilities |
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
-| `npm run test` | ✅ Pass | 97/97 tests (13 files: Phase 01 IPC → Phase 08 integration + reader logic + UI/feature-plan + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
-| `npm run build` | ✅ Pass | Vite → `dist/` (~402 kB JS; exact size in HANDOFF gate line) |
+| `npm run test` | ✅ Pass | 99/99 tests (13 files: Phase 01 IPC → Phase 08 integration + reader logic + UI/feature-plan + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
+| `npm run build` | ✅ Pass | Vite → `dist/` (~404 kB JS; exact size in HANDOFF gate line) |
 | `cargo check` | ✅ Pass | clean |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
-| `cargo test` | ✅ Pass | 143/143 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
+| `cargo test` | ✅ Pass | 149/149 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
 | `npm run tauri dev` | ✅ Smoke | Last smoke after feature-plan review 4 vòng (2026-09-23): app chạy thật, không panic; DB reopen schema 7 không reset |
 | `npm run tauri build` | ✅ Pass (2026-09-23, NSIS-only) | Exit 0; artifact + SHA-256 hiện hành trong `docs/phase-10/ARTIFACT_MANIFEST.md` (`2245f30e…a90674`). Chạy thử bản cài đặt trên VM sạch: chờ user xác nhận |
 
@@ -176,7 +176,7 @@ manga-downloader-1989/
 │   ├── shared/
 │   │   ├── api/
 │   │   │   ├── contracts.ts         # AppInfo, AppHealth, AppError types
-│   │   │   └── desktop.ts           # Sole IPC boundary: typed wrappers for all 48 commands + event listeners + binary page normalization
+│   │   │   └── desktop.ts           # Sole IPC boundary: typed wrappers for all 49 commands + event listeners + binary page normalization
 │   │   └── hooks/                   # useAsyncData, useServices (store), useInvalidation (6-domain bus), useDebouncedValue helpers
 │   └── styles/
 │       ├── tokens.css           # Semantic Dark Purple design tokens (colors, type, spacing, radii)
@@ -194,7 +194,7 @@ manga-downloader-1989/
 │   │   └── 0001_init.sql … 0007_read_history.sql   # Forward-only chain; 0004 executed as runtime-repaired SQL (src/db/migrations_repaired/, original checksum kept)
 │   └── src/
 │       ├── main.rs              # Windows subsystem attr, calls lib::run()
-│       ├── lib.rs               # Builder: setup (DB init + storage prep + recovery pass + tray/notifications + F1 watcher loop), 48 commands
+│       ├── lib.rs               # Builder: setup (DB init + storage prep + recovery pass + tray/notifications + F1 watcher loop + F3 dialog), 49 commands
 │       ├── app_state.rs         # AppState { db, registry, coordinator, events, … }
 │       ├── error.rs             # AppError enum → serialized { code, message, retryable }
 │       ├── commands/
@@ -212,7 +212,7 @@ manga-downloader-1989/
 │       ├── domain/              # typed DTOs + settings/ids validation
 │       ├── sources/             # adapter trait + mangadex/madara + GuardedHttp (exact-host, DNS gate, pacing)
 │       ├── downloader/          # engine: scheduler/worker/transfer/checkpoint/exporter/storage/recovery (Phase 06)
-│       ├── reader/              # CBZ (STORE-only, bounded central-dir parse) + image folders + sniff (Phase 07)
+│       ├── reader/              # CBZ (STORE + DEFLATE/flate2, bounded central-dir parse) + image folders + sniff (Phase 07)
 │       ├── services/            # business invariants + storage/settings/library/reader services
 │       └── db/
 │           ├── mod.rs           # init_pool + production_migrator (0004 runtime repair, checksum preserved)

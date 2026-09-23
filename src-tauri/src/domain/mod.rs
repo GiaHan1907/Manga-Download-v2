@@ -192,6 +192,19 @@ pub struct ReadHistoryDto {
     pub read_at: String,
 }
 
+/// Feature plan F3b — result of importing an external CBZ. Path-free by
+/// design: only the generated ids and archive metadata cross to the renderer.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedChapterDto {
+    pub manga_id: String,
+    pub chapter_id: String,
+    pub number: f64,
+    pub title: String,
+    pub page_count: i64,
+    pub size_bytes: i64,
+}
+
 /// Phase 07 — reader manifest. Deliberately path-free: pages are addressed by
 /// index and served through `reader_get_page_bytes`.
 #[derive(Debug, Clone, Serialize)]

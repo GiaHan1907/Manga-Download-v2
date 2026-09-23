@@ -21,6 +21,7 @@ import type {
   ReconcileReportDto,
   ReaderManifestDto,
   RemoveMangaFilesDto,
+  ImportResultDto,
 } from "../../types/library";
 import { DOWNLOAD_EVENT } from "../../types/downloads";
 import type {
@@ -266,6 +267,17 @@ export async function libraryRemoveChapter(chapterId: string): Promise<void> {
 
 export async function libraryRemoveMangaFiles(mangaId: string): Promise<RemoveMangaFilesDto> {
   return invoke<RemoveMangaFilesDto>("library_remove_manga_files", { mangaId });
+}
+
+/// Feature plan F3b — Rust opens the native picker (the renderer never sees a
+/// path) and imports the chosen CBZ under `mangaId`. `null` = user cancelled.
+/// The file name is generated server-side; only ids + metadata return.
+export async function libraryImportCbz(args: {
+  mangaId: string;
+  chapterNumber?: number;
+  chapterTitle?: string;
+}): Promise<ImportResultDto | null> {
+  return invoke<ImportResultDto | null>("library_import_cbz", args);
 }
 
 export async function readerOpenChapter(chapterId: string): Promise<ReaderManifestDto> {

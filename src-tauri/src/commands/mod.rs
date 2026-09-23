@@ -1,6 +1,7 @@
 pub mod discovery;
 pub mod downloads;
 pub mod favorites;
+pub mod import;
 pub mod library;
 pub mod local_catalog;
 pub mod reader;

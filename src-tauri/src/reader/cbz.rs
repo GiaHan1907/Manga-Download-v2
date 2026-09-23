@@ -1,11 +1,15 @@
-//! Minimal read-only ZIP (CBZ) access for app-owned archives.
+//! Minimal read-only ZIP (CBZ) access for app-owned archives — plus the
+//! F3a deflate path so CBZ files created by other tools stay readable.
 //!
 //! Parses the End Of Central Directory + central directory only; page bytes
 //! are read lazily per requested entry via `seek` — a 300-page chapter never
 //! lands fully in memory. Entry names from the archive are treated as
 //! untrusted: traversal-style names are rejected and images magic-checked.
-//! Only STORED entries are supported (the Phase 06 writer emits Stored); a
-//! compressed entry surfaces as `CBZ_INVALID`, never as a partial page.
+//! STORED and DEFLATE entries are supported; any other method surfaces as
+//! `CBZ_INVALID`, never as a partial page. Deflate output is guarded twice:
+//! the declared sizes must be within `MAX_PAGE_BYTES` at open, and the
+//! inflate loop is capped so a lying header (zip-bomb) can never allocate
+//! or decode more than the cap.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -17,10 +21,12 @@ use crate::reader::{is_image_name, is_safe_entry_name, natural_cmp, MAX_PAGE_BYT
 #[derive(Debug, Clone)]
 pub struct ZipEntry {
     pub name: String,
-    /// Compressed size == uncompressed for Stored.
+    /// Bytes on disk for this entry (== uncompressed for STORED).
     pub size: usize,
     pub local_offset: u64,
     pub method: u16,
+    /// Declared uncompressed size (central directory @24).
+    pub uncompressed: usize,
 }
 
 #[derive(Debug, Default)]
@@ -83,6 +89,7 @@ pub fn open(path: &Path) -> Result<Archive, AppError> {
         }
         let method = u16le(&bytes, cursor + 10);
         let size = u32le(&bytes, cursor + 20) as usize;
+        let uncompressed = u32le(&bytes, cursor + 24) as usize;
         let name_len = u16le(&bytes, cursor + 28) as usize;
         let extra_len = u16le(&bytes, cursor + 30) as usize;
         let comment_len = u16le(&bytes, cursor + 32) as usize;
@@ -105,7 +112,7 @@ pub fn open(path: &Path) -> Result<Archive, AppError> {
         if !is_image_name(&name) {
             continue;
         }
-        if size > MAX_PAGE_BYTES {
+        if size > MAX_PAGE_BYTES || uncompressed > MAX_PAGE_BYTES {
             return Err(LibraryError::CbzInvalid.into());
         }
         entries.push(ZipEntry {
@@ -113,6 +120,7 @@ pub fn open(path: &Path) -> Result<Archive, AppError> {
             size,
             local_offset,
             method,
+            uncompressed,
         });
     }
     if entries.is_empty() {
@@ -135,11 +143,18 @@ fn find_eocd(bytes: &[u8]) -> Option<usize> {
         .find(|&i| bytes[i..i + 4] == EOCD_SIGNATURE && i + 22 <= len)
 }
 
-/// Read one Stored entry's bytes. Re-validates the local header, method and
-/// declared size against the central directory value.
+/// Read one entry's (uncompressed) bytes. Re-validates the local header and
+/// declared sizes against the central directory value. STORED entries are a
+/// capped direct read; DEFLATE entries inflate through hard guards: the
+/// decoder only sees the entry's own compressed window, its output is capped
+/// at `MAX_PAGE_BYTES + 1`, and the decoded length must match the declared
+/// uncompressed size — a lying header or zip-bomb fails, never a partial page.
 pub fn read_entry(path: &Path, entry: &ZipEntry) -> Result<Vec<u8>, AppError> {
-    if entry.method != 0 {
-        // Compressed archives are outside the app CBZ contract.
+    if entry.method != 0 && entry.method != 8 {
+        // Unknown compression is outside the app CBZ contract.
+        return Err(LibraryError::CbzInvalid.into());
+    }
+    if entry.size > MAX_PAGE_BYTES || entry.uncompressed > MAX_PAGE_BYTES {
         return Err(LibraryError::CbzInvalid.into());
     }
     let mut file = File::open(path)?;
@@ -155,13 +170,26 @@ pub fn read_entry(path: &Path, entry: &ZipEntry) -> Result<Vec<u8>, AppError> {
     file.seek(SeekFrom::Start(
         entry.local_offset + 30 + local_name_len + local_extra_len,
     ))?;
-    if entry.size > MAX_PAGE_BYTES {
+    if entry.method == 0 {
+        let mut data = vec![0u8; entry.size];
+        file.read_exact(&mut data)
+            .map_err(|_| AppError::from(LibraryError::FileCorrupted))?;
+        return Ok(data);
+    }
+    // DEFLATE: feed the decoder exactly this entry's compressed bytes —
+    // a corrupt stream can never spill into the next entry's data.
+    let input = (&mut file).take(entry.size as u64);
+    let decoder = flate2::read::DeflateDecoder::new(input);
+    let mut out: Vec<u8> = Vec::with_capacity(entry.uncompressed.min(MAX_PAGE_BYTES));
+    // +1 so "hit the cap" is distinguishable from "filled the cap exactly".
+    let read = decoder
+        .take(MAX_PAGE_BYTES as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|_| AppError::from(LibraryError::FileCorrupted))?;
+    if read > MAX_PAGE_BYTES || read != entry.uncompressed {
         return Err(LibraryError::CbzInvalid.into());
     }
-    let mut data = vec![0u8; entry.size];
-    file.read_exact(&mut data)
-        .map_err(|_| AppError::from(LibraryError::FileCorrupted))?;
-    Ok(data)
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -185,6 +213,18 @@ mod tests {
             }
         }
         fn add(&mut self, name: &str, data: &[u8], method: u16, declared_size: u32) {
+            self.add_with(name, data, method, declared_size, declared_size);
+        }
+        /// `stored_size` = bytes on disk (central @20), `uncomp_size` = the
+        /// declared original size (central @24) — the two differ for DEFLATE.
+        fn add_with(
+            &mut self,
+            name: &str,
+            data: &[u8],
+            method: u16,
+            stored_size: u32,
+            uncomp_size: u32,
+        ) {
             let local_offset = self.body.len() as u32;
             let mut local = vec![0x50, 0x4b, 0x03, 0x04];
             local.extend([0x14, 0, 0, 0]);
@@ -192,7 +232,7 @@ mod tests {
             local.extend([0, 0, 0, 0]);
             local.extend([0, 0, 0, 0]); // crc unused by the reader
             local.extend((data.len() as u32).to_le_bytes());
-            local.extend(declared_size.to_le_bytes());
+            local.extend(uncomp_size.to_le_bytes());
             local.extend((name.len() as u16).to_le_bytes());
             local.extend([0, 0]); // extra len
             local.extend(name.as_bytes());
@@ -205,8 +245,8 @@ mod tests {
             central.extend(method.to_le_bytes()); // @10-11
             central.extend([0, 0, 0, 0]); // time+date @12-15
             central.extend([0, 0, 0, 0]); // crc @16-19 (reader ignores)
-            central.extend(declared_size.to_le_bytes()); // stored size @20 (reader caps on this)
-            central.extend(declared_size.to_le_bytes()); // uncomp size @24
+            central.extend(stored_size.to_le_bytes()); // stored size @20
+            central.extend(uncomp_size.to_le_bytes()); // uncomp size @24
             central.extend((name.len() as u16).to_le_bytes()); // @28
             central.extend([0, 0]); // extra @30
             central.extend([0, 0]); // comment @32
@@ -254,10 +294,74 @@ mod tests {
         assert_eq!(bytes, b"second-page");
     }
 
+    fn deflate(bytes: &[u8]) -> Vec<u8> {
+        use flate2::write::DeflateEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
     #[test]
-    fn t09_deflate_entry_surfaces_cbz_invalid_not_partial_bytes() {
+    fn f3a_deflate_entry_inflates_to_exact_declared_bytes() {
+        // A CBZ produced by ANOTHER tool: real deflate stream, compressed
+        // size on disk differs from the original page size.
+        let page = [PNG_MAGIC, vec![0xA5u8; 5000].as_slice()].concat();
+        let compressed = deflate(&page);
+        assert!(compressed.len() < page.len(), "test needs real compression");
         let mut zip = RawZip::new();
-        zip.add("000001.png", PNG_MAGIC, 8, PNG_MAGIC.len() as u32);
+        zip.add_with(
+            "000001.png",
+            &compressed,
+            8,
+            compressed.len() as u32,
+            page.len() as u32,
+        );
+        let (_dir, path) = write_temp(&zip.finish());
+
+        let archive = open(&path).unwrap();
+        assert_eq!(archive.entries[0].method, 8);
+        let bytes = read_entry(&path, &archive.entries[0]).unwrap();
+        assert_eq!(bytes, page);
+    }
+
+    #[test]
+    fn f3a_zip_bomb_declared_small_but_inflates_large_is_rejected() {
+        // Header claims an 8-byte page but the stream expands ~1MB — the
+        // inflate loop must fail closed (CbzInvalid), never serve the blob.
+        let payload = vec![0x41u8; 1024 * 1024];
+        let compressed = deflate(&payload);
+        let mut zip = RawZip::new();
+        zip.add_with(
+            "000001.png",
+            &compressed,
+            8,
+            compressed.len() as u32,
+            8, // lying declared size
+        );
+        let (_dir, path) = write_temp(&zip.finish());
+
+        let archive = open(&path).unwrap();
+        let error = read_entry(&path, &archive.entries[0]).unwrap_err();
+        assert!(matches!(error, AppError::Library(LibraryError::CbzInvalid)));
+    }
+
+    #[test]
+    fn f3a_oversized_declared_uncompressed_deflate_rejects_at_open() {
+        let mut zip = RawZip::new();
+        zip.add_with("000001.png", b"x", 8, 1, (MAX_PAGE_BYTES + 1) as u32);
+        let (_dir, path) = write_temp(&zip.finish());
+        assert!(matches!(
+            open(&path),
+            Err(AppError::Library(LibraryError::CbzInvalid))
+        ));
+    }
+
+    #[test]
+    fn t09_unknown_method_surfaces_cbz_invalid_not_partial_bytes() {
+        let mut zip = RawZip::new();
+        zip.add("000001.png", PNG_MAGIC, 99, PNG_MAGIC.len() as u32);
         let (_dir, path) = write_temp(&zip.finish());
 
         let archive = open(&path).unwrap();

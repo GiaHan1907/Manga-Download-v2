@@ -1,4 +1,4 @@
-import { Download, FolderOpen, Play, Star, Trash2 } from "lucide-react";
+import { Download, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import Button from "../../components/ui/Button";
@@ -35,6 +35,7 @@ export default function LocalMangaPage() {
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [alertsNonce, setAlertsNonce] = useState(0);
+  const [importBusy, setImportBusy] = useState(false);
   const libraryVersion = useDomainVersion("library");
   const downloadsVersion = useDomainVersion("downloads");
 
@@ -195,6 +196,28 @@ export default function LocalMangaPage() {
     }
   }
 
+  // Feature plan F3b — the native picker + validation run entirely in Rust;
+  // this only sends the manga id and reads back path-free metadata.
+  async function importCbz() {
+    setImportBusy(true);
+    setActionError(null);
+    try {
+      const result = await localServices.libraryV2.importCbz({ mangaId });
+      if (result === null) {
+        pushToast("Đã hủy nhập CBZ.");
+      } else {
+        pushToast(`Đã nhập “${result.title}” · ${result.pageCount} trang.`);
+        bumpDomain("library");
+        bumpDomain("home");
+        setNonce((value) => value + 1);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Nhập CBZ thất bại.");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   return (
     <div className="page-stack">
       <section className="panel" aria-label="Thông tin truyện đã lưu">
@@ -224,6 +247,10 @@ export default function LocalMangaPage() {
             <Button variant="secondary" onClick={toggleFavorite} disabled={favoriteBusy}>
               <Star size={16} aria-hidden="true" />
               {detail.favorite ? "Bỏ yêu thích" : "Yêu thích"}
+            </Button>
+            <Button variant="ghost" onClick={importCbz} disabled={importBusy}>
+              <FolderInput size={16} aria-hidden="true" />
+              {importBusy ? "Đang nhập…" : "Nhập CBZ"}
             </Button>
           </div>
         </div>

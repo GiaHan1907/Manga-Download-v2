@@ -5,6 +5,7 @@ import type {
   LibraryMangaDto,
   ReconcileReportDto,
   RemoveMangaFilesDto,
+  ImportResultDto,
 } from "../types/library";
 import type { PagedResult } from "../types/backend";
 
@@ -21,6 +22,11 @@ export interface LibraryApi {
   reconcile(): Promise<ReconcileReportDto>;
   removeChapter(chapterId: string): Promise<void>;
   removeMangaFiles(mangaId: string): Promise<RemoveMangaFilesDto>;
+  importCbz(args: {
+    mangaId: string;
+    chapterNumber?: number;
+    chapterTitle?: string;
+  }): Promise<ImportResultDto | null>;
   getWatch(mangaId: string): Promise<desktop.WatchStateDto>;
   setWatch(args: { mangaId: string; enabled: boolean | null }): Promise<void>;
   listAlerts(mangaId: string): Promise<desktop.ChapterAlertDto[]>;
@@ -44,6 +50,7 @@ export const libraryApi: LibraryApi = {
   reconcile: () => desktop.libraryReconcile().catch(rethrow),
   removeChapter: (chapterId) => desktop.libraryRemoveChapter(chapterId).catch(rethrow),
   removeMangaFiles: (mangaId) => desktop.libraryRemoveMangaFiles(mangaId).catch(rethrow),
+  importCbz: (args) => desktop.libraryImportCbz(args).catch(rethrow),
   getWatch: (mangaId) => desktop.libraryGetWatch(mangaId).catch(rethrow),
   setWatch: (args) => desktop.librarySetWatch(args).catch(rethrow),
   listAlerts: (mangaId) => desktop.libraryListAlerts(mangaId).catch(rethrow),

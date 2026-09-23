@@ -50,6 +50,29 @@ describe("F2/F5 IPC wrappers", () => {
   });
 });
 
+import { libraryImportCbz } from "../src/shared/api/desktop";
+
+describe("F3b CBZ import IPC wrapper", () => {
+  it("sends only the mangaId (+optional metadata) and never a path", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      mangaId: "m1",
+      chapterId: "c1",
+      number: 1,
+      title: "Chương 1",
+      pageCount: 3,
+      sizeBytes: 1234,
+    });
+    const result = await libraryImportCbz({ mangaId: "m1" });
+    expect(invoke).toHaveBeenCalledWith("library_import_cbz", { mangaId: "m1" });
+    expect(result?.pageCount).toBe(3);
+  });
+
+  it("resolves null when the user cancels the native dialog", async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await expect(libraryImportCbz({ mangaId: "m1" })).resolves.toBeNull();
+  });
+});
+
 import {
   libraryGetWatch,
   librarySetWatch,
