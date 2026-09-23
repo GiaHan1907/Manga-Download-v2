@@ -628,6 +628,25 @@ button {
   font-weight: 800;
 }
 
+/* Equal cards: long Vietnamese titles/subs used to wrap arbitrarily, so
+   grid rows stretched to the tallest text. Two title lines + one meta line
+   max — with a reserved title height so 1-line and 2-line cards align. */
+.manga-card__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  min-height: 2lh;
+  overflow: hidden;
+}
+.manga-card .manga-card__meta {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+}
+
 .manga-card__meta,
 .chapter-row__meta,
 .download-card__meta {
