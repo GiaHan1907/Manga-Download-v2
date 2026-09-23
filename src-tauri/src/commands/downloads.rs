@@ -332,7 +332,14 @@ async fn resolve_reveal_path(
         .output_relpath
         .ok_or_else(|| AppError::validation("Mục này không có bản ghi để mở."))?;
     storage::validate_relpath(&relpath)?;
-    let absolute = storage::library_root(app_data_dir).join(relpath);
+    // Join component-by-component: the stored relpath uses '/' separators,
+    // and a MIXED `\dir/sub.cbz` string passes every file API but makes
+    // `explorer /select` fail silently — Explorer's own parser needs pure
+    // backslashes on Windows.
+    let mut absolute = storage::library_root(app_data_dir);
+    for part in std::path::Path::new(&relpath).components() {
+        absolute.push(part.as_os_str());
+    }
     if !absolute.exists() {
         return Err(AppError::validation(
             "File không còn trên đĩa (đã xoá hoặc di chuyển?).",
@@ -417,6 +424,12 @@ mod tests {
             .await
             .unwrap();
         assert!(hit.ends_with("ch.cbz"));
+        if cfg!(windows) {
+            assert!(
+                !hit.to_string_lossy().contains('/'),
+                "explorer /select silently fails on mixed separators: {hit:?}"
+            );
+        }
 
         // Artifact gone from disk → honest validation error, no Explorer call.
         completed_task(&pool, "tk-gone", Some("manga-x/gone.cbz")).await;
