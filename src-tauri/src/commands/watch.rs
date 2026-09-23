@@ -27,9 +27,12 @@ pub struct WatchTickDto {
 }
 
 /// One watcher pass; emits + notifies when new chapters appeared.
+/// `force` bypasses the per-manga due window — used by the manual
+/// `watch_run_now` (rate-limited below) so "check now" really checks now.
 pub async fn perform_tick(
     handle: &tauri::AppHandle,
     state: &AppState,
+    force: bool,
 ) -> Result<WatchTickDto, AppError> {
     let settings = settings_service::load(&state.db).await?;
     let registry = {
@@ -41,6 +44,7 @@ pub async fn perform_tick(
         &registry,
         settings.watch_enabled,
         watch_service::WATCH_TICK_LIMIT,
+        force,
     )
     .await?;
     if report.alerted_chapters > 0 {
@@ -77,12 +81,17 @@ pub async fn watch_run_now(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let last = LAST_MANUAL.load(Ordering::Relaxed);
-    if now - last < MANUAL_MIN_INTERVAL_SECS {
-        return Err(AppError::Conflict);
-    }
-    LAST_MANUAL.store(now, Ordering::Relaxed);
-    perform_tick(&handle, state.inner()).await
+    // CAS so two concurrent clicks cannot both start a tick.
+    LAST_MANUAL
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |last| {
+            if now - last >= MANUAL_MIN_INTERVAL_SECS {
+                Some(now)
+            } else {
+                None
+            }
+        })
+        .map_err(|_| AppError::Conflict)?;
+    perform_tick(&handle, state.inner(), true).await
 }
 
 #[tauri::command]
@@ -147,7 +156,7 @@ pub fn spawn_watcher_loop(app: &tauri::AppHandle) {
             };
             tokio::time::sleep(delay).await;
             let state = handle.state::<AppState>();
-            match perform_tick(&handle, &state).await {
+            match perform_tick(&handle, &state, false).await {
                 Ok(report) if report.checked > 0 => {
                     eprintln!(
                         "watch tick: {} checked, {} new chapters, {} failed",

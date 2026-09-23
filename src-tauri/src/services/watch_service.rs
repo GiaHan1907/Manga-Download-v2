@@ -43,24 +43,27 @@ pub struct WatchReport {
 
 /// Manga eligible for a check: source enabled, effective watch flag on
 /// (per-manga override, else the global setting), and due per
-/// interval × 2^fail (capped ×16). Favorites first, then most recently
-/// read/updated — if the cap bites, those matter most.
+/// interval × 2^fail (capped ×16) unless `force` (manual "check now" — the
+/// command-level rate limit is what protects pacing there). Favorites first,
+/// then most recently read/updated — if the cap bites, those matter most.
 pub async fn select_candidates(
     pool: &SqlitePool,
     global_enabled: bool,
     limit: i64,
+    force: bool,
 ) -> Result<Vec<WatchCandidate>, AppError> {
     let rows: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT m.id, m.source_id, m.source_manga_id FROM mangas m \
          JOIN sources s ON s.id = m.source_id \
          WHERE s.enabled = 1 AND COALESCE(m.watch_enabled, ?1) = 1 \
-           AND (m.watched_at IS NULL OR julianday(m.watched_at) <= \
-                julianday('now') - (?2 * (1 << MIN(m.watch_fail_count, 4))) / 24.0) \
+           AND (?2 = 1 OR m.watched_at IS NULL OR julianday(m.watched_at) <= \
+                julianday('now') - (?3 * (1 << MIN(m.watch_fail_count, 4))) / 24.0) \
          ORDER BY (SELECT COUNT(*) FROM favorites f WHERE f.manga_id = m.id) DESC, \
                   m.last_read_at IS NULL, m.last_read_at DESC, m.updated_at DESC \
-         LIMIT ?3",
+         LIMIT ?4",
     )
     .bind(i64::from(global_enabled))
+    .bind(i64::from(force))
     .bind(WATCH_INTERVAL_HOURS)
     .bind(limit)
     .fetch_all(pool)
@@ -169,9 +172,10 @@ pub async fn run_tick(
     registry: &crate::sources::registry::SourceRegistry,
     global_enabled: bool,
     limit: i64,
+    force: bool,
 ) -> Result<WatchReport, AppError> {
     let mut report = WatchReport::default();
-    for candidate in select_candidates(pool, global_enabled, limit).await? {
+    for candidate in select_candidates(pool, global_enabled, limit, force).await? {
         report.checked += 1;
         let adapter = registry.get(&candidate.source_id);
         let outcome = match adapter {
@@ -436,7 +440,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ids: Vec<String> = select_candidates(&pool, true, 50)
+        let ids: Vec<String> = select_candidates(&pool, true, 50, false)
             .await
             .unwrap()
             .into_iter()
@@ -446,7 +450,7 @@ mod tests {
         assert!(!ids.contains(&opted_out), "explicit 0 beats global on");
         assert!(ids.contains(&opted_in));
 
-        let global_off: Vec<String> = select_candidates(&pool, false, 50)
+        let global_off: Vec<String> = select_candidates(&pool, false, 50, false)
             .await
             .unwrap()
             .into_iter()
@@ -465,13 +469,23 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let due: Vec<String> = select_candidates(&pool, true, 50)
+        let due: Vec<String> = select_candidates(&pool, true, 50, false)
             .await
             .unwrap()
             .into_iter()
             .map(|c| c.manga_id)
             .collect();
         assert!(!due.contains(&on_by_default), "just-checked is not due");
+
+        // Manual force bypasses the due window (the 60 s command rate limit
+        // is what protects pacing there) — same manga is selectable again.
+        let forced: Vec<String> = select_candidates(&pool, true, 50, true)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.manga_id)
+            .collect();
+        assert!(forced.contains(&on_by_default), "force ignores due window");
 
         // fail_count 4 → interval ×16; 24h ago is within 96h → still due window:
         sqlx::query(
@@ -481,7 +495,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let due_backed: Vec<String> = select_candidates(&pool, true, 50)
+        let due_backed: Vec<String> = select_candidates(&pool, true, 50, false)
             .await
             .unwrap()
             .into_iter()
@@ -494,7 +508,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let due_again: Vec<String> = select_candidates(&pool, true, 50)
+        let due_again: Vec<String> = select_candidates(&pool, true, 50, false)
             .await
             .unwrap()
             .into_iter()
@@ -511,7 +525,7 @@ mod tests {
         adapter.fail.fetch_add(1, Ordering::SeqCst);
         let registry = registry_with(adapter);
 
-        let report = run_tick(&pool, &registry, true, 20).await.unwrap();
+        let report = run_tick(&pool, &registry, true, 20, false).await.unwrap();
         assert_eq!(report.checked, 1);
         assert_eq!(report.failed, 1);
         let (fails,): (i64,) = sqlx::query_as("SELECT watch_fail_count FROM mangas WHERE id = ?1")

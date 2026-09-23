@@ -71,7 +71,7 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `library_set_watch` | `{ mangaId, enabled: bool\|null }` | — | Bật/tắt theo dõi từng truyện; `null` khôi phục theo chung; `NOT_FOUND` nếu manga lạ |
 | `library_list_alerts` | `{ mangaId }` | `ChapterAlertDto[] { chapterId, title, detectedAt }` | Tối đa 200, chưa ack; metadata thuần, không URL/path |
 | `library_ack_alerts` | `{ mangaId }` | `number` (xóa bao nhiêu) | Idempotent |
-| `watch_run_now` | — | `{ checked, alertedChapters, failed }` | Manual tick; rate-limit 60s → `DB_CONFLICT`; dùng chung đường với loop ~6h |
+| `watch_run_now` | — | `{ checked, alertedChapters, failed }` | Manual tick CƯỠNG ÉP (bỏ cửa sổ due — review vòng 1; loop nền ~6h vẫn tôn trọng backoff từng truyện); rate-limit 60s CAS → `DB_CONFLICT`; dùng chung `perform_tick` với loop |
 
 | `app_list_read_history` | `{ mangaId?, limit (1..100), offset }` | `PagedResult<ReadHistoryDto { mangaId, mangaTitle, chapterId, chapterTitle, chapterNumber, readAt }>` | Feature plan F4 (schema 7 `read_history` — UPSERT trong cùng transaction save_progress khi đến 2 trang cuối). Xóa lịch sử theo manga = metadata-only, không động file/progress/favorites |
 | `app_clear_read_history` | `{ mangaId }` | `number` (số xóa) | idempotent |
