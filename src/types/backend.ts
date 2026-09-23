@@ -8,6 +8,16 @@ export type PagedResult<T> = {
   offset: number;
 };
 
+/// Feature plan F4 — per-chapter read history (Rust serde camelCase).
+export type ReadHistoryDto = {
+  mangaId: string;
+  mangaTitle: string;
+  chapterId: string;
+  chapterTitle: string;
+  chapterNumber: number | null;
+  readAt: string;
+};
+
 export type LocalMangaDto = {
   id: string;
   sourceId: string;

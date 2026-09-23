@@ -80,3 +80,24 @@ describe("F1 watch IPC wrappers", () => {
     expect(report.alertedChapters).toBe(1);
   });
 });
+
+import { listReadHistory, clearReadHistory } from "../src/shared/api/desktop";
+
+describe("F4 read-history IPC wrappers", () => {
+  it("lists with paging filters and clears per manga (ids only)", async () => {
+    vi.mocked(invoke).mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+    await listReadHistory({ mangaId: "m1", limit: 20, offset: 0 });
+    expect(invoke).toHaveBeenCalledWith("app_list_read_history", {
+      mangaId: "m1",
+      limit: 20,
+      offset: 0,
+    });
+
+    await listReadHistory({ limit: 10, offset: 0 });
+    expect(invoke).toHaveBeenLastCalledWith("app_list_read_history", { limit: 10, offset: 0 });
+
+    vi.mocked(invoke).mockResolvedValue(4);
+    await expect(clearReadHistory("m1")).resolves.toBe(4);
+    expect(invoke).toHaveBeenCalledWith("app_clear_read_history", { mangaId: "m1" });
+  });
+});

@@ -120,6 +120,14 @@ async fn save_progress_tx(
         .execute(&mut *conn)
         .await?;
 
+    // Feature plan F4: reaching the final pages (pageTotal known) marks the
+    // chapter read — one UPSERTed row per (manga, chapter), same tx.
+    if let Some(total) = page_total {
+        if page_index >= total - 2 {
+            super::history_repo::mark_read_tx(&mut *conn, manga_id, chapter_id).await?;
+        }
+    }
+
     Ok(ReadingProgressDto {
         manga_id: manga_id.to_string(),
         chapter_id: chapter_id.to_string(),

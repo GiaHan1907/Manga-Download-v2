@@ -73,6 +73,9 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `library_ack_alerts` | `{ mangaId }` | `number` (xóa bao nhiêu) | Idempotent |
 | `watch_run_now` | — | `{ checked, alertedChapters, failed }` | Manual tick; rate-limit 60s → `DB_CONFLICT`; dùng chung đường với loop ~6h |
 
+| `app_list_read_history` | `{ mangaId?, limit (1..100), offset }` | `PagedResult<ReadHistoryDto { mangaId, mangaTitle, chapterId, chapterTitle, chapterNumber, readAt }>` | Feature plan F4 (schema 7 `read_history` — UPSERT trong cùng transaction save_progress khi đến 2 trang cuối). Xóa lịch sử theo manga = metadata-only, không động file/progress/favorites |
+| `app_clear_read_history` | `{ mangaId }` | `number` (số xóa) | idempotent |
+
 `library_list` (mở rộng): DTO thêm `newAlerts` (số chương mới chưa ack), filter mới `"alerts"`. **Event mới** `library-alerts` payload `{ newChapters }` — Rust chỉ emit khi tick phát hiện chương mới (kèm 1 notification tổng); frontend bump domain `library`/`home`, dữ liệu luôn refetch qua snapshot. Watcher CHỈ gọi `manga_detail` qua adapter (đúng pacing/allowlist GuardedHttp), không tự HTTP, không download gì.
 
 **Event** `download-task-updated` → payload `DownloadTaskEvent { task, downloadedBytes, speedBytesPerSecond|null, occurredAt }`: progress gộp ≥250ms/task, chuyển trạng thái tức thì; `task.revision` tăng đơn điệu để UI chặn frame cũ ghi đè frame mới. Frontend subscribe qua `desktop.subscribeDownloadTask()` và **bắt buộc unlisten khi teardown**. `DownloadTaskDto` không bao giờ chứa URL trang/headers/đường dẫn tuyệt đối; `outputRelpath` là đường dẫn tương đối dưới app library root, chỉ hiển thị, không phải input.

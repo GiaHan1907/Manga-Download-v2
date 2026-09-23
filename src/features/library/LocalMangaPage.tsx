@@ -7,6 +7,10 @@ import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import { pushToast } from "../../components/ui/toastStore";
+import {
+  listReadHistory as desktopListReadHistory,
+  clearReadHistory as desktopClearReadHistory,
+} from "../../shared/api/desktop";
 import type { LocalMangaDetailDto } from "../../types/backend";
 import type { SourceViewDto } from "../../types/source";
 import type { DownloadedChapterDto } from "../../types/library";
@@ -41,6 +45,12 @@ export default function LocalMangaPage() {
       alerts: await localServices.libraryV2.listAlerts(mangaId),
     }),
     [mangaId, alertsNonce, libraryVersion],
+  );
+
+  // Feature plan F4: per-chapter read history for this manga (newest first).
+  const history = useAsyncData(
+    () => desktopListReadHistory({ mangaId, limit: 20, offset: 0 }),
+    [mangaId, alertsNonce, nonce],
   );
 
   const manga = useAsyncData<LocalMangaDetailDto | null>(
@@ -289,6 +299,44 @@ export default function LocalMangaPage() {
               </div>
             </div>
           )}
+        </section>
+      )}
+
+      {history.state === "success" && history.data.total > 0 && (
+        <section className="panel" aria-label="Lịch sử đọc">
+          <div className="chapter-toolbar">
+            <div>
+              <h2 className="panel__title">Đã đọc gần đây ({history.data.total})</h2>
+              <p className="muted">Ghi nhận khi bạn đọc tới trang cuối của chương.</p>
+            </div>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                void desktopClearReadHistory(mangaId)
+                  .then((cleared) => {
+                    pushToast(`Đã xóa ${cleared} mục lịch sử đọc.`);
+                    setAlertsNonce((value) => value + 1);
+                  })
+                  .catch(() => pushToast("Không xóa được lịch sử đọc."));
+              }}
+            >
+              Xóa lịch sử đọc
+            </Button>
+          </div>
+          <ul className="continue-local">
+            {history.data.items.map((entry) => (
+              <li key={entry.chapterId} className="continue-local__row">
+                <span className="continue-local__title">
+                  {entry.chapterNumber !== null ? `Chương ${entry.chapterNumber} — ` : ""}
+                  {entry.chapterTitle}
+                </span>
+                <span className="muted">{new Date(entry.readAt).toLocaleString()}</span>
+                <Button to={`/read/${entry.chapterId}`} variant="ghost">
+                  Đọc lại
+                </Button>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

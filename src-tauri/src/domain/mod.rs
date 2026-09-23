@@ -180,6 +180,18 @@ pub struct ClearHistoryDto {
     pub skipped_other: i64,
 }
 
+/// Feature plan F4 — one per-chapter read record (metadata only).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadHistoryDto {
+    pub manga_id: String,
+    pub manga_title: String,
+    pub chapter_id: String,
+    pub chapter_title: String,
+    pub chapter_number: Option<f64>,
+    pub read_at: String,
+}
+
 /// Phase 07 — reader manifest. Deliberately path-free: pages are addressed by
 /// index and served through `reader_get_page_bytes`.
 #[derive(Debug, Clone, Serialize)]

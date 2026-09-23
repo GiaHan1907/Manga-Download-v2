@@ -131,6 +131,8 @@ pub fn run() {
             commands::favorites::app_list_favorite_mangas,
             commands::reading_progress::app_get_reading_progress,
             commands::reading_progress::app_save_reading_progress,
+            commands::reading_progress::app_list_read_history,
+            commands::reading_progress::app_clear_read_history,
             commands::tasks::app_list_local_download_tasks,
             commands::downloads::queue_chapter_downloads,
             commands::downloads::get_download_task,

@@ -9,6 +9,7 @@ import type {
   LocalMangaDetailDto,
   LocalMangaDto,
   PagedResult,
+  ReadHistoryDto,
   ReadingProgressDto,
   SettingsPatchDto,
   StorageStatusDto,
@@ -75,6 +76,19 @@ export async function listFavoriteMangas(args: {
 
 export async function getReadingProgress(mangaId: string): Promise<ReadingProgressDto | null> {
   return invoke<ReadingProgressDto | null>("app_get_reading_progress", { mangaId });
+}
+
+/// Feature plan F4 — read history (newest first; omit mangaId for the global stream).
+export async function listReadHistory(args: {
+  mangaId?: string;
+  limit: number;
+  offset: number;
+}): Promise<PagedResult<ReadHistoryDto>> {
+  return invoke<PagedResult<ReadHistoryDto>>("app_list_read_history", args);
+}
+
+export async function clearReadHistory(mangaId: string): Promise<number> {
+  return invoke<number>("app_clear_read_history", { mangaId });
 }
 
 export async function saveReadingProgress(args: {
