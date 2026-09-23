@@ -234,3 +234,85 @@ async fn live_r1_download_journey() {
     assert_eq!(archive.entries.len() as i64, dto.total_pages);
     assert!(first_page.len() > 20, "page0 too small to be an image");
 }
+
+/// Paste-a-link rehearsal against the REAL app data dir while the desktop app
+/// is running: this process performs exactly what `queue_chapter_download_by_url`
+/// does (classify link, ensure the manga+chapter rows, queue), then waits for
+/// THE APP's own dispatcher (1 s tick) to execute the task. Proves the whole
+/// live UI path end to end without clicking for the user.
+///
+///   MANGA_LIVE_APP_DATA="<real appdata dir>" MANGA_LIVE_PASTE_URL="<chapter url>" \
+///   cargo test --lib -- --ignored --nocapture live_paste
+#[tokio::test]
+#[ignore = "live paste-link rehearsal: needs the desktop app running + env"]
+async fn live_paste_link_onto_running_app() {
+    let dir =
+        std::env::var("MANGA_LIVE_APP_DATA").expect("MANGA_LIVE_APP_DATA = real app data dir");
+    let url = std::env::var("MANGA_LIVE_PASTE_URL").expect("MANGA_LIVE_PASTE_URL = chapter link");
+    let app_data = PathBuf::from(dir);
+    let pool = init_pool(&app_data).await.expect("init_pool");
+    let rows = source_repo::list_sources(&pool).await.unwrap();
+    let registry = SourceRegistry::from_rows(&rows);
+
+    let link = discovery_service::find_chapter_link(&registry, &url)
+        .expect("link must classify (source registered? chapter-level https url?)");
+    println!("LIVEPASTE link classified: {:?}", link);
+    let chapter_id = discovery_service::ensure_chapter_row(&registry, &pool, &link)
+        .await
+        .expect("manga save + chapter row");
+    let outcome = download_repo::queue_batch(&pool, std::slice::from_ref(&chapter_id), "cbz", 0)
+        .await
+        .expect("queue_batch");
+    assert!(
+        outcome.errors.is_empty(),
+        "queue rejected: {:?}",
+        outcome.errors
+    );
+    let task_id = outcome
+        .created
+        .first()
+        .or(outcome.reused.first())
+        .expect("no task")
+        .id
+        .clone();
+    println!("LIVEPASTE queued task {task_id} — app dispatcher takes over");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40 * 60);
+    let mut last_line = String::new();
+    loop {
+        let row = download_repo::get_task(&pool, &task_id)
+            .await
+            .unwrap()
+            .expect("task exists");
+        let dto = task_repo::to_dto(row);
+        let line = format!("{} {}/{}", dto.status, dto.completed_pages, dto.total_pages);
+        if line != last_line {
+            println!("LIVEPASTE {line}");
+            last_line = line;
+        }
+        if matches!(dto.status.as_str(), "completed" | "failed" | "cancelled") {
+            assert_eq!(
+                dto.status, "completed",
+                "app worker failed: {:?}",
+                dto.error_message
+            );
+            let relpath = dto
+                .output_relpath
+                .clone()
+                .expect("completed without relpath");
+            let abs = storage::library_root(&app_data).join(&relpath);
+            let size = std::fs::metadata(&abs).expect("artifact missing").len();
+            let archive = cbz::open(&abs).expect("artifact parses");
+            println!(
+                "LIVEPASTE DONE: {relpath} — {size} bytes, {} pages",
+                archive.entries.len()
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "app never executed the task — is the desktop app running?"
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
