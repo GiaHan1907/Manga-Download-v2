@@ -174,7 +174,12 @@ pub async fn import_cbz(
         let _ = std::fs::remove_file(&dest);
         return Err(error);
     }
-    tx.commit().await?;
+    if let Err(error) = tx.commit().await {
+        // Commit can still fail (e.g. SQLITE_BUSY on the durable write) —
+        // same compensation as the insert branch: no row, no file.
+        let _ = std::fs::remove_file(&dest);
+        return Err(error.into());
+    }
 
     Ok(ImportedChapterDto {
         manga_id: manga_id.to_string(),
