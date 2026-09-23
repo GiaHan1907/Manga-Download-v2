@@ -29,6 +29,10 @@ pub trait Transport: Send + Sync {
     async fn get_text(&self, url: &str) -> Result<String, SourceError>;
     /// Form POST with XHR headers — used by WordPress/admin-ajax endpoints.
     async fn post_form_json(&self, url: &str, form: &[(&str, &str)]) -> Result<Value, SourceError>;
+    /// Form POST returning an HTML fragment (Madara `ajax/chapters/` list).
+    /// Same host allowlist, pacing and size caps as every other request.
+    async fn post_form_text(&self, url: &str, form: &[(&str, &str)])
+        -> Result<String, SourceError>;
     /// Binary GET with a caller-supplied byte cap (page images). Same
     /// host/redirect/pacing policy as text fetches.
     async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError>;
@@ -248,6 +252,30 @@ impl Transport for GuardedHttp {
     }
 
     async fn post_form_json(&self, url: &str, form: &[(&str, &str)]) -> Result<Value, SourceError> {
+        let bytes = self.post_form_bytes(url, form).await?;
+        serde_json::from_slice(&bytes).map_err(|_| SourceError::Parse)
+    }
+
+    async fn post_form_text(
+        &self,
+        url: &str,
+        form: &[(&str, &str)],
+    ) -> Result<String, SourceError> {
+        let bytes = self.post_form_bytes(url, form).await?;
+        String::from_utf8(bytes).map_err(|_| SourceError::Parse)
+    }
+
+    async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
+        self.fetch_bytes_bounded(url, max_bytes).await
+    }
+}
+
+impl GuardedHttp {
+    async fn post_form_bytes(
+        &self,
+        url: &str,
+        form: &[(&str, &str)],
+    ) -> Result<Vec<u8>, SourceError> {
         let parsed = self.validate(url)?;
         self.pace().await;
         let response = self
@@ -279,11 +307,7 @@ impl Transport for GuardedHttp {
         if bytes.len() as u64 > MAX_BODY_BYTES {
             return Err(SourceError::Parse);
         }
-        serde_json::from_slice(&bytes).map_err(|_| SourceError::Parse)
-    }
-
-    async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
-        self.fetch_bytes_bounded(url, max_bytes).await
+        Ok(bytes.to_vec())
     }
 }
 
@@ -341,6 +365,13 @@ pub mod mock {
             _: &[(&str, &str)],
         ) -> Result<Value, SourceError> {
             serde_json::from_str(&self.pop_raw("POST", url)?).map_err(|_| SourceError::Parse)
+        }
+        async fn post_form_text(
+            &self,
+            url: &str,
+            _: &[(&str, &str)],
+        ) -> Result<String, SourceError> {
+            self.pop_raw("POST-TEXT", url)
         }
         async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
             let body = self.pop_raw("GET-BYTES", url)?;

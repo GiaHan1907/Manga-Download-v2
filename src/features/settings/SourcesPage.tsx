@@ -16,6 +16,7 @@ function RealSources() {
   const [reload, setReload] = useState(0);
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [imageHostsText, setImageHostsText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -62,6 +63,9 @@ function RealSources() {
             <div>
               <h3>{source.displayName}</h3>
               <p className="muted">{source.baseUrl ?? source.id}</p>
+              {source.imageHosts && (
+                <p className="muted">Host ảnh: {source.imageHosts}</p>
+              )}
               <div className="chip-row">
                 <StatusBadge tone={source.builtin ? "neutral" : "success"}>
                   {source.builtin ? "Tích hợp sẵn" : "Do người dùng thêm"}
@@ -130,17 +134,31 @@ function RealSources() {
           onChange={(event) => setBaseUrl(event.target.value)}
           placeholder="https://vd-site-madara.com/"
         />
+        <Input
+          label="Host ảnh phụ trợ (tuỳ chọn, tối đa 4, phân cách bằng dấu phẩy)"
+          value={imageHostsText}
+          onChange={(event) => setImageHostsText(event.target.value)}
+          placeholder="VD: img-cdn.example.com"
+        />
       </div>
       {actionError && <ErrorState title="Thao tác với nguồn thất bại" description={actionError} />}
       <div className="settings-actions">
         <Button
           variant="primary"
           disabled={busy || name.trim() === "" || baseUrl.trim() === ""}
-          onClick={() =>
+          onClick={() => {
+            const hosts = imageHostsText
+              .split(",")
+              .map((entry) => entry.trim())
+              .filter((entry) => entry !== "");
             void run(() =>
-              localServices.source.addSource({ displayName: name.trim(), baseUrl: baseUrl.trim() }),
-            )
-          }
+              localServices.source.addSource({
+                displayName: name.trim(),
+                baseUrl: baseUrl.trim(),
+                imageHosts: hosts.length > 0 ? hosts : undefined,
+              }),
+            ).then(() => setImageHostsText(""));
+          }}
         >
           {busy ? "Đang xử lý..." : "Thêm nguồn"}
         </Button>

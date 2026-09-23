@@ -9,7 +9,11 @@ import type {
 
 export interface SourceService {
   listSources(): Promise<SourceViewDto[]>;
-  addSource(args: { displayName: string; baseUrl: string }): Promise<SourceViewDto>;
+  addSource(args: {
+    displayName: string;
+    baseUrl: string;
+    imageHosts?: string[];
+  }): Promise<SourceViewDto>;
   removeSource(sourceId: string): Promise<void>;
   setSourceEnabled(args: { sourceId: string; enabled: boolean }): Promise<boolean>;
   search(args: {

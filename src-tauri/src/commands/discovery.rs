@@ -27,11 +27,18 @@ pub async fn list_supported_sources(
 pub async fn add_manga_source(
     display_name: String,
     base_url: String,
+    image_hosts: Option<Vec<String>>,
     state: State<'_, AppState>,
 ) -> Result<SourceView, AppError> {
     let registry = snapshot(&state)?;
-    let view =
-        discovery_service::add_manga_source(&registry, &state.db, &display_name, &base_url).await?;
+    let view = discovery_service::add_manga_source(
+        &registry,
+        &state.db,
+        &display_name,
+        &base_url,
+        image_hosts,
+    )
+    .await?;
     let fresh = discovery_service::registry_from_pool(&state.db).await?;
     *state.registry.lock().map_err(|_| AppError::Internal)? = fresh;
     Ok(view)

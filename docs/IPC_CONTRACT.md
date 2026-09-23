@@ -38,7 +38,7 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | Command | Input (camelCase) | Output | Ghi chú |
 |---|---|---|---|
 | `list_supported_sources` | — | `SourceViewDto[]` | Registry động: MangaDex built-in + hàng `sources` adapter `madara` hợp lệ; merge `enabled` từ DB |
-| `add_manga_source` | `{ displayName, baseUrl }` | `SourceViewDto` | baseUrl phải HTTPS, host public, không port lạ/credential; id do host `madara-<host>`; registry rebuild sau ghi |
+| `add_manga_source` | `{ displayName, baseUrl, imageHosts? }` | `SourceViewDto { …, imageHosts: string\|null }` | baseUrl phải HTTPS, host public, không port lạ/credential; id do host `madara-<host>`; `imageHosts` (mới, tối đa 4): exact hostname bare (không scheme/port/IP/wildcard) cho phép RIÊNG request ảnh chương của nguồn đó — metadata/search/chapter vẫn chỉ base host; policy fail-closed như cũ; registry rebuild sau ghi |
 | `remove_manga_source` | `{ sourceId }` | — | builtin (`mangadex`) → `UNSUPPORTED_IN_THIS_PHASE`; registry rebuild |
 | `set_source_enabled` | `{ sourceId, enabled }` | `boolean` | chỉ id có trong registry; tạo row cho builtin khi toggle lần đầu |
 | `search_manga` | `{ query, sourceIds?, page? }` | `SearchResultDto` | query 1..=200 ký tự, page 1..=50, ≤10 sourceIds; lỗi từng nguồn cô lập trong `sourceErrors` |

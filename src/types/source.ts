@@ -11,6 +11,8 @@ export interface SourceViewDto {
   enabled: boolean;
   builtin: boolean;
   baseUrl: string | null;
+  /** Comma-separated registered image CDN hosts (null = base host only). */
+  imageHosts: string | null;
 }
 
 export interface RemoteMangaSummaryDto {

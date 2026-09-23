@@ -59,7 +59,7 @@ Tự động: dev smoke nhiều lần, `tauri build` EXIT=0 (bundle lần đầu
 
 ## 11. Known issues / release blockers
 
-R-1 live journey BLOCKED (cần user) — **đây là blocker duy nhất còn lại cho "feature-complete đã kiểm chứng"**; R-2 installer chưa cài-thử; R-3..R-8 chấp nhận có ghi chú; R-6 reduced-motion + deflate CBZ + TanStack-kiến-trúc (đã deviate có lý do P08) = debt có kiểm soát.
+R-1 live journey: ĐÓNG 2026-09-23 qua headless probe trên máy user (Ninja ch.1, 188/188 trang CBZ verify — xem RISK_REGISTER R-1); còn xác nhận lại trong app UI; R-2 installer chưa cài-thử; R-3..R-8 chấp nhận có ghi chú; R-6 reduced-motion + deflate CBZ + TanStack-kiến-trúc (đã deviate có lý do P08) = debt có kiểm soát.
 
 ## 12. Phase 10 handoff requirements
 

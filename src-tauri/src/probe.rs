@@ -54,6 +54,11 @@ async fn live_r1_download_journey() {
     let source_name = env_or("MANGA_LIVE_SOURCE_NAME", "Truyen Tuoi Tho");
     let query = env_or("MANGA_LIVE_QUERY", "ninja loan thi");
     let title_hint = env_or("MANGA_LIVE_TITLE_HINT", "ninja");
+    let image_hosts: Vec<String> = env_or("MANGA_LIVE_IMAGE_HOSTS", "img.resourcehub.shop")
+        .split(',')
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect();
     let app_data = PathBuf::from(dir);
     let pool = init_pool(&app_data).await.expect("init_pool on copy");
     let _ = crate::downloader::recovery::reconcile_startup(&pool, &app_data).await;
@@ -63,7 +68,15 @@ async fn live_r1_download_journey() {
     //    which we tolerate).
     let rows = source_repo::list_sources(&pool).await.unwrap();
     let registry = SourceRegistry::from_rows(&rows);
-    match discovery_service::add_manga_source(&registry, &pool, &source_name, &source_url).await {
+    match discovery_service::add_manga_source(
+        &registry,
+        &pool,
+        &source_name,
+        &source_url,
+        Some(image_hosts),
+    )
+    .await
+    {
         Ok(view) => println!("PROBE source registered: {}", view.info.id),
         Err(error) => println!("PROBE add_source returned {error:?} (continuing)"),
     }

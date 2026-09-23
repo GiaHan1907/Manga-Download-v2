@@ -119,6 +119,9 @@ export async function listSupportedSources(): Promise<SourceViewDto[]> {
 export async function addMangaSource(args: {
   displayName: string;
   baseUrl: string;
+  /** Optional exact hostnames that may serve this source's chapter images
+   * (max 4, validated by Rust; requests to any other host stay blocked). */
+  imageHosts?: string[];
 }): Promise<SourceViewDto> {
   return invoke<SourceViewDto>("add_manga_source", args);
 }

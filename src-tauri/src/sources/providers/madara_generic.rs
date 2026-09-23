@@ -16,16 +16,47 @@ use crate::sources::http::{GuardedHttp, HttpPolicy, Transport, IMAGE_MAX_BYTES, 
 /// Generic WordPress/Madara adapter. Users register any Madara-based site by
 /// name + https base URL; only the fixed public endpoints the site's own
 /// frontend uses are called (admin-ajax search, /manga/<slug>/ pages).
+/// Chapter images may legitimately live on a separate CDN host, but ONLY one
+/// the user explicitly registered per source (`image_hosts`) — the transport
+/// allowlist stays exact-host and fail-closed (no wildcards, no IPs, cap 4).
 pub struct MadaraGeneric {
     id: String,
     display_name: String,
     host: String,
     base: Url,
+    image_hosts: Vec<String>,
     http: Arc<dyn Transport>,
 }
 
+/// Normalize one exact image-host allowance: bare lowercase hostname,
+/// dotted, no IP literal, no scheme/port/path, bounded length.
+pub fn normalize_image_host(raw: &str) -> Option<String> {
+    let candidate = raw.trim().to_lowercase();
+    if candidate.is_empty()
+        || candidate.len() > 253
+        || candidate.parse::<std::net::IpAddr>().is_ok()
+        || !candidate.contains('.')
+        || candidate
+            .chars()
+            .any(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'))
+    {
+        return None;
+    }
+    let valid_segments = candidate.split('.').all(|segment| {
+        !segment.is_empty()
+            && !segment.starts_with('-')
+            && !segment.ends_with('-')
+            && segment.len() <= 63
+    });
+    valid_segments.then_some(candidate)
+}
+
 impl MadaraGeneric {
-    pub fn live(display_name: &str, base_url: &str) -> Result<Self, SourceError> {
+    pub fn live(
+        display_name: &str,
+        base_url: &str,
+        image_hosts: &[String],
+    ) -> Result<Self, SourceError> {
         let parsed = Url::parse(base_url.trim()).map_err(|_| SourceError::MalformedUrl)?;
         if parsed.scheme() != "https"
             || parsed.port().is_some()
@@ -41,19 +72,43 @@ impl MadaraGeneric {
         if host.parse::<std::net::IpAddr>().is_ok() || !host.contains('.') {
             return Err(SourceError::MalformedUrl);
         }
+        if image_hosts.len() > 4 {
+            return Err(SourceError::MalformedUrl);
+        }
+        let mut extras: Vec<String> = Vec::new();
+        for extra in image_hosts {
+            let normalized = normalize_image_host(extra).ok_or(SourceError::MalformedUrl)?;
+            if normalized == host
+                || normalized.ends_with(&format!(".{host}"))
+                || extras.contains(&normalized)
+            {
+                // Subdomains of the base are already pointless-but-safe to
+                // drop; duplicates and the base itself never need an entry.
+                continue;
+            }
+            extras.push(normalized);
+        }
         let mut base = parsed.clone();
         base.set_path("/");
         base.set_query(None);
         base.set_fragment(None);
+        let mut allowed_hosts = vec![host.clone()];
+        allowed_hosts.extend(extras.iter().cloned());
         Ok(MadaraGeneric {
             id: format!("madara-{}", host.replace('.', "-")),
             display_name: display_name.to_string(),
-            http: Arc::new(GuardedHttp::new(HttpPolicy {
-                allowed_hosts: vec![host.clone()],
-            })),
+            http: Arc::new(GuardedHttp::new(HttpPolicy { allowed_hosts })),
             host,
             base,
+            image_hosts: extras,
         })
+    }
+
+    /// Every hostname chapter images may come from: base + registered extras.
+    fn allowed_image_hosts(&self) -> Vec<String> {
+        let mut allowed = vec![self.host.clone()];
+        allowed.extend(self.image_hosts.iter().cloned());
+        allowed
     }
 
     #[cfg(test)]
@@ -61,6 +116,16 @@ impl MadaraGeneric {
         display_name: &str,
         base_url: &str,
         http: Arc<dyn Transport>,
+    ) -> Result<Self, SourceError> {
+        Self::with_transport_and_image_hosts(display_name, base_url, http, &[])
+    }
+
+    #[cfg(test)]
+    pub fn with_transport_and_image_hosts(
+        display_name: &str,
+        base_url: &str,
+        http: Arc<dyn Transport>,
+        image_hosts: &[String],
     ) -> Result<Self, SourceError> {
         let parsed = Url::parse(base_url).map_err(|_| SourceError::MalformedUrl)?;
         let host = parsed
@@ -74,6 +139,7 @@ impl MadaraGeneric {
             display_name: display_name.to_string(),
             host,
             base,
+            image_hosts: image_hosts.to_vec(),
             http,
         })
     }
@@ -133,6 +199,49 @@ impl MadaraGeneric {
             return None;
         }
         Some(chapter.to_string())
+    }
+
+    /// Extract chapter links from any fragment (page or AJAX markup). Only
+    /// same-manga, same-host slugs survive — sidebar/related links for other
+    /// series are filtered out by `chapter_slug_from_url`.
+    fn parse_chapter_nodes(&self, document: &Html, source_manga_id: &str) -> Vec<RemoteChapter> {
+        let chapters_selector = Selector::parse(
+            "ul.main.version-chap a[href], li.wp-manga-chapter a[href], div.chapter-item a[href]",
+        )
+        .unwrap();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut chapters: Vec<RemoteChapter> = Vec::new();
+        for node in document.select(&chapters_selector) {
+            let Some(href) = node.value().attr("href") else {
+                continue;
+            };
+            let Some(slug) = self.chapter_slug_from_url(href, source_manga_id) else {
+                continue;
+            };
+            if !seen.insert(slug.clone()) {
+                continue;
+            }
+            let label = node.text().collect::<String>().trim().to_string();
+            let number = chapter_number_from_slug(&slug);
+            let chapter_title = if label.is_empty() {
+                format!(
+                    "Chương {}",
+                    number
+                        .map(|value| value.to_string())
+                        .unwrap_or(slug.clone())
+                )
+            } else {
+                label
+            };
+            chapters.push(RemoteChapter {
+                source_chapter_id: slug,
+                title: chapter_title,
+                number,
+                order: 0,
+                published_at: None,
+            });
+        }
+        chapters
     }
 }
 
@@ -252,15 +361,23 @@ impl SourceAdapter for MadaraGeneric {
         );
         let html = self.http.get_text(&page_url).await?;
         let document = Html::parse_document(&html);
-        // Primary dom-hint documented by the site's own theme; the loose
-        // fallback keeps plain Madara forks working. A foreign image host
-        // fails the whole manifest — the allowlist is never widened silently.
+        // Primary dom-hint documented by the site's own theme; the page-box
+        // variant covers the common "chapter image on a registered CDN host"
+        // layout; the loose fallback keeps plain Madara forks working. An
+        // image host outside the source's explicit allowlist fails the WHOLE
+        // manifest — it is never widened silently.
+        let allowed = self.allowed_image_hosts();
         let strict = Selector::parse(".reading-content img.wp-manga-chapter-img").unwrap();
         let mut urls: Vec<String> = Vec::new();
-        collect_page_urls(&document, &strict, &self.base, &self.host, &mut urls)?;
+        collect_page_urls(&document, &strict, &self.base, &allowed, &mut urls)?;
+        if urls.is_empty() {
+            let boxed = Selector::parse(".reading-content .page-box img, .page-box img.page-image")
+                .unwrap();
+            collect_page_urls(&document, &boxed, &self.base, &allowed, &mut urls)?;
+        }
         if urls.is_empty() {
             let loose = Selector::parse(".reading-content img").unwrap();
-            collect_page_urls(&document, &loose, &self.base, &self.host, &mut urls)?;
+            collect_page_urls(&document, &loose, &self.base, &allowed, &mut urls)?;
         }
         if urls.is_empty() || urls.len() > MAX_PAGE_COUNT {
             return Err(SourceError::Parse);
@@ -286,6 +403,17 @@ impl SourceAdapter for MadaraGeneric {
         }
         let page_url = self.manga_url(source_manga_id);
         let html = self.http.get_text(&page_url).await?;
+        // Madara "load chapters via AJAX" pattern: the page ships only an
+        // empty #manga-chapters-holder. The site's own frontend POSTs to
+        // {manga_url}ajax/chapters/; the fragment uses the same markup.
+        // The request must happen BEFORE any Html value exists (scraper's
+        // document is !Send and must not live across an await).
+        let ajax_fragment: Option<String> = if html.contains("manga-chapters-holder") {
+            let ajax_url = format!("{}ajax/chapters/", page_url);
+            self.http.post_form_text(&ajax_url, &[]).await.ok()
+        } else {
+            None
+        };
         let document = Html::parse_document(&html);
 
         let h1 = Selector::parse("h1").unwrap();
@@ -317,39 +445,15 @@ impl SourceAdapter for MadaraGeneric {
             }
         }
 
-        let chapters_selector =
-            Selector::parse("ul.main.version-chap a[href], li.wp-manga-chapter a[href]").unwrap();
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut chapters: Vec<RemoteChapter> = Vec::new();
-        for node in document.select(&chapters_selector) {
-            let Some(href) = node.value().attr("href") else {
-                continue;
-            };
-            let Some(slug) = self.chapter_slug_from_url(href, source_manga_id) else {
-                continue;
-            };
-            if !seen.insert(slug.clone()) {
-                continue;
+        let mut chapters = self.parse_chapter_nodes(&document, source_manga_id);
+        if let Some(fragment) = &ajax_fragment {
+            let doc = Html::parse_document(fragment);
+            let via_ajax = self.parse_chapter_nodes(&doc, source_manga_id);
+            // Prefer whichever list is richer — sidebar links that happen to
+            // match this manga must not beat the real chapter list.
+            if via_ajax.len() >= chapters.len() {
+                chapters = via_ajax;
             }
-            let label = node.text().collect::<String>().trim().to_string();
-            let number = chapter_number_from_slug(&slug);
-            let chapter_title = if label.is_empty() {
-                format!(
-                    "Chương {}",
-                    number
-                        .map(|value| value.to_string())
-                        .unwrap_or(slug.clone())
-                )
-            } else {
-                label
-            };
-            chapters.push(RemoteChapter {
-                source_chapter_id: slug,
-                title: chapter_title,
-                number,
-                order: 0,
-                published_at: None,
-            });
         }
         // Listing pages commonly order newest-first; expose chronological
         // order: numbered chapters ascending by number, unnumbered chapters
@@ -399,7 +503,7 @@ fn collect_page_urls(
     document: &Html,
     selector: &Selector,
     base: &Url,
-    host: &str,
+    allowed_hosts: &[String],
     out: &mut Vec<String>,
 ) -> Result<(), SourceError> {
     let mut seen: HashSet<Url> = HashSet::new();
@@ -411,7 +515,11 @@ fn collect_page_urls(
             .filter(|value| !value.is_empty());
         let Some(raw) = raw else { continue };
         let joined = base.join(raw).map_err(|_| SourceError::Parse)?;
-        if joined.scheme() != "https" || joined.host_str() != Some(host) {
+        if joined.scheme() != "https"
+            || !joined
+                .host_str()
+                .is_some_and(|host| allowed_hosts.iter().any(|allowed| allowed == host))
+        {
             return Err(SourceError::Parse);
         }
         if seen.insert(joined.clone()) {
@@ -533,13 +641,137 @@ mod tests {
         assert!(!provider.owns_url(&Url::parse("https://truyentuoitho.com/other").unwrap()));
     }
 
+    const CHAPTER_ITEM_FIXTURE: &str = r#"<html><body>
+      <h1>Ninja Loạn Thị</h1>
+      <div class="list-chapter">
+        <div class="chapter-item"><span class="chapter font-meta">
+          <a href="https://truyentuoitho.com/manga/ninja-loan-thi/tap-65/">Tập 65</a>
+        </span></div>
+      </div>
+      <div class="list-chapter">
+        <div class="chapter-item"><span class="chapter font-meta">
+          <a href="/manga/ninja-loan-thi/tap-1/">Tập 1</a>
+        </span></div>
+      </div></body></html>"#;
+
+    #[tokio::test]
+    async fn detail_parses_chapter_item_theme_and_orders_numbered_first() {
+        let (provider, _) = adapter(vec![Ok(CHAPTER_ITEM_FIXTURE)]);
+        let detail = provider.manga_detail("ninja-loan-thi").await.unwrap();
+        let ids: Vec<&str> = detail
+            .chapters
+            .iter()
+            .map(|c| c.source_chapter_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["tap-1", "tap-65"]);
+    }
+
+    const HOLDER_PAGE_FIXTURE: &str = r#"<html><body><h1>Ninja Loạn Thị</h1>
+      <div id="manga-chapters-holder" data-id="1901"><i class="fa-spin"></i></div>
+      <div class="chapter-item"><a href="https://truyentuoitho.com/manga/other-series/tap-9/">sidebar</a></div>
+    </body></html>"#;
+
+    const CHAPTERS_FRAGMENT_FIXTURE: &str = r#"<div class="listing-chapters_wrap"><ul class="main version-chap">
+      <li class="wp-manga-chapter"><a href="https://truyentuoitho.com/manga/ninja-loan-thi/tap-2/">Tập 2</a></li>
+      <li class="wp-manga-chapter"><a href="https://truyentuoitho.com/manga/ninja-loan-thi/tap-1/">Tập 1</a></li>
+    </ul></div>"#;
+
+    #[tokio::test]
+    async fn holder_page_loads_full_list_via_ajax_chapters_post() {
+        let (provider, transport) =
+            adapter(vec![Ok(HOLDER_PAGE_FIXTURE), Ok(CHAPTERS_FRAGMENT_FIXTURE)]);
+        let detail = provider.manga_detail("ninja-loan-thi").await.unwrap();
+        let ids: Vec<&str> = detail
+            .chapters
+            .iter()
+            .map(|c| c.source_chapter_id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["tap-1", "tap-2"],
+            "sidebar other-series link filtered"
+        );
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(requested[1].0, "POST-TEXT");
+        assert!(requested[1]
+            .1
+            .ends_with("/manga/ninja-loan-thi/ajax/chapters/"));
+    }
+
+    const PAGE_BOX_FIXTURE: &str = r#"<html><body><div class="reading-content">
+      <div class="page-box"><img src="https://img.resourcehub.shop/ninja/0001.webp"/></div>
+      <div class="page-box"><img src="https://img.resourcehub.shop/ninja/0002.webp"/></div>
+    </div></body></html>"#;
+
+    fn adapter_with_hosts(
+        replies: Vec<Result<&'static str, &'static str>>,
+        hosts: &[&str],
+    ) -> MadaraGeneric {
+        let transport = Arc::new(MockTransport::with(replies));
+        MadaraGeneric::with_transport_and_image_hosts(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            transport,
+            &hosts.iter().map(|h| h.to_string()).collect::<Vec<String>>(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn manifest_serves_pages_from_registered_extra_image_host() {
+        let provider = adapter_with_hosts(vec![Ok(PAGE_BOX_FIXTURE)], &["img.resourcehub.shop"]);
+        let manifest = provider
+            .page_manifest("ninja-loan-thi", "tap-1")
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2);
+        assert!(manifest.pages[0]
+            .url
+            .starts_with("https://img.resourcehub.shop/"));
+    }
+
+    #[tokio::test]
+    async fn manifest_without_the_image_host_registered_stays_fail_closed() {
+        let provider = adapter_with_hosts(vec![Ok(PAGE_BOX_FIXTURE)], &[]);
+        let error = provider
+            .page_manifest("ninja-loan-thi", "tap-1")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SourceError::Parse));
+    }
+
+    #[test]
+    fn normalize_image_host_accepts_bare_hosts_and_rejects_everything_else() {
+        assert_eq!(
+            normalize_image_host(" Img.ResourceHub.shop ").as_deref(),
+            Some("img.resourcehub.shop")
+        );
+        assert_eq!(normalize_image_host("1.2.3.4"), None);
+        assert_eq!(normalize_image_host("https://cdn.example"), None);
+        assert_eq!(normalize_image_host("cdn.example:443"), None);
+        assert_eq!(normalize_image_host("cdn_example.com"), None);
+        assert_eq!(normalize_image_host("-bad.example"), None);
+        assert_eq!(normalize_image_host("bad..example"), None);
+        assert_eq!(normalize_image_host("nodot"), None);
+    }
+
+    #[test]
+    fn live_rejects_invalid_extra_hosts() {
+        assert!(
+            MadaraGeneric::live("x", "https://example.com", &["10.0.0.5".to_string()]).is_err()
+        );
+        assert!(
+            MadaraGeneric::live("x", "https://example.com", &["cdn.example".to_string()]).is_ok()
+        );
+    }
+
     #[test]
     fn live_constructor_rejects_unsafe_base_urls() {
-        assert!(MadaraGeneric::live("x", "http://a.example.com").is_err());
-        assert!(MadaraGeneric::live("x", "https://127.0.0.1").is_err());
-        assert!(MadaraGeneric::live("x", "https://user@pass.example.org").is_err());
-        assert!(MadaraGeneric::live("x", "https://localhost:8443").is_err());
-        assert!(MadaraGeneric::live("x", "https://example.com").is_ok());
+        assert!(MadaraGeneric::live("x", "http://a.example.com", &[]).is_err());
+        assert!(MadaraGeneric::live("x", "https://127.0.0.1", &[]).is_err());
+        assert!(MadaraGeneric::live("x", "https://user@pass.example.org", &[]).is_err());
+        assert!(MadaraGeneric::live("x", "https://localhost:8443", &[]).is_err());
+        assert!(MadaraGeneric::live("x", "https://example.com", &[]).is_ok());
     }
 
     const CHAPTER_FIXTURE: &str = r#"<html><body>

@@ -22,7 +22,7 @@
 | T10-15 | WebView2 có sẵn: cài/launch | NOT RUN | Kịch bản A checklist (Win11 máy dev có runtime — nhưng cài-by-installer chưa chạy) |
 | T10-16 | WebView2 thiếu: bootstrap hành vi | NOT RUN | Kịch bản B checklist; policy `downloadBootstrapper` đã document |
 | T10-17 | Per-user install không cần admin | PASS(config)/NOT RUN(runtime) | `installMode: currentUser` trong conf; hành vi thực tế thuộc mục 1 |
-| T10-18 | Release app dùng nguồn test (network) | BLOCKED | = R-1 live journey P09 — cần user/mạng được phép |
+| T10-18 | Release app dùng nguồn test (network) | PARTIAL | R-1 đóng ở mức headless 2026-09-23 (probe live, nguồn thật truyentuoitho — 188 trang verified); re-verify trên build release + thao tác UI trong app còn mở |
 | T10-19 | Tải fixture chapters → CBZ valid (release build) | PASS(fixture-level) | engine/exporter tests 123/123 chạy trên code release; live = T10-18 |
 | T10-20 | Library/Reader offline, không mạng | PASS | reader tests không network + P09 offline evidence; installer-level offline = mục 6 |
 | T10-21 | Cài đặt không reset SQLite/Favorites/Settings/progress | PASS(config)/NOT RUN(installer) | uninstall/install không đụng app-data theo design Tauri NSIS (không data-removal step trong template); xác nhận thực tế = mục 9/10 |

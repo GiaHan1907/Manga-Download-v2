@@ -97,7 +97,7 @@ All gates should exit with code 0. Current status:
 | `npm run build` | ✅ Pass | Vite → `dist/` (~404 kB JS; exact size in HANDOFF gate line) |
 | `cargo check` | ✅ Pass | clean |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
-| `cargo test` | ✅ Pass | 149/149 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
+| `cargo test` | ✅ Pass | 155/155 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
 | `npm run tauri dev` | ✅ Smoke | Last smoke after feature-plan review 4 vòng (2026-09-23): app chạy thật, không panic; DB reopen schema 7 không reset |
 | `npm run tauri build` | ✅ Pass (2026-09-23, NSIS-only) | Exit 0; artifact + SHA-256 hiện hành trong `docs/phase-10/ARTIFACT_MANIFEST.md` (`2245f30e…a90674`). Chạy thử bản cài đặt trên VM sạch: chờ user xác nhận |
 
@@ -210,7 +210,7 @@ manga-downloader-1989/
 │       │   ├── reader.rs        # chapter manifest + per-page bytes via tauri::ipc::Response (Phase 07)
 │       │   └── tasks.rs         # read-only task metadata
 │       ├── domain/              # typed DTOs + settings/ids validation
-│       ├── sources/             # adapter trait + mangadex/madara + GuardedHttp (exact-host, DNS gate, pacing)
+│       ├── sources/             # adapter trait + mangadex/madara + GuardedHttp (exact-host + per-source image-host allowlist, DNS gate, pacing)
 │       ├── downloader/          # engine: scheduler/worker/transfer/checkpoint/exporter/storage/recovery (Phase 06)
 │       ├── reader/              # CBZ (STORE + DEFLATE/flate2, bounded central-dir parse) + image folders + sniff (Phase 07)
 │       ├── services/            # business invariants + storage/settings/library/reader services

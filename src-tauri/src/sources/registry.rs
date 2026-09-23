@@ -32,7 +32,18 @@ impl SourceRegistry {
                 eprintln!("source row {} has no base_url; skipped", row.id);
                 continue;
             };
-            match MadaraGeneric::live(&row.display_name, base_url) {
+            let hosts: Vec<String> = row
+                .image_hosts
+                .as_deref()
+                .map(|csv| {
+                    csv.split(',')
+                        .filter_map(|entry| {
+                            crate::sources::providers::madara_generic::normalize_image_host(entry)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            match MadaraGeneric::live(&row.display_name, base_url, &hosts) {
                 Ok(adapter) => {
                     if adapter.info().id != row.id {
                         eprintln!(

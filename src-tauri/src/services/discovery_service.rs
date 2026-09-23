@@ -18,6 +18,9 @@ pub struct SourceView {
     pub enabled: bool,
     pub builtin: bool,
     pub base_url: Option<String>,
+    /// Exact comma-separated image hosts the user registered (null = base
+    /// host only). Display-only for the Sources screen.
+    pub image_hosts: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -79,6 +82,11 @@ pub async fn list_sources_view(
                 } else {
                     row_by_id.get(&info.id).and_then(|r| r.base_url.clone())
                 },
+                image_hosts: if builtin {
+                    None
+                } else {
+                    row_by_id.get(&info.id).and_then(|r| r.image_hosts.clone())
+                },
                 info,
             }
         })
@@ -90,25 +98,54 @@ pub async fn add_manga_source(
     pool: &SqlitePool,
     display_name: &str,
     base_url: &str,
+    image_hosts: Option<Vec<String>>,
 ) -> Result<SourceView, AppError> {
     let display_name = display_name.trim();
     validate_text_len(display_name, 80, "Tên nguồn")?;
     if display_name.is_empty() {
         return Err(AppError::validation("Tên nguồn không được để trống."));
     }
-    let adapter =
-        crate::sources::providers::madara_generic::MadaraGeneric::live(display_name, base_url)
-            .map_err(AppError::Source)?;
+    let image_hosts = image_hosts.unwrap_or_default();
+    if image_hosts.len() > 4 {
+        return Err(AppError::validation(
+            "Tối đa 4 host ảnh phụ trợ cho một nguồn.",
+        ));
+    }
+    let mut normalized_hosts: Vec<String> = Vec::new();
+    for host in &image_hosts {
+        let Some(normalized) =
+            crate::sources::providers::madara_generic::normalize_image_host(host)
+        else {
+            return Err(AppError::validation(format!(
+                "Host ảnh không hợp lệ: {host}"
+            )));
+        };
+        if !normalized_hosts.contains(&normalized) {
+            normalized_hosts.push(normalized);
+        }
+    }
+    let adapter = crate::sources::providers::madara_generic::MadaraGeneric::live(
+        display_name,
+        base_url,
+        &normalized_hosts,
+    )
+    .map_err(AppError::Source)?;
     let candidate = adapter.info();
     if registry.get(&candidate.id).is_some() {
         return Err(AppError::Conflict);
     }
+    let image_hosts_csv = if normalized_hosts.is_empty() {
+        None
+    } else {
+        Some(normalized_hosts.join(","))
+    };
     source_repo::upsert_source(
         pool,
         &candidate.id,
         display_name,
         "madara",
         Some(base_url.trim()),
+        image_hosts_csv.as_deref(),
     )
     .await?;
     let rows = source_repo::list_sources(pool).await?;
@@ -121,6 +158,7 @@ pub async fn add_manga_source(
         enabled: row.enabled,
         builtin: false,
         base_url: row.base_url.clone(),
+        image_hosts: row.image_hosts.clone(),
     })
 }
 
@@ -154,7 +192,7 @@ pub async fn set_source_enabled(
         return Ok(enabled);
     }
     // Built-ins have a row created on first toggle.
-    source_repo::upsert_source(pool, source_id, "MangaDex", "mangadex", None).await?;
+    source_repo::upsert_source(pool, source_id, "MangaDex", "mangadex", None, None).await?;
     source_repo::set_enabled(pool, source_id, enabled).await?;
     Ok(enabled)
 }
@@ -501,7 +539,7 @@ mod tests {
         assert_eq!(unknown.source_errors.len(), 1);
         assert_eq!(unknown.source_errors[0].code, "VALIDATION_ERROR");
 
-        source_repo::upsert_source(&pool, "fixture", "Fixture Provider", "fixture", None)
+        source_repo::upsert_source(&pool, "fixture", "Fixture Provider", "fixture", None, None)
             .await
             .unwrap();
         source_repo::set_enabled(&pool, "fixture", false)
@@ -665,17 +703,41 @@ mod tests {
         let (_dir, pool) = crate::db::test_pool().await;
         let registry = fixture_registry();
 
-        let view = add_manga_source(&registry, &pool, "Example Site", "https://example.com/")
-            .await
-            .unwrap();
+        let view = add_manga_source(
+            &registry,
+            &pool,
+            "Example Site",
+            "https://example.com/",
+            Some(vec![" CDN.Example.net ".to_string()]),
+        )
+        .await
+        .unwrap();
         assert_eq!(view.info.id, "madara-example-com");
         assert!(!view.builtin);
+        assert_eq!(view.image_hosts.as_deref(), Some("cdn.example.net"));
 
         // Duplicate host registration is rejected once the registry knows it.
         let refreshed = registry_from_pool(&pool).await.unwrap();
-        let again =
-            add_manga_source(&refreshed, &pool, "Example Site", "https://example.com/").await;
+        let again = add_manga_source(
+            &refreshed,
+            &pool,
+            "Example Site",
+            "https://example.com/",
+            None,
+        )
+        .await;
         assert!(matches!(again, Err(AppError::Conflict)));
+
+        // A bogus image host is refused before anything is persisted.
+        let bogus = add_manga_source(
+            &refreshed,
+            &pool,
+            "Other",
+            "https://other.example/",
+            Some(vec!["10.1.2.3".to_string()]),
+        )
+        .await;
+        assert!(matches!(bogus, Err(AppError::Validation(_))));
 
         let rebuilt = registry_from_pool(&pool).await.unwrap();
         let ids: Vec<String> = rebuilt
