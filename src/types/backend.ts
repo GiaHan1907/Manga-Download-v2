@@ -26,6 +26,8 @@ export type LocalMangaDto = {
   author: string | null;
   description: string | null;
   status: "ongoing" | "completed" | "unknown";
+  /** Internal cover path key for get_manga_cover (never a URL). */
+  coverKey: string | null;
   chapterCount: number;
   favorite: boolean;
   updatedAt: string;

@@ -178,7 +178,7 @@ pub async fn upsert_chapter(
     Ok(result)
 }
 
-pub(crate) const MANGA_SELECT: &str = "SELECT m.id, m.source_id, m.source_manga_id, m.title, m.author, m.description, m.status, m.updated_at, \
+pub(crate) const MANGA_SELECT: &str = "SELECT m.id, m.source_id, m.source_manga_id, m.title, m.author, m.description, m.status, m.cover_key, m.updated_at, \
      (SELECT COUNT(*) FROM chapters c WHERE c.manga_id = m.id) AS chapter_count, \
      EXISTS(SELECT 1 FROM favorites f WHERE f.manga_id = m.id) AS favorite \
      FROM mangas m";
@@ -195,6 +195,7 @@ pub(crate) fn map_manga(row: &sqlx::sqlite::SqliteRow) -> Result<MangaDto, AppEr
         chapter_count: row.try_get("chapter_count")?,
         favorite: row.try_get::<bool, _>("favorite")?,
         updated_at: row.try_get("updated_at")?,
+        cover_key: row.try_get("cover_key")?,
     })
 }
 

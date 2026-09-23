@@ -2,6 +2,7 @@ import { History } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import { localServices } from "../../../services/provider";
 import { useAsyncData } from "../../../shared/hooks/useAsyncData";
+import { useCoverUrl } from "../../../shared/hooks/useCoverUrl";
 import { useDomainVersion } from "../../../shared/hooks/useInvalidation";
 import type { LibraryMangaDto } from "../../../types/library";
 
@@ -56,10 +57,11 @@ function describeProgress(manga: LibraryMangaDto): string {
 function ContinueHero({ manga }: { manga: LibraryMangaDto }) {
   const total = manga.progress?.pageTotal ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((((manga.progress?.pageIndex ?? 0) + 1) / total) * 100)) : 0;
+  const coverUrl = useCoverUrl(manga.sourceId, manga.sourceMangaId, manga.coverKey);
   return (
     <div className="continue-hero" data-testid="continue-hero">
       <div className="continue-hero__cover" aria-hidden="true">
-        {manga.title.charAt(0).toUpperCase()}
+        {coverUrl ? <img src={coverUrl} alt="" /> : manga.title.charAt(0).toUpperCase()}
       </div>
       <div className="continue-hero__body">
         <h3 className="continue-hero__title">{manga.title}</h3>

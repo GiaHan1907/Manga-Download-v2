@@ -60,6 +60,9 @@ pub struct MangaDto {
     pub author: Option<String>,
     pub description: Option<String>,
     pub status: String,
+    /// Internal cover path key (never a fetchable URL) — feed to
+    /// `get_manga_cover` together with sourceId + sourceMangaId.
+    pub cover_key: Option<String>,
     pub chapter_count: i64,
     pub favorite: bool,
     pub updated_at: String,
@@ -248,6 +251,10 @@ pub struct LibraryMangaDto {
     pub title: String,
     pub author: Option<String>,
     pub status: String,
+    /// Cover trio for `get_manga_cover` (path key only — never a URL).
+    pub source_id: String,
+    pub source_manga_id: String,
+    pub cover_key: Option<String>,
     pub favorite: bool,
     pub downloaded_chapters: i64,
     pub total_chapters: i64,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import * as desktop from "../../../shared/api/desktop";
-import { sniffImageMime } from "../../../shared/lib/imageMime";
+import * as desktop from "../api/desktop";
+import { sniffImageMime } from "../lib/imageMime";
 
 const CACHE_LIMIT = 120;
 // Object URLs are cached module-wide, keyed by source+manga+cover so grid

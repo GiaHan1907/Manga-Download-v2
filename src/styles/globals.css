@@ -992,6 +992,7 @@ button {
 .continue-hero__cover {
   display: grid;
   place-items: center;
+  overflow: hidden;
   width: 96px;
   height: 132px;
   flex-shrink: 0;
@@ -1000,6 +1001,11 @@ button {
   color: var(--primary-foreground);
   font-size: 2rem;
   font-weight: 700;
+}
+.continue-hero__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .continue-hero__body {
   min-width: 0;

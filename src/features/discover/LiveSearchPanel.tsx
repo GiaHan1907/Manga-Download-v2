@@ -12,7 +12,7 @@ import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useDomainVersion } from "../../shared/hooks/useInvalidation";
 import type { RemoteMangaSummaryDto, SearchResultDto, SourceViewDto } from "../../types/source";
-import { useCoverUrl } from "./hooks/useCoverUrl";
+import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 
 // Isolated so the cover hook runs per card (React rules of hooks forbid

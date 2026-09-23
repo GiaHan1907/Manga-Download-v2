@@ -18,6 +18,7 @@ import type { QueueResultDto } from "../../types/downloads";
 import { localServices } from "../../services/provider";
 import { formatBytes } from "../../types/downloads";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 
 export default function LocalMangaPage() {
@@ -56,6 +57,15 @@ export default function LocalMangaPage() {
     () => localServices.library.getManga(mangaId),
     [mangaId, nonce, libraryVersion],
   );
+
+  // Saved-manga cover (schema stores the path key; bytes come from the same
+  // get_manga_cover IPC). Null inputs before load make the hook a no-op.
+  const coverUrl = useCoverUrl(
+    manga.state === "success" && manga.data ? manga.data.sourceId : "",
+    manga.state === "success" && manga.data ? manga.data.sourceMangaId : "",
+    manga.state === "success" && manga.data ? manga.data.coverKey : null,
+  );
+
   const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), []);
   const downloaded = useAsyncData<DownloadedChapterDto[]>(
     () => localServices.libraryV2.downloadedChapters(mangaId),
@@ -238,6 +248,14 @@ export default function LocalMangaPage() {
     <div className="page-stack">
       <section className="panel" aria-label="Thông tin truyện đã lưu">
         <div className="section-header">
+          {coverUrl && (
+            <img
+              src={coverUrl}
+              alt={`Ảnh bìa ${detail.title}`}
+              width={110}
+              style={{ borderRadius: 8, objectFit: "cover", alignSelf: "flex-start" }}
+            />
+          )}
           <div>
             <p className="muted">
               Library · Local (SQLite){" "}

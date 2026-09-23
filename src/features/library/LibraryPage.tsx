@@ -12,6 +12,7 @@ import { normalizeIpcError } from "../../shared/api/desktop";
 import { watchRunNow as desktopWatchRunNow } from "../../shared/api/desktop";
 import { pushToast } from "../../components/ui/toastStore";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { localServices } from "../../services/provider";
 import type { LibraryFilter, LibraryMangaDto, LibrarySort } from "../../types/library";
@@ -275,6 +276,12 @@ function LibraryEntry({
           Math.round(((manga.progress.pageIndex + 1) / (manga.progress.pageTotal ?? 0)) * 100),
         )
       : 0;
+  // Grid-only: the list view has no cover slot, so skip the fetch entirely.
+  const coverUrl = useCoverUrl(
+    manga.sourceId,
+    manga.sourceMangaId,
+    view === "grid" ? manga.coverKey : null,
+  );
   const card = (
     <MangaCard
       to={`/library/${manga.id}`}
@@ -282,6 +289,7 @@ function LibraryEntry({
       subtitle={`${manga.downloadedChapters}/${manga.totalChapters} chương offline · ${manga.author ?? "không rõ tác giả"}`}
       status={manga.status}
       alertCount={manga.newAlerts ?? 0}
+      coverUrl={coverUrl ?? undefined}
     />
   );
   return (

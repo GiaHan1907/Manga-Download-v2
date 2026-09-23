@@ -9,7 +9,7 @@ import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain } from "../../shared/hooks/useInvalidation";
-import { useCoverUrl } from "./hooks/useCoverUrl";
+import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import type { SaveResultDto } from "../../types/source";
 
 type SaveState =

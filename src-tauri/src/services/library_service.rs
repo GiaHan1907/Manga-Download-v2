@@ -66,7 +66,7 @@ pub async fn list_mangas(
         ""
     };
 
-    let base = "SELECT m.id, m.title, m.author, m.status, m.last_read_at, \
+    let base = "SELECT m.id, m.title, m.author, m.status, m.source_id, m.source_manga_id, m.cover_key, m.last_read_at, \
          (SELECT COUNT(*) FROM favorites f WHERE f.manga_id = m.id) AS favorite, \
          (SELECT COUNT(*) FROM chapters c WHERE c.manga_id = m.id AND c.local_path IS NOT NULL) AS downloaded_chapters, \
          (SELECT COUNT(*) FROM chapters c WHERE c.manga_id = m.id) AS total_chapters, \
@@ -124,6 +124,9 @@ pub async fn list_mangas(
                 title: row.try_get("title")?,
                 author: row.try_get("author")?,
                 status: row.try_get("status")?,
+                source_id: row.try_get("source_id")?,
+                source_manga_id: row.try_get("source_manga_id")?,
+                cover_key: row.try_get("cover_key")?,
                 favorite: favorite != 0,
                 downloaded_chapters: row.try_get("downloaded_chapters")?,
                 total_chapters: row.try_get("total_chapters")?,

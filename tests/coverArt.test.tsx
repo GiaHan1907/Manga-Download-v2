@@ -2,11 +2,13 @@
 /// opaque ids/keys and normalize every binary transport shape to Uint8Array;
 /// sniffImageMime labels the blob from magic bytes (Rust already validated).
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
 import { getMangaCover } from "../src/shared/api/desktop";
+import { useCoverUrl } from "../src/shared/hooks/useCoverUrl";
 import { sniffImageMime } from "../src/shared/lib/imageMime";
 
 beforeEach(() => {
@@ -41,6 +43,35 @@ describe("getMangaCover IPC wrapper", () => {
     vi.mocked(invoke).mockResolvedValue(raw);
     const bytes = await getMangaCover({ sourceId: "s", sourceMangaId: "m", coverKey: "/k" });
     expect(bytes).toBe(raw);
+  });
+});
+
+describe("useCoverUrl hook", () => {
+  const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x1a, 0x0a, 0x00]);
+  beforeEach(() => {
+    // Object URLs are not implemented in jsdom; stub them per test.
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:cover"),
+      revokeObjectURL: vi.fn(),
+    });
+  });
+
+  it("returns the object URL once the IPC resolves", async () => {
+    vi.mocked(invoke).mockResolvedValue(pngBytes.slice().buffer);
+    const { result } = renderHook(() => useCoverUrl("s1", "m1", "/wp/one.jpg"));
+    expect(result.current).toBeNull();
+    await waitFor(() => expect(result.current).toBe("blob:cover"));
+    expect(invoke).toHaveBeenCalledWith(
+      "get_manga_cover",
+      expect.objectContaining({ sourceId: "s1", coverKey: "/wp/one.jpg" }),
+    );
+  });
+
+  it("never fetches when there is no cover key", () => {
+    const { result } = renderHook(() => useCoverUrl("s1", "m1", null));
+    expect(result.current).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 

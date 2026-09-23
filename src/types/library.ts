@@ -18,6 +18,10 @@ export type LibraryMangaDto = {
   title: string;
   author: string | null;
   status: "ongoing" | "completed" | "unknown";
+  /** Cover trio for get_manga_cover (path key only — never a URL). */
+  sourceId: string;
+  sourceMangaId: string;
+  coverKey: string | null;
   favorite: boolean;
   downloadedChapters: number;
   totalChapters: number;
