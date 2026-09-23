@@ -55,6 +55,7 @@ mod tests {
             output_format: None,
             notifications_enabled: None,
             close_to_tray: None,
+            watch_enabled: None,
         }
     }
 

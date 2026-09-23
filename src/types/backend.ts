@@ -82,6 +82,8 @@ export type AppSettingsDto = {
   outputFormat: "cbz" | "folder" | "pdf";
   notificationsEnabled: boolean;
   closeToTray: boolean;
+  /** Feature plan F1: global watcher default (per-manga override in Library). */
+  watchEnabled: boolean;
 };
 
 /// Phase 08 — Home overview aggregates (library_stats).

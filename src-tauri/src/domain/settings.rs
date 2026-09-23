@@ -24,6 +24,9 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     /// Phase 08: window close hides to tray instead of exiting.
     pub close_to_tray: bool,
+    /// Feature plan F1: global default for the new-chapter watcher. Per-manga
+    /// `mangas.watch_enabled` (NULL here means "follow this value") overrides.
+    pub watch_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -36,6 +39,7 @@ impl Default for AppSettings {
             output_format: "cbz".to_string(),
             notifications_enabled: true,
             close_to_tray: false,
+            watch_enabled: true,
         }
     }
 }
@@ -89,6 +93,9 @@ impl AppSettings {
         }
         if let Some(value) = patch.close_to_tray {
             next.close_to_tray = value;
+        }
+        if let Some(value) = patch.watch_enabled {
+            next.watch_enabled = value;
         }
         next
     }
@@ -180,6 +187,7 @@ mod tests {
             "outputFormat",
             "notificationsEnabled",
             "closeToTray",
+            "watchEnabled",
         ];
         expected.sort();
         assert_eq!(keys, expected);

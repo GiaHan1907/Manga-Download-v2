@@ -1059,6 +1059,16 @@ button {
 }
 
 /* ---------- UI plan C5: success toast stack ---------- */
+.manga-card__alert {
+  display: inline-block;
+  margin-right: var(--space-2);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
 .toast-stack {
   position: fixed;
   right: var(--space-4);

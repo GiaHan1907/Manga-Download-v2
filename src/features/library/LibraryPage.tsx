@@ -9,6 +9,8 @@ import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import { normalizeIpcError } from "../../shared/api/desktop";
+import { watchRunNow as desktopWatchRunNow } from "../../shared/api/desktop";
+import { pushToast } from "../../components/ui/toastStore";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { localServices } from "../../services/provider";
@@ -29,6 +31,7 @@ const FILTERS: { id: LibraryFilter; label: string }[] = [
   { id: "downloaded", label: "Có nội dung offline" },
   { id: "partial", label: "Tải dở" },
   { id: "favorite", label: "Yêu thích" },
+  { id: "alerts", label: "Có chương mới" },
 ];
 
 function readViewMode(): "grid" | "list" {
@@ -162,6 +165,29 @@ export default function LibraryPage() {
         <Button variant="ghost" onClick={() => void runReconcile()}>
           Kiểm tra file
         </Button>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            void desktopWatchRunNow()
+              .then((report) =>
+                pushToast(
+                  report.alertedChapters > 0
+                    ? `${report.alertedChapters} chương mới từ ${report.checked} truyện được kiểm tra.`
+                    : `Đã kiểm tra ${report.checked} truyện theo dõi — không có chương mới.${report.failed > 0 ? ` (${report.failed} nguồn lỗi, sẽ thử lại sau)` : ""}`,
+                ),
+              )
+              .catch((error: unknown) => {
+                const normalized = normalizeIpcError(error);
+                pushToast(
+                  normalized.code === "DB_CONFLICT"
+                    ? "Vừa kiểm tra xong — chờ ~1 phút rồi thử lại."
+                    : normalized.message,
+                );
+              });
+          }}
+        >
+          Kiểm tra chương mới
+        </Button>
         <span className="muted library-count">
           {page.state === "success" ? `${page.data.total} truyện` : ""}
         </span>
@@ -255,6 +281,7 @@ function LibraryEntry({
       title={manga.title}
       subtitle={`${manga.downloadedChapters}/${manga.totalChapters} chương offline · ${manga.author ?? "không rõ tác giả"}`}
       status={manga.status}
+      alertCount={manga.newAlerts ?? 0}
     />
   );
   return (

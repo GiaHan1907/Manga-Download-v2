@@ -45,6 +45,8 @@ pub async fn list_mangas(
         "downloaded" => "AND downloaded_chapters > 0",
         "partial" => "AND downloaded_chapters > 0 AND downloaded_chapters < total_chapters",
         "favorite" => "AND EXISTS (SELECT 1 FROM favorites f WHERE f.manga_id = m.id)",
+        // Feature plan F1: manga with unacknowledged new-chapter alerts.
+        "alerts" => "AND EXISTS (SELECT 1 FROM chapter_alerts ca WHERE ca.manga_id = m.id)",
         other => {
             return Err(AppError::validation(format!(
                 "Bộ lọc không hợp lệ ({other})."
@@ -76,7 +78,8 @@ pub async fn list_mangas(
          (SELECT rp.updated_at FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_updated_at, \
          EXISTS (SELECT 1 FROM download_tasks dt JOIN chapters c ON c.id = dt.chapter_id \
                  WHERE c.manga_id = m.id AND dt.status = 'completed' \
-                 AND dt.output_relpath IS NOT NULL AND c.local_path IS NULL) AS has_missing \
+                 AND dt.output_relpath IS NOT NULL AND c.local_path IS NULL) AS has_missing, \
+         (SELECT COUNT(*) FROM chapter_alerts ca WHERE ca.manga_id = m.id) AS new_alerts \
          FROM mangas m";
     let where_sql = format!("WHERE 1=1 {search} {filter}");
     let total_sql = format!("SELECT COUNT(*) FROM ({base} {where_sql})");
@@ -129,6 +132,7 @@ pub async fn list_mangas(
                 last_download_at: row.try_get("last_download_at")?,
                 progress,
                 has_missing: row.try_get::<bool, _>("has_missing")?,
+                new_alerts: row.try_get::<i64, _>("new_alerts")?,
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;
@@ -555,6 +559,32 @@ mod tests {
             .find(|item| item["id"] == serde_json::json!(ids[0]))
             .expect("tampered chapter listed");
         assert_eq!(row["artifactOk"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn t12_alerts_filter_and_new_alerts_count() {
+        let (lib, manga_a, chapters) = seeded().await;
+        let ts = now_iso();
+        sqlx::query(
+            "INSERT INTO chapter_alerts (manga_id, chapter_id, detected_at) VALUES (?1, ?2, ?3)",
+        )
+        .bind(&manga_a)
+        .bind(&chapters[0])
+        .bind(&ts)
+        .execute(&lib.pool)
+        .await
+        .unwrap();
+        let with_alerts = list_all(&lib, "alerts").await;
+        assert_eq!(with_alerts.len(), 1);
+        assert_eq!(with_alerts[0].new_alerts, 1);
+        let all = list_all(&lib, "all").await;
+        let a = all.iter().find(|m| m.id == manga_a).unwrap();
+        assert_eq!(a.new_alerts, 1);
+        // Ack empties the filter again (alerts are deleted, not flagged).
+        super::super::watch_service::ack_alerts(&lib.pool, &manga_a)
+            .await
+            .unwrap();
+        assert!(list_all(&lib, "alerts").await.is_empty());
     }
 
     #[tokio::test]

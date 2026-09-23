@@ -232,6 +232,8 @@ pub struct LibraryMangaDto {
     pub progress: Option<LibraryProgressDto>,
     /// True when reconciliation previously found a recorded artifact missing.
     pub has_missing: bool,
+    /// Feature plan F1: unacknowledged new-chapter alerts for this manga.
+    pub new_alerts: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -261,6 +263,7 @@ pub struct SettingsPatchInput {
     pub output_format: Option<String>,
     pub notifications_enabled: Option<bool>,
     pub close_to_tray: Option<bool>,
+    pub watch_enabled: Option<bool>,
 }
 
 /// Phase 08 — Home overview aggregates (single SQL pass, no N+1).

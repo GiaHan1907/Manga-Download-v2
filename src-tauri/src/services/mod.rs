@@ -7,3 +7,4 @@ pub mod reader_service;
 pub mod reading_service;
 pub mod settings_service;
 pub mod storage_service;
+pub mod watch_service;

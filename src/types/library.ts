@@ -4,7 +4,7 @@ import type { ReadingProgressDto } from "./backend";
 /// paths: pages are (chapterId, index) addressed and bytes come per page.
 
 export type LibrarySort = "lastRead" | "recentDownload" | "title" | "chapters";
-export type LibraryFilter = "all" | "downloaded" | "partial" | "favorite";
+export type LibraryFilter = "all" | "downloaded" | "partial" | "favorite" | "alerts";
 
 export type LibraryProgressDto = {
   chapterId: string;
@@ -26,6 +26,9 @@ export type LibraryMangaDto = {
   lastDownloadAt: string | null;
   progress: LibraryProgressDto | null;
   hasMissing: boolean;
+  /** Feature plan F1: unacknowledged new-chapter alerts (Rust always sends;
+   *  optional in TS so demo fixtures may omit it). */
+  newAlerts?: number;
 };
 
 export type DownloadedChapterDto = {

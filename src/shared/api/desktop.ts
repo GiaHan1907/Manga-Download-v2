@@ -295,6 +295,57 @@ export async function subscribeTrayOpenDownloads(
   return listen<unknown>("tray-open-downloads", () => handler());
 }
 
+// --- Feature plan F1: new-chapter watch (ids + counts only) ---
+
+export type WatchStateDto = {
+  enabled: boolean | null;
+  watchedAt: string | null;
+  failCount: number;
+};
+
+export type ChapterAlertDto = {
+  chapterId: string;
+  title: string;
+  detectedAt: string;
+};
+
+export type WatchTickDto = {
+  checked: number;
+  alertedChapters: number;
+  failed: number;
+};
+
+export async function libraryGetWatch(mangaId: string): Promise<WatchStateDto> {
+  return invoke<WatchStateDto>("library_get_watch", { mangaId });
+}
+
+export async function librarySetWatch(args: {
+  mangaId: string;
+  enabled: boolean | null;
+}): Promise<void> {
+  await invoke("library_set_watch", args);
+}
+
+export async function libraryListAlerts(mangaId: string): Promise<ChapterAlertDto[]> {
+  return invoke<ChapterAlertDto[]>("library_list_alerts", { mangaId });
+}
+
+export async function libraryAckAlerts(mangaId: string): Promise<number> {
+  return invoke<number>("library_ack_alerts", { mangaId });
+}
+
+export async function watchRunNow(): Promise<WatchTickDto> {
+  return invoke<WatchTickDto>("watch_run_now");
+}
+
+export async function subscribeLibraryAlerts(
+  handler: (payload: { newChapters: number }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ newChapters: number }>("library-alerts", (message) =>
+    handler(message.payload),
+  );
+}
+
 export function normalizeIpcError(error: unknown): AppError {
   if (typeof error === "object" && error !== null) {
     const candidate = error as Record<string, unknown>;

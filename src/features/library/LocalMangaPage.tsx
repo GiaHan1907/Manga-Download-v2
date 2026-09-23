@@ -30,8 +30,18 @@ export default function LocalMangaPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [alertsNonce, setAlertsNonce] = useState(0);
   const libraryVersion = useDomainVersion("library");
   const downloadsVersion = useDomainVersion("downloads");
+
+  // Feature plan F1: watcher state + unacknowledged new-chapter alerts.
+  const watch = useAsyncData(
+    async () => ({
+      state: await localServices.libraryV2.getWatch(mangaId),
+      alerts: await localServices.libraryV2.listAlerts(mangaId),
+    }),
+    [mangaId, alertsNonce, libraryVersion],
+  );
 
   const manga = useAsyncData<LocalMangaDetailDto | null>(
     () => localServices.library.getManga(mangaId),
@@ -208,6 +218,79 @@ export default function LocalMangaPage() {
           </div>
         </div>
       </section>
+
+      {watch.state === "success" && (
+        <section className="panel" aria-label="Theo dõi chương mới">
+          <div className="chapter-toolbar">
+            <div>
+              <h2 className="panel__title">Theo dõi chương mới</h2>
+              <p className="muted">
+                {watch.data.state.enabled === null
+                  ? "Đang theo cài đặt chung (kiểm tra ~6 giờ/lần khi app chạy)."
+                  : watch.data.state.enabled
+                    ? "Đang bật cho truyện này."
+                    : "Đang tắt cho truyện này."}
+                {watch.data.state.failCount > 0
+                  ? ` · ${watch.data.state.failCount} lần lỗi gần nhất — nguồn đang tạm lùi lịch kiểm tra.`
+                  : ""}
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const effective = watch.data.state.enabled ?? true;
+                void localServices.libraryV2
+                  .setWatch({ mangaId, enabled: !effective })
+                  .then(() => {
+                    pushToast(effective ? "Đã tắt theo dõi chương mới." : "Đã bật theo dõi chương mới.");
+                    setAlertsNonce((value) => value + 1);
+                  })
+                  .catch((error: unknown) =>
+                    pushToast(error instanceof Error ? error.message : "Không đổi được theo dõi."),
+                  );
+              }}
+            >
+              {(watch.data.state.enabled ?? true) ? "Tắt theo dõi" : "Bật theo dõi"}
+            </Button>
+          </div>
+          {watch.data.alerts.length > 0 && (
+            <div className="queue-result" role="status">
+              <p>
+                <strong>{watch.data.alerts.length} chương mới</strong> kể từ lần kiểm tra trước:
+              </p>
+              <ul>
+                {watch.data.alerts.slice(0, 8).map((alert) => (
+                  <li key={alert.chapterId}>{alert.title}</li>
+                ))}
+                {watch.data.alerts.length > 8 && <li className="muted">…</li>}
+              </ul>
+              <div className="settings-actions">
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const ids = watch.data.alerts.map((alert) => alert.chapterId);
+                    setSelected((prev) => new Set([...prev, ...ids]));
+                    pushToast(`Đã chọn ${ids.length} chương mới — bấm "Tải" để xếp hàng.`);
+                  }}
+                >
+                  Chọn tất cả chương mới
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    void localServices.libraryV2
+                      .ackAlerts(mangaId)
+                      .then(() => setAlertsNonce((value) => value + 1))
+                      .catch(() => undefined);
+                  }}
+                >
+                  Đã xem hết
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel" aria-label="Chương đã tải offline">
         <h2 className="panel__title">Đã tải ({downloadedIds.size})</h2>

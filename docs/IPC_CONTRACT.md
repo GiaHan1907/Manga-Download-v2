@@ -63,6 +63,18 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `cancel_downloads_for_manga` | `{ mangaId }` | `number` (số tác vụ accepted) | Feature plan F5. Mọi task chưa xong (trừ terminal/failed) của mọi chương thuộc manga; queued/paused chốt ngay, worker-active nhận cancel flag hợp tác. Kết quả cuối cùng qua event — con số là "đã nhận yêu cầu", không phải "đã cancelled" |
 | `app_list_local_download_tasks` (mở rộng) | `{ status?, limit?, offset? }` | `PagedResult<DownloadTaskDto>` | status nay nhận cả 10 lifecycle states; DTO thêm `attempts/nextRetryAt/errorMessage/revision/finishedAt/outputRelpath/chapterTitle/mangaTitle` |
 
+## Commands Feature plan F1 — new-chapter watch (schema 6 `0006_watch.sql`)
+
+| Command | Input (camelCase) | Output | Ghi chú |
+|---|---|---|---|
+| `library_get_watch` | `{ mangaId }` | `{ enabled: bool\|null, watchedAt: string\|null, failCount }` | `enabled: null` = theo cài đặt chung `settings.watchEnabled` |
+| `library_set_watch` | `{ mangaId, enabled: bool\|null }` | — | Bật/tắt theo dõi từng truyện; `null` khôi phục theo chung; `NOT_FOUND` nếu manga lạ |
+| `library_list_alerts` | `{ mangaId }` | `ChapterAlertDto[] { chapterId, title, detectedAt }` | Tối đa 200, chưa ack; metadata thuần, không URL/path |
+| `library_ack_alerts` | `{ mangaId }` | `number` (xóa bao nhiêu) | Idempotent |
+| `watch_run_now` | — | `{ checked, alertedChapters, failed }` | Manual tick; rate-limit 60s → `DB_CONFLICT`; dùng chung đường với loop ~6h |
+
+`library_list` (mở rộng): DTO thêm `newAlerts` (số chương mới chưa ack), filter mới `"alerts"`. **Event mới** `library-alerts` payload `{ newChapters }` — Rust chỉ emit khi tick phát hiện chương mới (kèm 1 notification tổng); frontend bump domain `library`/`home`, dữ liệu luôn refetch qua snapshot. Watcher CHỈ gọi `manga_detail` qua adapter (đúng pacing/allowlist GuardedHttp), không tự HTTP, không download gì.
+
 **Event** `download-task-updated` → payload `DownloadTaskEvent { task, downloadedBytes, speedBytesPerSecond|null, occurredAt }`: progress gộp ≥250ms/task, chuyển trạng thái tức thì; `task.revision` tăng đơn điệu để UI chặn frame cũ ghi đè frame mới. Frontend subscribe qua `desktop.subscribeDownloadTask()` và **bắt buộc unlisten khi teardown**. `DownloadTaskDto` không bao giờ chứa URL trang/headers/đường dẫn tuyệt đối; `outputRelpath` là đường dẫn tương đối dưới app library root, chỉ hiển thị, không phải input.
 
 ## Commands Phase 07 — library & offline reader (id-only, binary per page)

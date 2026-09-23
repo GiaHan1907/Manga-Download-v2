@@ -21,6 +21,10 @@ export interface LibraryApi {
   reconcile(): Promise<ReconcileReportDto>;
   removeChapter(chapterId: string): Promise<void>;
   removeMangaFiles(mangaId: string): Promise<RemoveMangaFilesDto>;
+  getWatch(mangaId: string): Promise<desktop.WatchStateDto>;
+  setWatch(args: { mangaId: string; enabled: boolean | null }): Promise<void>;
+  listAlerts(mangaId: string): Promise<desktop.ChapterAlertDto[]>;
+  ackAlerts(mangaId: string): Promise<number>;
 }
 
 function rethrow(err: unknown): never {
@@ -40,4 +44,8 @@ export const libraryApi: LibraryApi = {
   reconcile: () => desktop.libraryReconcile().catch(rethrow),
   removeChapter: (chapterId) => desktop.libraryRemoveChapter(chapterId).catch(rethrow),
   removeMangaFiles: (mangaId) => desktop.libraryRemoveMangaFiles(mangaId).catch(rethrow),
+  getWatch: (mangaId) => desktop.libraryGetWatch(mangaId).catch(rethrow),
+  setWatch: (args) => desktop.librarySetWatch(args).catch(rethrow),
+  listAlerts: (mangaId) => desktop.libraryListAlerts(mangaId).catch(rethrow),
+  ackAlerts: (mangaId) => desktop.libraryAckAlerts(mangaId).catch(rethrow),
 };

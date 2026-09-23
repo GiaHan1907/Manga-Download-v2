@@ -184,6 +184,18 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
             Quit vẫn dừng worker theo lifecycle — không hứa tải tiếp sau khi process thoát)
           </span>
         </label>
+        <label className="input-field input-field--check">
+          <input
+            type="checkbox"
+            checked={draft.watchEnabled}
+            onChange={(event) => setDraft({ ...draft, watchEnabled: event.target.checked })}
+          />
+          <span>
+            Tự kiểm tra chương mới cho truyện đã lưu (mặc định toàn cục; tắt/bật từng truyện trong
+            trang Library). App chỉ kiểm tra khi đang chạy — chu kỳ ~6 giờ, Pace theo nguồn, và chỉ
+            với truyện đã bật theo dõi.
+          </span>
+        </label>
         <p className="muted">Cần lưu để có hiệu lực.</p>
       </section>
 

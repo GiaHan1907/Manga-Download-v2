@@ -10,6 +10,7 @@ export interface AppSettings {
   outputFormat: OutputFormat;
   notificationsEnabled: boolean;
   closeToTray: boolean;
+  watchEnabled: boolean;
 }
 
 export const SETTINGS_LIMITS = {
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   outputFormat: "cbz",
   notificationsEnabled: true,
   closeToTray: false,
+  watchEnabled: true,
 };
 
 export interface SettingsService {

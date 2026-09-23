@@ -106,6 +106,8 @@ pub fn run() {
                 app_data_dir: app_data_dir.clone(),
                 flags: Arc::clone(&flags),
             });
+            // Feature plan F1: ~6 h new-chapter watcher (metadata only).
+            commands::watch::spawn_watcher_loop(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -140,6 +142,11 @@ pub fn run() {
             commands::downloads::clear_download_history,
             commands::downloads::retry_all_failed_downloads,
             commands::downloads::cancel_downloads_for_manga,
+            commands::watch::watch_run_now,
+            commands::watch::library_set_watch,
+            commands::watch::library_list_alerts,
+            commands::watch::library_ack_alerts,
+            commands::watch::library_get_watch,
             commands::library::library_stats,
             commands::library::library_list,
             commands::library::library_get_downloaded_chapters,

@@ -49,3 +49,34 @@ describe("F2/F5 IPC wrappers", () => {
     expect(invoke).toHaveBeenCalledWith("cancel_downloads_for_manga", { mangaId: "m1" });
   });
 });
+
+import {
+  libraryGetWatch,
+  librarySetWatch,
+  libraryListAlerts,
+  libraryAckAlerts,
+  watchRunNow,
+} from "../src/shared/api/desktop";
+
+describe("F1 watch IPC wrappers", () => {
+  it("sends ids only and mirrors the documented command names", async () => {
+    vi.mocked(invoke).mockResolvedValue({ enabled: null, watchedAt: null, failCount: 0 });
+    await libraryGetWatch("m1");
+    expect(invoke).toHaveBeenCalledWith("library_get_watch", { mangaId: "m1" });
+
+    await librarySetWatch({ mangaId: "m1", enabled: false });
+    expect(invoke).toHaveBeenCalledWith("library_set_watch", { mangaId: "m1", enabled: false });
+
+    vi.mocked(invoke).mockResolvedValue([]);
+    await libraryListAlerts("m1");
+    expect(invoke).toHaveBeenCalledWith("library_list_alerts", { mangaId: "m1" });
+
+    await libraryAckAlerts("m1");
+    expect(invoke).toHaveBeenCalledWith("library_ack_alerts", { mangaId: "m1" });
+
+    vi.mocked(invoke).mockResolvedValue({ checked: 2, alertedChapters: 1, failed: 0 });
+    const report = await watchRunNow();
+    expect(invoke).toHaveBeenCalledWith("watch_run_now");
+    expect(report.alertedChapters).toBe(1);
+  });
+});

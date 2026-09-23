@@ -12,6 +12,7 @@ function toDto(settings: AppSettings): AppSettingsDto {
     outputFormat: settings.outputFormat,
     notificationsEnabled: settings.notificationsEnabled,
     closeToTray: settings.closeToTray,
+    watchEnabled: settings.watchEnabled,
   };
 }
 

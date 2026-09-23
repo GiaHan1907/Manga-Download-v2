@@ -9,3 +9,4 @@ pub mod settings;
 pub mod storage;
 pub mod system;
 pub mod tasks;
+pub mod watch;
