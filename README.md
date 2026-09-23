@@ -94,7 +94,7 @@ All gates should exit with code 0. Current status:
 | `npm run lint` | ✅ Pass | ESLint flat config, no errors |
 | `npm run typecheck` | ✅ Pass | `tsc -b`, no type errors |
 | `npm run test` | ✅ Pass | 99/99 tests (13 files: Phase 01 IPC → Phase 08 integration + reader logic + UI/feature-plan + review-round regressions; counts updated at each self-review — current truth in `docs/HANDOFF.md` §1a) |
-| `npm run build` | ✅ Pass | Vite → `dist/` (~404 kB JS; exact size in HANDOFF gate line) |
+| `npm run build` | ✅ Pass | Vite → `dist/` (~406 kB JS; exact size in HANDOFF gate line) |
 | `cargo check` | ✅ Pass | clean |
 | `cargo clippy --all-targets -- -D warnings` | ✅ Pass | zero warnings |
 | `cargo test` | ✅ Pass | 155/155 (engine state-machine + checkpoint/exporter adversarial + CBZ parser handcrafted-ZIP tests + migration upgrade tests + HTTP policy/SSRF + discovery + library/reader + storage/settings + perf tripwires) |
@@ -176,7 +176,7 @@ manga-downloader-1989/
 │   ├── shared/
 │   │   ├── api/
 │   │   │   ├── contracts.ts         # AppInfo, AppHealth, AppError types
-│   │   │   └── desktop.ts           # Sole IPC boundary: typed wrappers for all 50 commands + event listeners + binary page normalization
+│   │   │   └── desktop.ts           # Sole IPC boundary: typed wrappers for all 51 commands + event listeners + binary page normalization
 │   │   └── hooks/                   # useAsyncData, useServices (store), useInvalidation (6-domain bus), useDebouncedValue helpers
 │   └── styles/
 │       ├── tokens.css           # Semantic Dark Purple design tokens (colors, type, spacing, radii)
@@ -194,7 +194,7 @@ manga-downloader-1989/
 │   │   └── 0001_init.sql … 0007_read_history.sql   # Forward-only chain; 0004 executed as runtime-repaired SQL (src/db/migrations_repaired/, original checksum kept)
 │   └── src/
 │       ├── main.rs              # Windows subsystem attr, calls lib::run()
-│       ├── lib.rs               # Builder: setup (DB init + storage prep + recovery pass + tray/notifications + F1 watcher loop + F3 dialog), 50 commands
+│       ├── lib.rs               # Builder: setup (DB init + storage prep + recovery pass + tray/notifications + F1 watcher loop + F3 dialog), 51 commands
 │       ├── app_state.rs         # AppState { db, registry, coordinator, events, … }
 │       ├── error.rs             # AppError enum → serialized { code, message, retryable }
 │       ├── commands/

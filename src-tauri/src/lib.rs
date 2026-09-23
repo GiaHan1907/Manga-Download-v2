@@ -145,6 +145,7 @@ pub fn run() {
             commands::downloads::cancel_download,
             commands::downloads::retry_download,
             commands::downloads::set_download_priority,
+            commands::downloads::reveal_download,
             commands::downloads::clear_download_history,
             commands::downloads::retry_all_failed_downloads,
             commands::downloads::cancel_downloads_for_manga,

@@ -1,4 +1,4 @@
-import { Ban, Eraser, Link, Pause, Play, RotateCcw } from "lucide-react";
+import { Ban, Eraser, FolderOpen, Link, Pause, Play, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import Button from "../../components/ui/Button";
 import Dialog from "../../components/ui/Dialog";
@@ -7,7 +7,11 @@ import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import { pushToast } from "../../components/ui/toastStore";
-import { normalizeIpcError, queueChapterDownloadByUrl } from "../../shared/api/desktop";
+import {
+  normalizeIpcError,
+  queueChapterDownloadByUrl,
+  revealDownload,
+} from "../../shared/api/desktop";
 import type { DownloadTaskDto } from "../../types/backend";
 import {
   allowedDownloadActions,
@@ -181,6 +185,14 @@ export default function DownloadsPage() {
     }
   }
 
+  // Rust opens Explorer (artifact selected, or library root with no id);
+  // no path ever comes back to this side.
+  function openLocation(taskId?: string) {
+    void revealDownload(taskId ? { taskId } : {}).catch((err: unknown) =>
+      pushToast(normalizeIpcError(err).message),
+    );
+  }
+
   if (loading && tasks.length === 0) {
     return (
       <div className="page-stack" aria-busy="true">
@@ -228,6 +240,10 @@ export default function DownloadsPage() {
           <Button variant="ghost" disabled={bulkBusy} onClick={() => setPurgeOpen(true)}>
             <Eraser size={14} aria-hidden="true" />
             Dọn lịch sử
+          </Button>
+          <Button variant="ghost" onClick={() => openLocation()}>
+            <FolderOpen size={14} aria-hidden="true" />
+            Mở thư mục tải
           </Button>
         </div>
         <div className="discover-controls" style={{ marginTop: "var(--space-3)" }}>
@@ -298,7 +314,15 @@ export default function DownloadsPage() {
                   </p>
                 )}
                 {task.status === "completed" && task.outputRelpath && (
-                  <span className="download-card__meta">Đã xác minh: {task.outputRelpath}</span>
+                  <>
+                    <span className="download-card__meta">
+                      Đã xác minh: {task.outputRelpath}
+                    </span>
+                    <Button variant="secondary" onClick={() => openLocation(task.id)}>
+                      <FolderOpen size={14} aria-hidden="true" />
+                      Mở nơi lưu
+                    </Button>
+                  </>
                 )}
                 {allowedDownloadActions(task.status).map((action) => {
                   const Icon = actionIcon[action];

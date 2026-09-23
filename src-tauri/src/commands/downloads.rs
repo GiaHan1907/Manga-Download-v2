@@ -8,6 +8,7 @@ use crate::domain::{
     now_iso, ClearHistoryDto, DownloadTaskDto, DownloadTaskEvent, QueueErrorDto, QueueResultDto,
 };
 use crate::downloader::progress::TaskSink;
+use crate::downloader::storage;
 use crate::error::AppError;
 use crate::services::{discovery_service, download_history_service, settings_service};
 use crate::sources::dto::Capability;
@@ -303,4 +304,136 @@ pub async fn cancel_downloads_for_manga(
         }
     }
     Ok(accepted)
+}
+
+/// Resolve what Explorer should open: a completed task's artifact (selected
+/// in its folder) or, with no task, the library root itself. Every path is
+/// derived HERE from the DB + app root — the renderer only passes a task id,
+/// and even the relative path from the DB is re-validated before use.
+async fn resolve_reveal_path(
+    pool: &sqlx::SqlitePool,
+    app_data_dir: &std::path::Path,
+    task_id: Option<&str>,
+) -> Result<std::path::PathBuf, AppError> {
+    let Some(task_id) = task_id else {
+        let root = storage::library_root(app_data_dir);
+        std::fs::create_dir_all(&root)?;
+        return Ok(root);
+    };
+    let row = download_repo::get_task(pool, task_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("task"))?;
+    if row.status != "completed" {
+        return Err(AppError::validation(
+            "Chỉ mở được nơi lưu của mục đã hoàn tất.",
+        ));
+    }
+    let relpath = row
+        .output_relpath
+        .ok_or_else(|| AppError::validation("Mục này không có bản ghi để mở."))?;
+    storage::validate_relpath(&relpath)?;
+    let absolute = storage::library_root(app_data_dir).join(relpath);
+    if !absolute.exists() {
+        return Err(AppError::validation(
+            "File không còn trên đĩa (đã xoá hoặc di chuyển?).",
+        ));
+    }
+    Ok(absolute)
+}
+
+/// Open Explorer at the download location — `/select` reveals the artifact
+/// itself (file or image-folder) inside its folder. explorer.exe commonly
+/// exits non-zero even when the window opens, so only a spawn failure is an
+/// error; nothing about the path is ever returned to the renderer.
+#[tauri::command]
+pub async fn reveal_download(
+    task_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AppError> {
+    let target = resolve_reveal_path(&state.db, &state.app_data_dir, task_id.as_deref()).await?;
+    let mut command = std::process::Command::new("explorer.exe");
+    if task_id.is_some() {
+        command.arg(format!("/select,{}", target.display()));
+    } else {
+        command.arg(&target);
+    }
+    command
+        .spawn()
+        .map_err(|_| AppError::validation("Không mở được Explorer trên hệ thống này."))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_reveal_path;
+    use crate::error::AppError;
+    use sqlx::SqlitePool;
+
+    async fn completed_task(pool: &SqlitePool, task_id: &str, relpath: Option<&str>) {
+        let ts = crate::domain::now_iso();
+        crate::db::repositories::manga_repo::ensure_source(pool, "src-r", "R")
+            .await
+            .unwrap();
+        let (manga, _) = crate::db::repositories::manga_repo::upsert_manga(
+            pool, "src-r", "mr", "T", None, None, "ongoing",
+        )
+        .await
+        .unwrap();
+        let (chapter, _) = crate::db::repositories::manga_repo::upsert_chapter(
+            pool, &manga, "cr", "C", None, None,
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO download_tasks (id, chapter_id, status, target_format, completed_pages, \
+             total_pages, attempts, revision, output_relpath, created_at, updated_at) \
+             VALUES (?1, ?2, 'completed', 'cbz', 1, 1, 0, 1, ?3, ?4, ?4)",
+        )
+        .bind(task_id)
+        .bind(&chapter)
+        .bind(relpath)
+        .bind(&ts)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reveal_resolution_selects_artifact_rejects_missing_and_opens_root() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let data = tempfile::tempdir().unwrap();
+        let root = crate::downloader::storage::library_root(data.path());
+
+        // No task → library root, created on demand.
+        let opened = resolve_reveal_path(&pool, data.path(), None).await.unwrap();
+        assert_eq!(opened, root);
+        assert!(opened.is_dir());
+
+        // Completed with a present artifact → its absolute path.
+        std::fs::create_dir_all(root.join("manga-x")).unwrap();
+        std::fs::write(root.join("manga-x/ch.cbz"), b"zip").unwrap();
+        completed_task(&pool, "tk-present", Some("manga-x/ch.cbz")).await;
+        let hit = resolve_reveal_path(&pool, data.path(), Some("tk-present"))
+            .await
+            .unwrap();
+        assert!(hit.ends_with("ch.cbz"));
+
+        // Artifact gone from disk → honest validation error, no Explorer call.
+        completed_task(&pool, "tk-gone", Some("manga-x/gone.cbz")).await;
+        assert!(matches!(
+            resolve_reveal_path(&pool, data.path(), Some("tk-gone")).await,
+            Err(AppError::Validation(_))
+        ));
+
+        // Traversal relpath never resolves outside the root.
+        completed_task(&pool, "tk-evil", Some("../escape.cbz")).await;
+        assert!(resolve_reveal_path(&pool, data.path(), Some("tk-evil"))
+            .await
+            .is_err());
+
+        // Unknown id → not found.
+        assert!(resolve_reveal_path(&pool, data.path(), Some("ghost"))
+            .await
+            .is_err());
+    }
 }

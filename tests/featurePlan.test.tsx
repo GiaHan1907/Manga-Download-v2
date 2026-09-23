@@ -88,6 +88,21 @@ describe("paste-a-link IPC wrapper", () => {
   });
 });
 
+import { revealDownload } from "../src/shared/api/desktop";
+
+describe("reveal-download IPC wrapper", () => {
+  it("passes only the task id when revealing one artifact", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await revealDownload({ taskId: "t1" });
+    expect(invoke).toHaveBeenCalledWith("reveal_download", { taskId: "t1" });
+  });
+  it("opens the library root when no id is given", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await revealDownload();
+    expect(invoke).toHaveBeenCalledWith("reveal_download", {});
+  });
+});
+
 import {
   libraryGetWatch,
   librarySetWatch,

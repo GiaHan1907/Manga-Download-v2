@@ -241,6 +241,13 @@ export async function queueChapterDownloadByUrl(args: {
   return invoke<QueueResultDto>("queue_chapter_download_by_url", args);
 }
 
+/// Open Explorer at the download location: with a completed task's id the
+/// artifact is SELECTED in its folder; with no id the library root opens.
+/// Paths never cross IPC in either direction — this is an action, not a getter.
+export async function revealDownload(args: { taskId?: string } = {}): Promise<void> {
+  await invoke<void>("reveal_download", args);
+}
+
 /// Subscribe to coalesced task updates. Returns an unsubscribe function that
 /// MUST be called on teardown (design §8.2 listener cleanup).
 export async function subscribeDownloadTask(
