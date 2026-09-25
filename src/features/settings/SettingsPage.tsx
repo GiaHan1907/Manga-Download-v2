@@ -2,18 +2,15 @@ import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
-import StatusBadge from "../../components/ui/StatusBadge";
 import type { ReadingDirection, ReaderMode } from "../../domain/reader";
 import {
   chooseDownloadRoot,
   clearRegenerableCache,
-  getAppInfo,
   getDownloadRoot,
   normalizeIpcError,
   resetDownloadRoot,
   storageStatus,
 } from "../../shared/api/desktop";
-import type { AppInfo } from "../../shared/api/contracts";
 import type { CacheCleanupDto, DownloadRootDto, StorageStatusDto } from "../../types/backend";
 import { formatBytes } from "../../types/downloads";
 import { services } from "../../services/provider";
@@ -28,13 +25,6 @@ import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation
 export default function SettingsPage() {
   const settingsVersion = useDomainVersion("settings");
   const settings = useAsyncData(() => services.settings.get(), [settingsVersion]);
-  const appInfo = useAsyncData<AppInfo | null>(async () => {
-    try {
-      return await getAppInfo();
-    } catch {
-      return null;
-    }
-  }, []);
 
   if (settings.state === "loading") {
     return <Skeleton height="20rem" label="Đang tải cài đặt" />;
@@ -48,10 +38,10 @@ export default function SettingsPage() {
     );
   }
 
-  return <SettingsForm initial={settings.data} appInfo={appInfo} />;
+  return <SettingsForm initial={settings.data} />;
 }
 
-function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: AsyncAppInfo }) {
+function SettingsForm({ initial }: { initial: AppSettings }) {
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [feedback, setFeedback] = useState<string | null>(null);
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
@@ -81,19 +71,8 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
   return (
     <div className="page-stack">
       <div className="settings-grid">
-      <section className="panel" aria-label="Cài đặt chung">
-        <h2 className="panel__title">General</h2>
-        <p className="panel__description">
-          Chủ đề: Dark Purple — hệ token duy nhất của app (Phase 02). Light/Auto chưa được thiết kế
-          accessibility nên KHÔNG có trong settings.
-        </p>
-      </section>
-
       <section className="panel" aria-label="Cài đặt reader">
         <h2 className="panel__title">Reader</h2>
-        <p className="panel__description">
-          Áp dụng cho lần MỞ chương kế tiếp (reader đang mở giữ lựa chọn phiên của nó).
-        </p>
         <label className="input-field">
           <span className="input-field__label">Chế độ đọc mặc định</span>
           <select
@@ -121,10 +100,6 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
 
       <section className="panel" aria-label="Cài đặt downloads">
         <h2 className="panel__title">Downloads</h2>
-        <p className="panel__description">
-          Engine Rust đọc các giá trị này ở mỗi nhịp lập lịch — đổi chỉ ảnh hưởng job mới, không
-          phá checkpoint đang chạy.
-        </p>
         <label className="input-field">
           <span className="input-field__label">
             Chương đồng thời ({SETTINGS_LIMITS.chapterConcurrency.min}–{SETTINGS_LIMITS.chapterConcurrency.max})
@@ -162,9 +137,6 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
             <option value="folder">Thư mục ảnh (xuất thật)</option>
           </select>
         </label>
-        <p className="muted">
-          PDF không có trong danh sách vì engine Phase 06 không xuất PDF — chọn sẽ bị server từ chối.
-        </p>
       </section>
 
       <section className="panel" aria-label="Cài đặt Windows">
@@ -200,28 +172,9 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
             với truyện đã bật theo dõi.
           </span>
         </label>
-        <p className="muted">Cần lưu để có hiệu lực.</p>
       </section>
 
       <StoragePanel />
-
-      <section className="panel" aria-label="Về ứng dụng">
-        <h2 className="panel__title">About</h2>
-        {appInfo.state === "success" && appInfo.data ? (
-          <p className="panel__description">
-            {appInfo.data.name} · phiên bản thật {appInfo.data.version} (IPC Phase 01) · {appInfo.data.platform}
-          </p>
-        ) : (
-          <p className="panel__description">Không đọc được thông tin app qua IPC — kiểm tra Console.</p>
-        )}
-        <p className="panel__description">
-          Mọi cài đặt ở trang này được validate trong Rust và lưu vào SQLite (Phase 04). Không có
-          control nào ở đây là mock.
-        </p>
-        <div className="chip-row">
-          <StatusBadge tone="success">Persisted — SQLite</StatusBadge>
-        </div>
-      </section>
       </div>
 
       <div className="settings-actions">
@@ -316,12 +269,6 @@ function StoragePanel() {
       )}
       {status.state === "success" && status.data && (
         <div className="storage-status">
-          <p className="panel__description">
-            Thư viện: <strong>{formatBytes(status.data.libraryBytes)}</strong> · Cache/staging:{" "}
-            <strong>{formatBytes(status.data.cacheBytes)}</strong> · {status.data.stagingDirs} thư mục
-            tạm · {status.data.activeTasks} tác vụ đang chạy. Số liệu là{" "}
-            <em>xấp xỉ</em> (theo DB + walk thư mục quản lý của app).
-          </p>
           {!status.data.rootAvailable && (
             <p className="queue-error" role="alert">
               Không đọc được thư mục library (ổ đĩa bị ngắt?) — việc đọc/tải offline sẽ báo lỗi cho tới
@@ -418,12 +365,7 @@ function StoragePanel() {
       {status.state === "success" && !status.data && (
         <p className="muted">Không đọc được trạng thái lưu trữ — thử lại sau.</p>
       )}
-      <p className="muted">
-        Policy: không đổi được thư mục library ở Phase 08 (đảm bảo file cũ không bị mồ côi); không có
-        nút "mở thư mục" vì shell capability chưa được cấp.
-      </p>
     </section>
   );
 }
 
-type AsyncAppInfo = { state: "loading" } | { state: "error"; error: unknown } | { state: "success"; data: AppInfo | null };

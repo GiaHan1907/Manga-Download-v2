@@ -241,10 +241,8 @@ describe("T08-15/T08-16 favorites pagination + storage panel", () => {
 
   it("settings storage panel shows sizes and clears only regenerable cache (inline confirm)", async () => {
     renderAt("/settings");
-    const storageText = await screen.findByText((content) =>
-      content.includes("Thư viện:") && content.includes("Cache/staging"),
-    );
-    expect(storageText.textContent).toMatch(/xấp xỉ/);
+    // Panel is intentionally terse now: root line + actions (no stats prose).
+    expect(await screen.findByText(/Nơi lưu truyện đã tải/)).toBeDefined();
     // Two-step inline confirmation — no native dialog in webviews.
     fireEvent.click(screen.getByRole("button", { name: "Dọn cache tái tạo được" }));
     expect(await screen.findByText(/Sẽ xóa staging của các tác vụ đã kết thúc/)).toBeDefined();
