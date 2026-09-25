@@ -229,6 +229,9 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
         <Button variant="secondary" onClick={() => void reset()}>
           Khôi phục mặc định
         </Button>
+        <Button to="/settings/sources" variant="ghost">
+          Quản lý nguồn (Sources)
+        </Button>
       </div>
       {feedback && (
         <p className="muted" role="status">

@@ -298,8 +298,13 @@ describe("T08-15/T08-16 favorites pagination + storage panel", () => {
     expect(await screen.findByText(/Xác nhận: chuyển về mặc định/)).toBeDefined();
   });
 
-  it("surfaces a broken custom link as an alert, never an empty library", async () => {
-    const base = vi.mocked(invoke).getMockImplementation()!;
+  it("Settings exposes an entry link to the sources registry page", async () => {
+    renderAt("/settings");
+    fireEvent.click(await screen.findByRole("link", { name: "Quản lý nguồn (Sources)" }));
+    expect(await screen.findByText("Nguồn thật (Rust registry)")).toBeDefined();
+  });
+
+  it("surfaces a broken custom link as an alert, never an empty library", async () => {    const base = vi.mocked(invoke).getMockImplementation()!;
     vi.mocked(invoke).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_download_root") {
         return Promise.resolve({ isCustom: true, label: "E:\\Manga", linkOk: false });
