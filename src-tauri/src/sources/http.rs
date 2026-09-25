@@ -20,7 +20,10 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Politeness floor between requests to the same host. Owners of user-added
 /// sources may raise limits server-side; the client never hammers.
 pub const MIN_REQUEST_SPACING: Duration = Duration::from_secs(3);
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MangaDownloader1989/0.5 (local desktop manga client)";
+/// Kept for docs/tests only: real requests carry the Chrome profile UA
+/// supplied by the emulation.
+#[allow(dead_code)]
+const APP_IDENTITY_NOTE: &str = "MangaDownloader1989/0.5 (local desktop manga client)";
 
 /// JSON transport hardened by an exact-host allowlist policy. Redirects are
 /// followed manually so every hop is re-validated before any request leaves.
@@ -99,7 +102,7 @@ impl HttpPolicy {
     }
 }
 
-fn is_public_ip(ip: &IpAddr) -> bool {
+pub(crate) fn is_public_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let o = v4.octets();
@@ -125,18 +128,22 @@ fn is_public_ip(ip: &IpAddr) -> bool {
 
 pub struct GuardedHttp {
     policy: HttpPolicy,
-    client: reqwest::Client,
+    client: wreq::Client,
     last_request_at: Mutex<Option<Instant>>,
 }
 
 impl GuardedHttp {
     pub fn new(policy: HttpPolicy) -> Self {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+        // Cloudflare on user-registered manga sites resets non-browser TLS
+        // fingerprints (2026-09-25 incident); wreq emulates a real Chrome's
+        // TLS + HTTP/2 + header profile. The UA comes from the emulation —
+        // overriding it here would re-break the fingerprint consistency.
+        let client = wreq::Client::builder()
+            .emulation(wreq_util::Emulation::Chrome139)
+            .redirect(wreq::redirect::Policy::none())
             .timeout(REQUEST_TIMEOUT)
-            .user_agent(USER_AGENT)
             .build()
-            .expect("reqwest client");
+            .expect("wreq client");
         GuardedHttp {
             policy,
             client,
@@ -177,7 +184,7 @@ impl GuardedHttp {
         *self.last_request_at.lock().unwrap() = Some(Instant::now());
     }
 
-    fn classify_status(status: reqwest::StatusCode, retry_after: Option<String>) -> SourceError {
+    fn classify_status(status: wreq::StatusCode, retry_after: Option<String>) -> SourceError {
         match status.as_u16() {
             401 | 403 => SourceError::PermissionDenied,
             404 => SourceError::NotFound,
@@ -189,6 +196,56 @@ impl GuardedHttp {
         }
     }
 
+    fn classify_u16(code: u16, retry_after: Option<String>) -> SourceError {
+        match code {
+            401 | 403 => SourceError::PermissionDenied,
+            404 => SourceError::NotFound,
+            429 => {
+                SourceError::RateLimited(retry_after.unwrap_or_else(|| "retry-after".to_string()))
+            }
+            _ => SourceError::Upstream,
+        }
+    }
+
+    fn ech_body_or_error(
+        response: crate::sources::ech::EchResponse,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, SourceError> {
+        if !(200..300).contains(&response.status) {
+            return Err(Self::classify_u16(
+                response.status,
+                response.header("retry-after").map(str::to_string),
+            ));
+        }
+        if response.body.len() as u64 > max_bytes {
+            return Err(SourceError::Parse);
+        }
+        Ok(response.body)
+    }
+
+    /// Connection-level failure path: same hop, but SNI encrypted via ECH.
+    /// Redirects are re-validated through the normal policy each time.
+    async fn fetch_via_ech(
+        &self,
+        start: &url::Url,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, SourceError> {
+        let mut current = start.clone();
+        for _ in 0..=MAX_REDIRECTS {
+            let response = crate::sources::ech::fetch(&current, None).await?;
+            if (300..400).contains(&response.status) {
+                let location = response.header("location").ok_or(SourceError::Network)?;
+                let next = current
+                    .join(location)
+                    .map_err(|_| SourceError::MalformedUrl)?;
+                current = self.validate(next.as_str())?;
+                continue;
+            }
+            return Self::ech_body_or_error(response, max_bytes);
+        }
+        Err(SourceError::Network)
+    }
+
     async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, SourceError> {
         self.fetch_bytes_bounded(url, MAX_BODY_BYTES).await
     }
@@ -197,17 +254,18 @@ impl GuardedHttp {
         let mut current = self.validate(url)?;
         for _ in 0..=MAX_REDIRECTS {
             self.pace().await;
-            let response = self
-                .client
-                .get(current.clone())
-                .send()
-                .await
-                .map_err(|_| SourceError::Network)?;
+            let response = match self.client.get(current.as_str()).send().await {
+                Ok(response) => response,
+                Err(error) if error.is_connect() => {
+                    return self.fetch_via_ech(&current, max_bytes).await;
+                }
+                Err(_) => return Err(SourceError::Network),
+            };
             let status = response.status();
             if status.is_redirection() {
                 let location = response
                     .headers()
-                    .get(reqwest::header::LOCATION)
+                    .get(wreq::header::LOCATION)
                     .and_then(|v| v.to_str().ok())
                     .ok_or(SourceError::Network)?;
                 let next = current
@@ -219,7 +277,7 @@ impl GuardedHttp {
             if !status.is_success() {
                 let retry_after = response
                     .headers()
-                    .get(reqwest::header::RETRY_AFTER)
+                    .get(wreq::header::RETRY_AFTER)
                     .and_then(|v| v.to_str().ok())
                     .map(str::to_string);
                 return Err(Self::classify_status(status, retry_after));
@@ -273,22 +331,29 @@ impl GuardedHttp {
     ) -> Result<Vec<u8>, SourceError> {
         let parsed = self.validate(url)?;
         self.pace().await;
-        let response = self
+        let result = self
             .client
-            .post(parsed)
+            .post(parsed.as_str())
             .header(
-                reqwest::header::HeaderName::from_static("x-requested-with"),
+                wreq::header::HeaderName::from_static("x-requested-with"),
                 "XMLHttpRequest",
             )
             .form(form)
             .send()
-            .await
-            .map_err(|_| SourceError::Network)?;
+            .await;
+        let response = match result {
+            Ok(response) => response,
+            Err(error) if error.is_connect() => {
+                let fallback = crate::sources::ech::fetch(&parsed, Some(form)).await?;
+                return Self::ech_body_or_error(fallback, MAX_BODY_BYTES);
+            }
+            Err(_) => return Err(SourceError::Network),
+        };
         let status = response.status();
         if !status.is_success() {
             let retry_after = response
                 .headers()
-                .get(reqwest::header::RETRY_AFTER)
+                .get(wreq::header::RETRY_AFTER)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_string);
             return Err(Self::classify_status(status, retry_after));
@@ -474,7 +539,7 @@ mod tests {
 
     #[test]
     fn t09_classify_status_maps_http_codes_and_retry_after() {
-        use reqwest::StatusCode;
+        use wreq::StatusCode;
         let classify = GuardedHttp::classify_status;
         assert!(matches!(
             classify(StatusCode::UNAUTHORIZED, None),
