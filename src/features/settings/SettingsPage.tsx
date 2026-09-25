@@ -79,7 +79,8 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
   }
 
   return (
-    <div className="page-stack settings-grid">
+    <div className="page-stack">
+      <div className="settings-grid">
       <section className="panel" aria-label="Cài đặt chung">
         <h2 className="panel__title">General</h2>
         <p className="panel__description">
@@ -221,6 +222,7 @@ function SettingsForm({ initial, appInfo }: { initial: AppSettings; appInfo: Asy
           <StatusBadge tone="success">Persisted — SQLite</StatusBadge>
         </div>
       </section>
+      </div>
 
       <div className="settings-actions">
         <Button variant="primary" onClick={() => void save()} disabled={!dirty}>

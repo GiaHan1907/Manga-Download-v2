@@ -1331,8 +1331,19 @@ button {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
   gap: var(--space-4);
+  align-items: start;
+}
+
+/* Grid items default to min-width:auto — long paths/words would stretch the
+   track and overflow the page. */
+.settings-grid > * {
+  min-width: 0;
+}
+
+.settings-grid .panel {
+  overflow-wrap: break-word;
 }
 
 .settings-grid .input-field {
