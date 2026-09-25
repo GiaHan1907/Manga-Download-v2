@@ -1032,6 +1032,33 @@ mod tests {
         assert!(MadaraGeneric::live("x", "https://example.com", &[]).is_ok());
     }
 
+    #[tokio::test]
+    #[ignore = "live WAF-vs-app triage: built-in TTT search over the real network"]
+    async fn live_builtin_ttt_search_probe() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &[crate::sources::registry::TTT_IMAGE_HOSTS.to_string()],
+        )
+        .unwrap();
+        match adapter.search("ninja", 1).await {
+            Ok(page) => {
+                for item in page.items.iter().take(5) {
+                    println!(
+                        "LIVE ok: [{}] {} ({}) cover={:?}",
+                        item.source_id, item.title, item.source_manga_id, item.cover_key
+                    );
+                }
+                println!("LIVE total items: {}", page.items.len());
+                assert!(!page.items.is_empty(), "search returned zero cards");
+            }
+            Err(error) => {
+                println!("LIVE FAIL: {} ({})", error.code(), error.safe_message());
+                panic!("live search failed: {}", error.code());
+            }
+        }
+    }
+
     const CHAPTER_FIXTURE: &str = r#"<html><body>
       <div class="reading-content">
         <img class="wp-manga-chapter-img" src="  /uploads/p1.jpg  "/>

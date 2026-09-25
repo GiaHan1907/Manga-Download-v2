@@ -9,7 +9,7 @@ use crate::db::repositories::source_repo::SourceRow;
 pub const BUILTIN_IDS: &[&str] = &["mangadex", "madara-truyentuoitho-com"];
 pub const TTT_BASE_URL: &str = "https://truyentuoitho.com/";
 pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
-pub const TTT_IMAGE_HOSTS: &str = "truyentuoitho.com";
+pub const TTT_IMAGE_HOSTS: &str = "img.resourcehub.shop";
 
 pub fn is_builtin(id: &str) -> bool {
     BUILTIN_IDS.contains(&id)
