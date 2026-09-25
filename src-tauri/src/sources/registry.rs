@@ -5,6 +5,29 @@ use super::providers::madara_generic::MadaraGeneric;
 use super::providers::mangadex::MangaDex;
 use crate::db::repositories::source_repo::SourceRow;
 
+/// App-shipped sources: never removable, toggleable like any other.
+pub const BUILTIN_IDS: &[&str] = &["mangadex", "madara-truyentuoitho-com"];
+pub const TTT_BASE_URL: &str = "https://truyentuoitho.com/";
+pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
+pub const TTT_IMAGE_HOSTS: &str = "truyentuoitho.com";
+
+pub fn is_builtin(id: &str) -> bool {
+    BUILTIN_IDS.contains(&id)
+}
+
+fn builtin_adapters() -> Vec<Arc<dyn SourceAdapter>> {
+    let ttt_hosts: Vec<String> = vec![TTT_IMAGE_HOSTS.to_string()];
+    vec![
+        Arc::new(MangaDex::live()),
+        // Static, reviewed config: a panic here would be a shipping bug,
+        // surfaced immediately by the registry unit tests instead.
+        Arc::new(
+            MadaraGeneric::live(TTT_DISPLAY_NAME, TTT_BASE_URL, &ttt_hosts)
+                .expect("built-in Truyen Tuoi Tho config must be valid"),
+        ),
+    ]
+}
+
 /// Registry of app-shipped, vetted adapters. The renderer cannot register new
 /// hosts or adapters; tests inject bespoke registries (fixture adapters).
 #[derive(Clone, Default)]
@@ -21,9 +44,9 @@ impl SourceRegistry {
     /// Built-in providers plus user-registered Madara sites from the DB.
     /// Invalid or duplicate rows are skipped with a diagnostic, never fatal.
     pub fn from_rows(rows: &[SourceRow]) -> Self {
-        let mut adapters: Vec<Arc<dyn SourceAdapter>> = vec![Arc::new(MangaDex::live())];
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        seen.insert("mangadex".to_string());
+        let mut adapters: Vec<Arc<dyn SourceAdapter>> = builtin_adapters();
+        let mut seen: std::collections::HashSet<String> =
+            BUILTIN_IDS.iter().map(|id| id.to_string()).collect();
         for row in rows {
             if row.adapter != "madara" {
                 continue;

@@ -73,12 +73,17 @@ pub async fn list_sources_view(
         .iter()
         .map(|adapter| {
             let info = adapter.info();
-            let builtin = info.id == "mangadex";
+            let builtin = crate::sources::registry::is_builtin(&info.id);
             SourceView {
                 enabled: *enabled.get(&info.id).unwrap_or(&true),
                 builtin,
                 base_url: if builtin {
-                    None
+                    match info.id.as_str() {
+                        "madara-truyentuoitho-com" => {
+                            Some(crate::sources::registry::TTT_BASE_URL.to_string())
+                        }
+                        _ => None,
+                    }
                 } else {
                     row_by_id.get(&info.id).and_then(|r| r.base_url.clone())
                 },
@@ -171,7 +176,7 @@ pub async fn registry_from_pool(pool: &SqlitePool) -> Result<SourceRegistry, App
 
 pub async fn remove_manga_source(pool: &SqlitePool, source_id: &str) -> Result<(), AppError> {
     validate_id(source_id, "sourceId")?;
-    if source_id == "mangadex" {
+    if crate::sources::registry::is_builtin(source_id) {
         return Err(AppError::Unsupported);
     }
     source_repo::delete_source(pool, source_id).await
@@ -187,12 +192,23 @@ pub async fn set_source_enabled(
     if registry.get(source_id).is_none() {
         return Err(AppError::not_found("source"));
     }
-    if source_id != "mangadex" {
+    if !crate::sources::registry::is_builtin(source_id) {
         source_repo::set_enabled(pool, source_id, enabled).await?;
         return Ok(enabled);
     }
     // Built-ins have a row created on first toggle.
-    source_repo::upsert_source(pool, source_id, "MangaDex", "mangadex", None, None).await?;
+    use crate::sources::registry as reg;
+    let (name, adapter, base, hosts) = if source_id == "mangadex" {
+        ("MangaDex", "mangadex", None, None)
+    } else {
+        (
+            reg::TTT_DISPLAY_NAME,
+            "madara",
+            Some(reg::TTT_BASE_URL),
+            Some(reg::TTT_IMAGE_HOSTS),
+        )
+    };
+    source_repo::upsert_source(pool, source_id, name, adapter, base, hosts).await?;
     source_repo::set_enabled(pool, source_id, enabled).await?;
     Ok(enabled)
 }
@@ -609,9 +625,40 @@ mod tests {
         let builtins = list_sources_view(&SourceRegistry::from_rows(&[]), &pool)
             .await
             .unwrap();
-        assert_eq!(builtins.len(), 1);
-        assert_eq!(builtins[0].info.id, "mangadex");
-        assert!(builtins[0].builtin);
+        assert_eq!(builtins.len(), 2);
+        assert!(builtins.iter().all(|v| v.builtin));
+        let ids: Vec<&str> = builtins.iter().map(|v| v.info.id.as_str()).collect();
+        assert!(ids.contains(&"mangadex"));
+        assert!(ids.contains(&"madara-truyentuoitho-com"));
+        let ttt = builtins
+            .iter()
+            .find(|v| v.info.id == "madara-truyentuoitho-com")
+            .unwrap();
+        assert_eq!(ttt.base_url.as_deref(), Some("https://truyentuoitho.com/"));
+        assert!(ttt.enabled);
+        // Built-in TTT is toggleable (creates its row) but never removable.
+        set_source_enabled(
+            &SourceRegistry::from_rows(&[]),
+            &pool,
+            "madara-truyentuoitho-com",
+            false,
+        )
+        .await
+        .unwrap();
+        let after = list_sources_view(&SourceRegistry::from_rows(&[]), &pool)
+            .await
+            .unwrap();
+        assert!(
+            !after
+                .iter()
+                .find(|v| v.info.id == "madara-truyentuoitho-com")
+                .unwrap()
+                .enabled
+        );
+        assert!(matches!(
+            remove_manga_source(&pool, "madara-truyentuoitho-com").await,
+            Err(AppError::Unsupported)
+        ));
     }
 
     #[tokio::test]
@@ -858,7 +905,11 @@ mod tests {
             .await
             .unwrap();
         let after_remove = registry_from_pool(&pool).await.unwrap();
-        assert_eq!(after_remove.adapters().len(), 1);
+        assert_eq!(
+            after_remove.adapters().len(),
+            2,
+            "only the two built-ins remain"
+        );
         assert!(matches!(
             remove_manga_source(&pool, "mangadex").await,
             Err(AppError::Unsupported)
