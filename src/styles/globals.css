@@ -1331,7 +1331,9 @@ button {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  /* One horizontal row of compact cards on wide windows; wraps gracefully
+     on narrow ones. minmax(0) keeps long paths inside their card. */
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   gap: var(--space-4);
   align-items: start;
 }
@@ -1344,6 +1346,13 @@ button {
 
 .settings-grid .panel {
   overflow-wrap: break-word;
+}
+
+/* Long labels (e.g. confirm buttons) must wrap inside compact cards. */
+.settings-grid .button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 
 .settings-grid .input-field {
