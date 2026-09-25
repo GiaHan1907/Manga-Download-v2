@@ -5,13 +5,16 @@ import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
 import type { ReadingDirection, ReaderMode } from "../../domain/reader";
 import {
+  chooseDownloadRoot,
   clearRegenerableCache,
   getAppInfo,
+  getDownloadRoot,
   normalizeIpcError,
+  resetDownloadRoot,
   storageStatus,
 } from "../../shared/api/desktop";
 import type { AppInfo } from "../../shared/api/contracts";
-import type { CacheCleanupDto, StorageStatusDto } from "../../types/backend";
+import type { CacheCleanupDto, DownloadRootDto, StorageStatusDto } from "../../types/backend";
 import { formatBytes } from "../../types/downloads";
 import { services } from "../../services/provider";
 import {
@@ -242,6 +245,16 @@ function StoragePanel() {
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<CacheCleanupDto | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [rootBusy, setRootBusy] = useState(false);
+  const [rootError, setRootError] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const root = useAsyncData<DownloadRootDto | null>(async () => {
+    try {
+      return await getDownloadRoot();
+    } catch {
+      return null;
+    }
+  }, [nonce]);
   const status = useAsyncData<StorageStatusDto | null>(async () => {
     try {
       return await storageStatus();
@@ -268,6 +281,25 @@ function StoragePanel() {
     }
   }
 
+  async function runRootAction(action: () => Promise<DownloadRootDto | null>) {
+    setRootBusy(true);
+    setRootError(null);
+    try {
+      const outcome = await action(); // null = user cancelled the dialog
+      if (outcome) {
+        bumpDomain("downloads");
+        bumpDomain("library");
+        bumpDomain("home");
+        setNonce((value) => value + 1);
+      }
+    } catch (error) {
+      setRootError(normalizeIpcError(error).message);
+    } finally {
+      setRootBusy(false);
+      setConfirmReset(false);
+    }
+  }
+
   return (
     <section className="panel" aria-label="Lưu trữ và cache">
       <h2 className="panel__title">Lưu trữ</h2>
@@ -283,8 +315,7 @@ function StoragePanel() {
             Thư viện: <strong>{formatBytes(status.data.libraryBytes)}</strong> · Cache/staging:{" "}
             <strong>{formatBytes(status.data.cacheBytes)}</strong> · {status.data.stagingDirs} thư mục
             tạm · {status.data.activeTasks} tác vụ đang chạy. Số liệu là{" "}
-            <em>xấp xỉ</em> (theo DB + walk thư mục app-managed). Thư mục nằm trong AppData của app —
-            đường dẫn tuyệt đối không đi qua IPC.
+            <em>xấp xỉ</em> (theo DB + walk thư mục quản lý của app).
           </p>
           {!status.data.rootAvailable && (
             <p className="queue-error" role="alert">
@@ -292,7 +323,51 @@ function StoragePanel() {
               khi root khả dụng lại.
             </p>
           )}
+          {root.state === "success" && root.data && (
+            <p className="panel__description">
+              Nơi lưu truyện đã tải: <strong>{root.data.label}</strong>
+              {root.data.isCustom ? " (thư mục tùy chọn)" : ""}
+            </p>
+          )}
+          {root.state === "success" && root.data && !root.data.linkOk && (
+            <p className="queue-error" role="alert">
+              Link tới thư mục tùy chọn đang hỏng (ngắt ổ đĩa / xóa thư mục?). Truyện KHÔNG bị mất — bấm
+              &quot;Chọn thư mục lưu…&quot; và trỏ lại đúng thư mục cũ để tái liên kết.
+            </p>
+          )}
+          {rootError && (
+            <p className="queue-error" role="alert">
+              Không đổi được nơi lưu — {rootError}
+            </p>
+          )}
           <div className="settings-actions">
+            <Button
+              variant="secondary"
+              disabled={rootBusy}
+              onClick={() => void runRootAction(() => chooseDownloadRoot())}
+            >
+              {rootBusy ? "Đang chuyển thư viện…" : "Chọn thư mục lưu…"}
+            </Button>
+            {root.state === "success" && root.data?.isCustom ? (
+              confirmReset ? (
+                <>
+                  <Button
+                    variant="primary"
+                    disabled={rootBusy}
+                    onClick={() => void runRootAction(() => resetDownloadRoot())}
+                  >
+                    Xác nhận: chuyển về mặc định
+                  </Button>
+                  <Button variant="ghost" onClick={() => setConfirmReset(false)}>
+                    Hủy
+                  </Button>
+                </>
+              ) : (
+                <Button variant="ghost" disabled={rootBusy} onClick={() => setConfirmReset(true)}>
+                  Về nơi lưu mặc định
+                </Button>
+              )
+            ) : null}
             {confirming ? (
               <>
                 <Button variant="primary" onClick={() => void clearCache()} disabled={busy}>

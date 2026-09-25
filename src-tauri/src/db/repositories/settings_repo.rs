@@ -27,3 +27,11 @@ pub async fn upsert_json(
     .await?;
     Ok(())
 }
+
+pub async fn delete_json(pool: &SqlitePool, key: &str) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM app_settings WHERE key = ?1")
+        .bind(key)
+        .execute(pool)
+        .await?;
+    Ok(())
+}

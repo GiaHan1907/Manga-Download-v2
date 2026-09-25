@@ -8,7 +8,7 @@ Không có Critical/High mở (theo P09 SECURITY/RISK + review vòng). Medium/Lo
 | K-2 | Không auto-update; upgrade thủ công cài đè | Medium | Tải installer mới khi muốn lên bản mới | Updater gated branch B — cần hạ tầng key/endpoint |
 | K-3 | Live download journey + 13 mục manual Windows chưa chạy trên máy sạch | **High (verification gap, không phải defect)** | Có thể lộ lỗi môi trường thật | `WINDOWS_INSTALL_UPGRADE_TEST.md` checklist — user/VM |
 | K-4 | CBZ deflate (archive nguồn ngoài) → `CBZ_INVALID` | Low | Không mở được file .cbz từ app khác | Chỉ làm khi có nhu cầu thật |
-| K-5 | Library root cố định trong app-data (không đổi được) | Low | Không di chuyển thư viện ra ổ khác qua UI | Design có chủ đích P08; cân nhắc phase sau |
+| K-5 | ~~Library root cố định~~ **ĐÃ GIẢI QUYẾT 2026-09-25**: Settings → Lưu trữ → "Chọn thư mục lưu…" (copy + byte-verify + NTFS junction, Rust-side dialog, không thêm capability; K-5 từng là design có chủ đích P08, user duyệt đổi policy) | — | — | `docs/IPC_CONTRACT.md` §Nơi lưu |
 | K-6 | `reader_get_page_bytes` re-parse tail CBZ mỗi trang (đo 0.12 ms/trang — trong ngưỡng) | Low | Không cảm nhận được | Handle-cache nếu profile cho thấy nóng |
 | K-7 | Checkpoint fsync-per-page ~4 ms (crash-safe đổi lấy tốc) | Low | Chương lớn chậm hơn vài giây | Không đổi semantics |
 | K-8 | `prefers-reduced-motion` chưa honour (toolbar auto-hide/palette) | Low | Accessibility minor | Phase bảo trì |

@@ -114,6 +114,14 @@ export type StorageStatusDto = {
   activeTasks: number;
   rootAvailable: boolean;
   approximate: boolean;
+  customRoot: boolean;
+  rootLinkOk: boolean;
+};
+
+export type DownloadRootDto = {
+  isCustom: boolean;
+  label: string;
+  linkOk: boolean;
 };
 
 export type CacheCleanupDto = {

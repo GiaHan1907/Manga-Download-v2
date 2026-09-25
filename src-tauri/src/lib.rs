@@ -165,7 +165,10 @@ pub fn run() {
             commands::reader::reader_open_chapter,
             commands::reader::reader_get_page_bytes,
             commands::storage::storage_status,
-            commands::storage::clear_regenerable_cache
+            commands::storage::clear_regenerable_cache,
+            commands::storage::get_download_root,
+            commands::storage::choose_download_root,
+            commands::storage::reset_download_root
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

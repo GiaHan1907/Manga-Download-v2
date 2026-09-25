@@ -53,6 +53,8 @@ function installBackendMock() {
           stagingDirs: 0,
           activeTasks: 0,
           rootAvailable: true,
+          customRoot: false,
+          rootLinkOk: true,
           approximate: true,
         });
       case "app_get_settings":

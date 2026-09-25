@@ -135,6 +135,14 @@ beforeEach(() => {
           activeTasks: 0,
           rootAvailable: true,
           approximate: true,
+          customRoot: false,
+          rootLinkOk: true,
+        });
+      case "get_download_root":
+        return Promise.resolve({
+          isCustom: false,
+          label: "Mặc định (AppData của app)",
+          linkOk: true,
         });
       case "clear_regenerable_cache":
         return Promise.resolve({ removedDirs: 2, freedBytes: 4096, keptActiveDirs: 1 });
@@ -246,5 +254,71 @@ describe("T08-15/T08-16 favorites pagination + storage panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Xác nhận dọn cache tạm" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("clear_regenerable_cache"));
     expect(await screen.findByText(/Đã xóa 2 thư mục tạm/i)).toBeDefined();
+  });
+
+  it("relocates the download root via the Rust folder command and shows the new label", async () => {
+    const calls: string[] = [];
+    let relocated = false;
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      calls.push(cmd);
+      if (cmd === "get_download_root") {
+        return Promise.resolve(
+          relocated
+            ? { isCustom: true, label: "D:\\Manga", linkOk: true }
+            : { isCustom: false, label: "Mặc định (AppData của app)", linkOk: true },
+        );
+      }
+      if (cmd === "choose_download_root") {
+        relocated = true;
+        return Promise.resolve({ isCustom: true, label: "D:\\Manga", linkOk: true });
+      }
+      if (cmd === "storage_status") {
+        return Promise.resolve({
+          libraryBytes: 2048,
+          cacheBytes: 512,
+          stagingDirs: 0,
+          activeTasks: 0,
+          rootAvailable: true,
+          approximate: true,
+          customRoot: relocated,
+          rootLinkOk: true,
+        });
+      }
+      return (base as (c: string, a?: Record<string, unknown>) => Promise<unknown>)(cmd, args);
+    });
+
+    renderAt("/settings");
+    expect(await screen.findByText(/Mặc định \(AppData của app\)/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Chọn thư mục lưu…/ }));
+    await waitFor(() => expect(calls).toContain("choose_download_root"));
+    expect(await screen.findByText("D:\\Manga")).toBeDefined();
+    // After a successful move the "reset" path needs its own inline confirm.
+    fireEvent.click(screen.getByRole("button", { name: "Về nơi lưu mặc định" }));
+    expect(await screen.findByText(/Xác nhận: chuyển về mặc định/)).toBeDefined();
+  });
+
+  it("surfaces a broken custom link as an alert, never an empty library", async () => {
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_download_root") {
+        return Promise.resolve({ isCustom: true, label: "E:\\Manga", linkOk: false });
+      }
+      if (cmd === "storage_status") {
+        return Promise.resolve({
+          libraryBytes: 0,
+          cacheBytes: 0,
+          stagingDirs: 0,
+          activeTasks: 0,
+          rootAvailable: false,
+          approximate: true,
+          customRoot: true,
+          rootLinkOk: false,
+        });
+      }
+      return (base as (c: string, a?: Record<string, unknown>) => Promise<unknown>)(cmd, args);
+    });
+    renderAt("/settings");
+    expect(await screen.findByText(/Link tới thư mục tùy chọn đang hỏng/)).toBeDefined();
   });
 });

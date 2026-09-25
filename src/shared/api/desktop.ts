@@ -4,6 +4,7 @@ import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
   AppSettingsDto,
   CacheCleanupDto,
+  DownloadRootDto,
   DownloadTaskDto,
   LibraryStatsDto,
   LocalMangaDetailDto,
@@ -349,6 +350,20 @@ export async function storageStatus(): Promise<StorageStatusDto> {
 
 export async function clearRegenerableCache(): Promise<CacheCleanupDto> {
   return invoke<CacheCleanupDto>("clear_regenerable_cache");
+}
+
+/// Where verified chapters live (label is user-safe text for Settings only).
+export async function getDownloadRoot(): Promise<DownloadRootDto> {
+  return invoke<DownloadRootDto>("get_download_root");
+}
+
+/// Native folder picker (runs in Rust) + verified relocation. `null` = user cancelled.
+export async function chooseDownloadRoot(): Promise<DownloadRootDto | null> {
+  return invoke<DownloadRootDto | null>("choose_download_root");
+}
+
+export async function resetDownloadRoot(): Promise<DownloadRootDto> {
+  return invoke<DownloadRootDto>("reset_download_root");
 }
 
 /// Subscribe to tray "Open Downloads" clicks. Cleanup function MUST be

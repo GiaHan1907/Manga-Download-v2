@@ -320,6 +320,11 @@ pub struct StorageStatusDto {
     pub active_tasks: i64,
     pub root_available: bool,
     pub approximate: bool,
+    /// Custom download root (junction into a user-chosen folder) is active.
+    pub custom_root: bool,
+    /// False when custom but the link/target is missing — never render that
+    /// as an empty library; the Settings screen warns instead.
+    pub root_link_ok: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -41,15 +41,21 @@ pub async fn status(pool: &SqlitePool, app_data_dir: &Path) -> Result<StorageSta
     let library_root = storage::library_root(app_data_dir);
     let (cache_bytes, staging_dirs) = staging_footprint(&storage::staging_root(app_data_dir));
     let covers_bytes = dir_size(&app_data_dir.join("covers"));
+    let root = crate::services::storage_root::current(pool, app_data_dir).await?;
+    let link_ok = root.link_ok;
     Ok(StorageStatusDto {
         library_bytes: library_bytes.unwrap_or(0),
         cache_bytes: (cache_bytes + covers_bytes) as i64,
         staging_dirs: staging_dirs as i64,
         active_tasks,
         // "Available" here means the app-managed roots can be read at all;
-        // missing/unmounted drives surface as false, not a hard error.
-        root_available: std::fs::read_dir(&library_root).is_ok() || library_root.exists(),
+        // a broken custom link is never reported as an available-but-empty
+        // library.
+        root_available: link_ok
+            && (std::fs::read_dir(&library_root).is_ok() || library_root.exists()),
         approximate: true,
+        custom_root: root.is_custom,
+        root_link_ok: link_ok,
     })
 }
 

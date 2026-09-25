@@ -113,6 +113,17 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 Capabilities KHÔNG đổi (notification gọi từ Rust, không qua IPC permission).
 
+
+## Commands — Nơi lưu truyện đã tải (2026-09-25, user duyệt đổi policy root)
+
+| Command | Input | Output | Ghi chú |
+|---|---|---|---|
+| `get_download_root` | — | `{ isCustom, label, linkOk }` | label: đường dẫn user đã chọn (chỉ hiện ở Settings, text thuần) hoặc chuỗi mặc định |
+| `choose_download_root` | — | `DownloadRootDto \| null` | Hộp chọn thư mục mở TRONG Rust (khuôn F3b — không capability `dialog:`); null = hủy. Quy trình: validate (tuyệt đối, không gốc ổ đĩa/hệ thống/trong appdata, không phải liên kết) → copy + so-sánh từng byte → junction `appdata\library → <đã chọn>\library` → lưu key `storage.downloadRoot.v1`; lỗi ở bước nào rollback bước đó, không xóa nguồn trước khi verify xong |
+| `reset_download_root` | — | `DownloadRootDto` | Copy ngược về app-data rồi bỏ junction; thư mục user từng chọn KHÔNG tự xóa |
+
+`storage_status` mở rộng `customRoot`, `rootLinkOk` — link hỏng không bao giờ được báo cáo là "library trống". Cache/staging (tệp tạm, covers) luôn ở app-data, chỉ library di chuyển. `chapters.local_path`/`download_pages.storage_key` là đường dẫn TƯƠNG ĐỐI nên engine/reader/reveal/import trong suốt qua junction, không cần migration.
+
 ## DTO định nghĩa tại `src/types/backend.ts`
 
 `LocalMangaDto` (kèm `chapterCount`, `favorite`), `LocalChapterDto` (+`downloaded`, `outputFormat` — badge offline do Rust kiểm chứng), `LocalMangaDetailDto`, `ReadingProgressDto`, `DownloadTaskDto`, `AppSettingsDto`, `PagedResult<T>`. Phase 06 thêm `src/types/downloads.ts` (`QueueResultDto`, `DownloadTaskEvent`, bảng transition UI, format helpers) và `localServices.downloads` (`src/services/downloads.api.ts`).
