@@ -10,7 +10,7 @@ const pkg = JSON.parse(read("package.json")).version;
 const tauri = JSON.parse(read("src-tauri/tauri.conf.json")).version;
 const cargo = read("src-tauri/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1];
 const lock = read("src-tauri/Cargo.lock").match(
-  /name = "manga-downloader-1989"\nversion = "([^"]+)"/,
+  /name = "manga-downloader-1989"\r?\nversion = "([^"]+)"/,
 )?.[1];
 
 const entries = { "package.json": pkg, "tauri.conf.json": tauri, "Cargo.toml": cargo, "Cargo.lock": lock };
