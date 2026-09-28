@@ -763,12 +763,14 @@ mod tests {
         let builtins = list_sources_view(&SourceRegistry::from_rows(&[]), &pool)
             .await
             .unwrap();
-        assert_eq!(builtins.len(), 3);
+        assert_eq!(builtins.len(), 5);
         assert!(builtins.iter().all(|v| v.builtin));
         let ids: Vec<&str> = builtins.iter().map(|v| v.info.id.as_str()).collect();
         assert!(ids.contains(&"mangadex"));
         assert!(ids.contains(&"madara-truyentuoitho-com"));
         assert!(ids.contains(&"truyenqq"));
+        assert!(ids.contains(&"nettruyen"));
+        assert!(ids.contains(&"dilib"));
         let ttt = builtins
             .iter()
             .find(|v| v.info.id == "madara-truyentuoitho-com")
@@ -1046,7 +1048,7 @@ mod tests {
         let after_remove = registry_from_pool(&pool).await.unwrap();
         assert_eq!(
             after_remove.adapters().len(),
-            3,
+            5,
             "only the built-ins remain"
         );
         assert!(matches!(

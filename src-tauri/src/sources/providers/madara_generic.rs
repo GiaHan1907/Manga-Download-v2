@@ -1,11 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use regex::Regex;
-use scraper::{Html, Selector};
-use url::Url;
-
 use crate::sources::adapter::{SourceAdapter, SourceError};
 use crate::sources::dto::{
     Capability, PageDescriptor, PageManifest, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary,
@@ -14,6 +9,10 @@ use crate::sources::dto::{
 use crate::sources::http::{
     GuardedHttp, HttpPolicy, Transport, COVER_MAX_BYTES, IMAGE_MAX_BYTES, MAX_PAGE_COUNT,
 };
+use async_trait::async_trait;
+use regex::Regex;
+use scraper::{Html, Selector};
+use url::Url;
 
 /// Generic WordPress/Madara adapter. Users register any Madara-based site by
 /// name + https base URL; only the fixed public endpoints the site's own
@@ -30,7 +29,29 @@ use crate::sources::http::{
 pub enum SiteProfile {
     Madara,
     TruyenQQ,
+    /// ASP.NET "Comic" engine (NetTruyen): /tim-truyen search, FULL chapter
+    /// list as JSON from ComicService.asmx/ChapterList?slug=, page images
+    /// referenced from sharded *.kcgsbok.com CDNs.
+    Nettruyen,
+    /// Dilib custom engine: story at /<slug>-<id>.html with the FULL chapter
+    /// list inline (/truyen-tranh/<story>-chap-<n>.html), reader images under
+    /// /img/comic/ on the base host. No server-rendered search.
+    Dilib,
 }
+
+/// NetTruyen chapter/thumb CDN domain (rotating imageN. subdomains).
+const NETTRUYEN_IMAGE_DOMAIN: &str = "kcgsbok.com";
+/// Dilib navigation/footer slugs that are never manga stories.
+const DILIB_RESERVED: &[&str] = &[
+    "ban-quyen",
+    "chinh-sach-quyen-rieng-tu-privacy-policy",
+    "gioi-thieu-sach-moi",
+    "lien-he",
+    "review-sach",
+    "thu-vien-sach-dien-tu",
+    "tinh-hoa-giao-duc-di-san-cho-muon-doi-sau",
+    "ung-ho-donate",
+];
 
 /// TruyenQQ serves chapter images from rotating shards of this CDN domain.
 /// A domain (not exact-host) allowlist is only ever set by built-in code —
@@ -173,6 +194,14 @@ impl MadaraGeneric {
                 allowed_hosts,
                 allowed_domains: vec![TRUYENQQ_IMAGE_DOMAIN.to_string()],
             },
+            SiteProfile::Nettruyen => HttpPolicy {
+                allowed_hosts,
+                allowed_domains: vec![NETTRUYEN_IMAGE_DOMAIN.to_string()],
+            },
+            SiteProfile::Dilib => HttpPolicy {
+                allowed_hosts,
+                allowed_domains: Vec::new(),
+            },
         }));
         Ok(MadaraGeneric {
             id: id.to_string(),
@@ -274,6 +303,8 @@ impl MadaraGeneric {
         let id = match profile {
             SiteProfile::Madara => format!("madara-{}", host.replace('.', "-")),
             SiteProfile::TruyenQQ => "truyenqq".to_string(),
+            SiteProfile::Nettruyen => "nettruyen".to_string(),
+            SiteProfile::Dilib => "dilib".to_string(),
         };
         Ok(MadaraGeneric {
             id,
@@ -290,6 +321,8 @@ impl MadaraGeneric {
         match self.profile {
             SiteProfile::Madara => format!("{}manga/{slug}/", self.base),
             SiteProfile::TruyenQQ => format!("{}{slug}", self.base),
+            SiteProfile::Nettruyen => format!("{}truyen-tranh/{slug}", self.base),
+            SiteProfile::Dilib => format!("{}{slug}.html", self.base),
         }
     }
 
@@ -297,6 +330,12 @@ impl MadaraGeneric {
         match self.profile {
             SiteProfile::Madara => format!("{}manga/{}/{}/", self.base, manga_slug, chapter_slug),
             SiteProfile::TruyenQQ => format!("{}{}/{}", self.base, manga_slug, chapter_slug),
+            SiteProfile::Nettruyen => {
+                format!("{}truyen-tranh/{}/{}", self.base, manga_slug, chapter_slug)
+            }
+            // Dilib chapters are /truyen-tranh/<story>-chap-<n>.html and the
+            // stored chapter id is the full file stem (chapter_url rebuilds it).
+            SiteProfile::Dilib => format!("{}truyen-tranh/{chapter_slug}.html", self.base),
         }
     }
 
@@ -305,7 +344,9 @@ impl MadaraGeneric {
     /// 2026-09-28), so the built-in always asks for page 1.
     fn detail_chapter_list_url(&self, slug: &str) -> String {
         match self.profile {
-            SiteProfile::Madara => self.manga_url(slug),
+            SiteProfile::Madara | SiteProfile::Nettruyen | SiteProfile::Dilib => {
+                self.manga_url(slug)
+            }
             SiteProfile::TruyenQQ => format!("{}{slug}?page-chap=1", self.base),
         }
     }
@@ -341,6 +382,20 @@ impl MadaraGeneric {
                 }
                 slug
             }
+            SiteProfile::Nettruyen => {
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                segments.next()?
+            }
+            SiteProfile::Dilib => {
+                let file = segments.next()?;
+                let slug = file.strip_suffix(".html")?;
+                if DILIB_RESERVED.contains(&slug) || !dilib_story_slug(slug) {
+                    return None;
+                }
+                slug
+            }
         };
         // Deeper paths are chapter links, not manga identities.
         if segments.next().is_some() || !valid_slug(slug) {
@@ -370,6 +425,28 @@ impl MadaraGeneric {
                 if segments.next()? != manga_slug {
                     return None;
                 }
+            }
+            SiteProfile::Nettruyen => {
+                if segments.next()? != "truyen-tranh" || segments.next()? != manga_slug {
+                    return None;
+                }
+            }
+            SiteProfile::Dilib => {
+                // /truyen-tranh/<manga>-chap-<n>.html — the stored identity is
+                // the whole file stem, chapter_url rebuilds from it.
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                let stem = segments.next()?.strip_suffix(".html")?;
+                if segments.next().is_some()
+                    || !stem
+                        .strip_prefix(&format!("{manga_slug}-"))
+                        .is_some_and(|rest| rest.starts_with("chap-"))
+                    || !valid_slug(stem)
+                {
+                    return None;
+                }
+                return Some(stem.to_string());
             }
         }
         let chapter = segments.next()?;
@@ -442,6 +519,16 @@ impl MadaraGeneric {
             SiteProfile::TruyenQQ => {
                 "#chapter-list a.chapter-name[href], .reading-list .item-name a[href]"
             }
+            SiteProfile::Nettruyen => {
+                ".list-chapter a.chapter[href], .nav-chapters a[href], #chapter_list a[href], ul.list-chapter a[href]"
+            }
+            SiteProfile::Dilib => {
+                // The story page ships the COMPLETE chapter list as plain
+                // `<a href="/truyen-tranh/<story>-chap-<n>.html">` anchors
+                // (no distinguishing class); `chapter_slug_from_url` rejects
+                // any that are not this story's chapter links.
+                "a[href$=\".html\"]"
+            }
         })
         .unwrap();
         let mut seen: HashSet<String> = HashSet::new();
@@ -488,6 +575,15 @@ fn valid_slug(slug: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// Dilib stories are `/<slug>-<numeric-id>.html`; the numeric tail separates
+/// real story slugs from section pages that happen to end in .html.
+fn dilib_story_slug(slug: &str) -> bool {
+    matches!(
+        slug.rsplit_once('-'),
+        Some((head, tail)) if !head.is_empty() && !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit())
+    )
+}
+
 fn chapter_number_from_slug(slug: &str) -> Option<f64> {
     let re = Regex::new(r"(\d+(?:[.,]\d+)?)$").ok()?;
     let cap = re.captures(slug)?.get(1)?.as_str().to_string();
@@ -500,12 +596,22 @@ impl SourceAdapter for MadaraGeneric {
         SourceInfo {
             id: self.id.clone(),
             display_name: self.display_name.clone(),
-            capabilities: vec![
-                Capability::Search,
-                Capability::ResolveUrl,
-                Capability::Details,
-                Capability::Pages,
-            ],
+            capabilities: if self.profile == SiteProfile::Dilib {
+                // Dilib has no server-rendered search results page; stories
+                // enter through URL import, then behave like any other source.
+                vec![
+                    Capability::ResolveUrl,
+                    Capability::Details,
+                    Capability::Pages,
+                ]
+            } else {
+                vec![
+                    Capability::Search,
+                    Capability::ResolveUrl,
+                    Capability::Details,
+                    Capability::Pages,
+                ]
+            },
             status: SourceStatus::Ready,
             attribution: Some(format!(
                 "Site do bên thứ ba vận hành — {}: {}",
@@ -544,6 +650,32 @@ impl SourceAdapter for MadaraGeneric {
                     Some(chapter) => segments.next().is_none() && valid_slug(chapter),
                 }
             }
+            SiteProfile::Nettruyen => {
+                let mut it = url
+                    .path_segments()
+                    .into_iter()
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                it.next() == Some("truyen-tranh")
+                    && it.next().is_some()
+                    && it
+                        .next()
+                        .is_none_or(|c| it.next().is_none() && valid_slug(c))
+            }
+            SiteProfile::Dilib => {
+                let mut it = url
+                    .path_segments()
+                    .into_iter()
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                match (it.next(), it.next()) {
+                    (Some(first), None) => match first.strip_suffix(".html") {
+                        Some(slug) => !DILIB_RESERVED.contains(&slug) && dilib_story_slug(slug),
+                        None => false,
+                    },
+                    _ => false,
+                }
+            }
         }
     }
 
@@ -560,6 +692,21 @@ impl SourceAdapter for MadaraGeneric {
                 segments.next()?
             }
             SiteProfile::TruyenQQ => segments.next()?,
+            SiteProfile::Nettruyen => {
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                segments.next()?
+            }
+            SiteProfile::Dilib => {
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                let stem = segments.next()?.strip_suffix(".html")?;
+                let (manga, rest) = stem.split_once("-chap-")?;
+                let _ = rest;
+                return Some((manga.to_string(), stem.to_string()));
+            }
         };
         let chapter = segments.next()?;
         // Exactly <manga>/<chapter> — deeper paths and bad slugs are not
@@ -595,6 +742,15 @@ impl SourceAdapter for MadaraGeneric {
                     format!("{}tim-kiem?s={}&page={}", self.base, encoded, page)
                 }
             }
+            SiteProfile::Nettruyen => {
+                // The site's own search route; `page` is their pagination param.
+                if page == 1 {
+                    format!("{}tim-truyen?keyword={}", self.base, encoded)
+                } else {
+                    format!("{}tim-truyen?keyword={}&page={}", self.base, encoded, page)
+                }
+            }
+            SiteProfile::Dilib => return Err(SourceError::UnsupportedOperation),
         };
         let html = self.http.get_text(&search_url).await?;
         let document = Html::parse_document(&html);
@@ -640,6 +796,20 @@ impl SourceAdapter for MadaraGeneric {
                     &mut items,
                 );
             }
+            SiteProfile::Nettruyen => {
+                // Search cards are `.item` blocks whose title sits in
+                // `figcaption h3`; the slider carousel has no figcaption and
+                // is therefore immune to this selector.
+                self.collect_cards(
+                    &document,
+                    &Selector::parse(".item").unwrap(),
+                    &Selector::parse("figcaption h3 a[href]").unwrap(),
+                    &Selector::parse("figure .image img").unwrap(),
+                    &mut seen,
+                    &mut items,
+                );
+            }
+            SiteProfile::Dilib => {}
         }
         let has_more = match self.profile {
             SiteProfile::Madara => document
@@ -653,6 +823,11 @@ impl SourceAdapter for MadaraGeneric {
                 .select(&Selector::parse(".pagination a[href*='page']").unwrap())
                 .next()
                 .is_some(),
+            SiteProfile::Nettruyen => document
+                .select(&Selector::parse(".pagination a[href*='page']").unwrap())
+                .next()
+                .is_some(),
+            SiteProfile::Dilib => false,
         };
         Ok(RemoteSearchPage { items, has_more })
     }
@@ -666,6 +841,14 @@ impl SourceAdapter for MadaraGeneric {
             SiteProfile::TruyenQQ => url
                 .path_segments()
                 .and_then(|mut segments| segments.next().map(str::to_string)),
+            SiteProfile::Nettruyen => url.path_segments().and_then(|mut segments| {
+                segments.next();
+                segments.next().map(str::to_string)
+            }),
+            SiteProfile::Dilib => url
+                .path_segments()
+                .and_then(|mut segments| segments.next())
+                .and_then(|file| file.strip_suffix(".html").map(str::to_string)),
         }
         .filter(|candidate| valid_slug(candidate))
         .ok_or(SourceError::MalformedUrl)?;
@@ -684,9 +867,15 @@ impl SourceAdapter for MadaraGeneric {
         let html = self.http.get_text(&page_url).await?;
         let document = Html::parse_document(&html);
         let mut urls: Vec<String> = Vec::new();
-        if self.profile == SiteProfile::TruyenQQ {
-            // Lazy reader: real pages are img[data-src] on the reviewed CDN
-            // domain; plain-src images are ads and never become pages.
+        // TruyenQQ and Nettruyen lazy-load real pages as img[data-src] on a
+        // sharded CDN domain; plain-`src` images are ads/placeholders and are
+        // never pages. Dilib (and Madara) serve pages from the base host.
+        let lazy_cdn = match self.profile {
+            SiteProfile::TruyenQQ => Some(TRUYENQQ_IMAGE_DOMAIN),
+            SiteProfile::Nettruyen => Some(NETTRUYEN_IMAGE_DOMAIN),
+            SiteProfile::Madara | SiteProfile::Dilib => None,
+        };
+        if let Some(cdn) = lazy_cdn {
             let lazy = Selector::parse("img[data-src]").unwrap();
             let mut seen: HashSet<Url> = HashSet::new();
             for node in document.select(&lazy) {
@@ -702,16 +891,47 @@ impl SourceAdapter for MadaraGeneric {
                     continue;
                 };
                 if joined.scheme() != "https"
-                    || !joined.host_str().is_some_and(|host| {
-                        host == TRUYENQQ_IMAGE_DOMAIN
-                            || host.ends_with(&format!(".{TRUYENQQ_IMAGE_DOMAIN}"))
-                    })
+                    || !joined
+                        .host_str()
+                        .is_some_and(|host| host == cdn || host.ends_with(&format!(".{cdn}")))
                 {
                     continue;
                 }
                 if seen.insert(joined.clone()) {
                     urls.push(joined.to_string());
                 }
+                if urls.len() >= MAX_PAGE_COUNT {
+                    break;
+                }
+            }
+        } else if self.profile == SiteProfile::Dilib {
+            // Dilib reader images are base-host `img[src*="/img/comic/"]`;
+            // anything else on the page (logo, sidebar covers) is not a page.
+            let allowed = self.allowed_image_hosts();
+            let comic = Selector::parse("img[src]").unwrap();
+            for node in document.select(&comic) {
+                let Some(raw) = node
+                    .value()
+                    .attr("src")
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
+                    continue;
+                };
+                if !raw.contains("/img/comic/") {
+                    continue;
+                }
+                let Ok(joined) = self.base.join(raw) else {
+                    continue;
+                };
+                if joined.scheme() != "https"
+                    || !joined
+                        .host_str()
+                        .is_some_and(|host| allowed.iter().any(|allowed| allowed == host))
+                {
+                    return Err(SourceError::Parse);
+                }
+                urls.push(joined.to_string());
                 if urls.len() >= MAX_PAGE_COUNT {
                     break;
                 }
@@ -780,6 +1000,19 @@ impl SourceAdapter for MadaraGeneric {
         } else {
             None
         };
+        // NetTruyen story pages ship only ~20 chapter anchors; the site's own
+        // reader GETs the complete list as JSON from ComicService/ChapterList.
+        // Fetched here BEFORE the Html document exists (same !Send rule), and
+        // used in place of the sparse HTML anchors when it is richer.
+        let nettruyen_json: Option<serde_json::Value> = if self.profile == SiteProfile::Nettruyen {
+            let url = format!(
+                "{}Comic/Services/ComicService.asmx/ChapterList?slug={}",
+                self.base, source_manga_id
+            );
+            self.http.get_json(&url).await.ok()
+        } else {
+            None
+        };
         let document = Html::parse_document(&html);
 
         let h1 = Selector::parse("h1").unwrap();
@@ -818,6 +1051,14 @@ impl SourceAdapter for MadaraGeneric {
             // match this manga must not beat the real chapter list.
             if via_ajax.len() >= chapters.len() {
                 chapters = via_ajax;
+            }
+        }
+        if let Some(json) = &nettruyen_json {
+            let via_json = chapters_from_nettruyen_json(json);
+            // The story page's ~20 anchors are always a subset of the JSON
+            // list; only the complete JSON manifest represents every chapter.
+            if via_json.len() >= chapters.len() {
+                chapters = via_json;
             }
         }
         // Listing pages commonly order newest-first; expose chronological
@@ -892,6 +1133,55 @@ fn collect_page_urls(
         }
     }
     Ok(())
+}
+
+/// Map NetTruyen's `ChapterList` JSON (`{"data":[{chapter_slug, chapter_name,
+/// chapter_num, ...}]}`) into chapters. Malformed or non-string entries are
+/// skipped; the caller only keeps the result when richer than the HTML anchors.
+fn chapters_from_nettruyen_json(json: &serde_json::Value) -> Vec<RemoteChapter> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut chapters: Vec<RemoteChapter> = Vec::new();
+    let Some(entries) = json.get("data").and_then(|data| data.as_array()) else {
+        return chapters;
+    };
+    for entry in entries {
+        let Some(slug) = entry.get("chapter_slug").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !valid_slug(slug) || !seen.insert(slug.to_string()) {
+            continue;
+        }
+        let number = match entry.get("chapter_num") {
+            Some(serde_json::Value::Number(n)) => n.as_f64(),
+            Some(serde_json::Value::String(s)) => s.parse::<f64>().ok(),
+            _ => None,
+        };
+        let title = entry
+            .get("chapter_name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| {
+                format!(
+                    "Chương {}",
+                    number
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| slug.to_string())
+                )
+            });
+        chapters.push(RemoteChapter {
+            source_chapter_id: slug.to_string(),
+            title,
+            number,
+            order: 0,
+            published_at: None,
+        });
+        if chapters.len() >= MAX_PAGE_COUNT {
+            break;
+        }
+    }
+    chapters
 }
 
 fn clean_title(raw: &str) -> String {
@@ -1491,33 +1781,92 @@ mod tests {
         let page = adapter.search("ninja", 1).await.expect("live search");
         assert!(!page.items.is_empty(), "search returned zero cards");
         let first = &page.items[0];
-        println!(
-            "LIVE search: {} items; first {} ({})",
-            page.items.len(),
-            first.title,
-            first.source_manga_id
-        );
+        let detail = adapter
+            .manga_detail(&first.source_manga_id)
+            .await
+            .expect("live detail");
+        println!("LIVE detail: {} chapters", detail.chapters.len());
+        assert!(!detail.chapters.is_empty());
+        let last = detail.chapters.last().unwrap();
+        let manifest = adapter
+            .page_manifest(&first.source_manga_id, &last.source_chapter_id)
+            .await
+            .expect("live pages");
+        println!("LIVE pages: {}", manifest.pages.len());
+        assert!(manifest.pages.len() >= 5);
+    }
+
+    #[tokio::test]
+    #[ignore = "live network probe: built-in NetTruyen search -> JSON chapters -> pages over the app transport (wreq + ECH)"]
+    async fn live_builtin_nt_probe() {
+        let adapter = MadaraGeneric::built_in(
+            "nettruyen",
+            "NetTruyen",
+            "https://nettruyen.gg/",
+            &[],
+            SiteProfile::Nettruyen,
+        )
+        .unwrap();
+        let page = adapter.search("ninja", 1).await.expect("live search");
+        assert!(!page.items.is_empty(), "search returned zero cards");
+        let first = &page.items[0];
         let detail = adapter
             .manga_detail(&first.source_manga_id)
             .await
             .expect("live detail");
         println!(
-            "LIVE detail: {} — {} chapters",
-            detail.summary.title,
-            detail.chapters.len()
+            "LIVE NT detail: {} chapters ({}.{})",
+            detail.chapters.len(),
+            first.source_manga_id,
+            detail
+                .chapters
+                .last()
+                .map(|c| c.source_chapter_id.as_str())
+                .unwrap_or("-")
         );
-        assert!(!detail.chapters.is_empty(), "chapter list empty");
-        let last = &detail.chapters[detail.chapters.len() - 1];
+        assert!(
+            detail.chapters.len() > 20,
+            "JSON list should beat the ~20 HTML anchors"
+        );
+        let last = detail.chapters.last().unwrap();
         let manifest = adapter
             .page_manifest(&first.source_manga_id, &last.source_chapter_id)
             .await
             .expect("live pages");
-        println!(
-            "LIVE pages: chapter {} -> {} images",
-            last.source_chapter_id,
-            manifest.pages.len()
+        println!("LIVE NT pages: {}", manifest.pages.len());
+        assert!(manifest.pages.len() >= 5);
+    }
+
+    #[tokio::test]
+    #[ignore = "live network probe: built-in Dilib URL import -> detail -> pages over the app transport (wreq)"]
+    async fn live_builtin_dilib_probe() {
+        let adapter = MadaraGeneric::built_in(
+            "dilib",
+            "Dilib",
+            "https://dilib.vn/",
+            &[],
+            SiteProfile::Dilib,
+        )
+        .unwrap();
+        let story: Url = "https://dilib.vn/dao-hai-tac-one-piece-14728.html"
+            .parse()
+            .unwrap();
+        assert!(adapter.owns_url(&story));
+        let slug = adapter.resolve_url(&story).await.expect("resolve story");
+        assert_eq!(slug, "dao-hai-tac-one-piece-14728");
+        let detail = adapter.manga_detail(&slug).await.expect("live detail");
+        println!("LIVE DL detail: {} chapters", detail.chapters.len());
+        assert!(
+            detail.chapters.len() > 50,
+            "a long-running story must list many chapters"
         );
-        assert!(manifest.pages.len() >= 5, "implausibly small page set");
+        let last = detail.chapters.last().unwrap();
+        let manifest = adapter
+            .page_manifest(&slug, &last.source_chapter_id)
+            .await
+            .expect("live pages");
+        println!("LIVE DL pages: {}", manifest.pages.len());
+        assert!(manifest.pages.len() >= 3);
     }
 
     #[test]

@@ -6,12 +6,22 @@ use super::providers::mangadex::MangaDex;
 use crate::db::repositories::source_repo::SourceRow;
 
 /// App-shipped sources: never removable, toggleable like any other.
-pub const BUILTIN_IDS: &[&str] = &["mangadex", "madara-truyentuoitho-com", "truyenqq"];
+pub const BUILTIN_IDS: &[&str] = &[
+    "mangadex",
+    "madara-truyentuoitho-com",
+    "truyenqq",
+    "nettruyen",
+    "dilib",
+];
 pub const TTT_BASE_URL: &str = "https://truyentuoitho.com/";
 pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
 pub const TTT_IMAGE_HOSTS: &str = "img.resourcehub.shop";
 pub const QQ_BASE_URL: &str = "https://truyenqq.com.vn/";
 pub const QQ_DISPLAY_NAME: &str = "TruyenQQ";
+pub const NT_BASE_URL: &str = "https://nettruyen.gg/";
+pub const NT_DISPLAY_NAME: &str = "NetTruyen";
+pub const DL_BASE_URL: &str = "https://dilib.vn/";
+pub const DL_DISPLAY_NAME: &str = "Dilib";
 
 /// Reviewed HTML-site built-ins sharing the generic scraper pipeline. Their
 /// ids are FIXED (never host-derived) so a domain edit keeps saved manga
@@ -43,6 +53,22 @@ pub const BUILTIN_HTML_SOURCES: &[BuiltInHtmlSpec] = &[
         base_url: QQ_BASE_URL,
         image_hosts: None,
         profile: SiteProfile::TruyenQQ,
+    },
+    BuiltInHtmlSpec {
+        id: "nettruyen",
+        display_name: NT_DISPLAY_NAME,
+        adapter: "nettruyen",
+        base_url: NT_BASE_URL,
+        image_hosts: None,
+        profile: SiteProfile::Nettruyen,
+    },
+    BuiltInHtmlSpec {
+        id: "dilib",
+        display_name: DL_DISPLAY_NAME,
+        adapter: "dilib",
+        base_url: DL_BASE_URL,
+        image_hosts: None,
+        profile: SiteProfile::Dilib,
     },
 ];
 
