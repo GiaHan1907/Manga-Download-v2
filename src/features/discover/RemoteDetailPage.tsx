@@ -99,7 +99,7 @@ export default function RemoteDetailPage() {
       </div>
         <div className="chip-row">
           <StatusBadge>{STATUS_LABELS[manga.status] ?? manga.status}</StatusBadge>
-          <StatusBadge tone="warning">Remote preview</StatusBadge>
+          <StatusBadge tone="warning">Xem trước từ xa</StatusBadge>
           {alreadySaved ? (
             <StatusBadge tone="success">Đã lưu metadata</StatusBadge>
           ) : (

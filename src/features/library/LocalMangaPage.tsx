@@ -2,6 +2,7 @@ import { Download, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-re
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import Button from "../../components/ui/Button";
+import Input from "../../components/ui/Input";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
@@ -17,6 +18,7 @@ import type { DownloadedChapterDto } from "../../types/library";
 import type { QueueResultDto } from "../../types/downloads";
 import { localServices } from "../../services/provider";
 import { formatBytes } from "../../types/downloads";
+import { matchesQuery } from "../../shared/lib/text";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
@@ -35,6 +37,8 @@ export default function LocalMangaPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [alertsNonce, setAlertsNonce] = useState(0);
   const [importBusy, setImportBusy] = useState(false);
+  const [downloadedQuery, setDownloadedQuery] = useState("");
+  const [queueQuery, setQueueQuery] = useState("");
   const libraryVersion = useDomainVersion("library");
   const downloadsVersion = useDomainVersion("downloads");
 
@@ -114,6 +118,15 @@ export default function LocalMangaPage() {
       ? progress.data
       : null;
   const actionable = detail.chapters.filter((chapter) => !downloadedIds.has(chapter.id));
+  const visibleActionable = queueQuery.trim()
+    ? actionable.filter((chapter) => matchesQuery(`${chapter.title} ${chapter.number ?? ""}`, queueQuery))
+    : actionable;
+  const visibleDownloaded =
+    downloaded.state === "success"
+      ? downloaded.data.filter((chapter) =>
+          matchesQuery(`${chapter.title} ${chapter.number ?? ""}`, downloadedQuery),
+        )
+      : [];
 
   function toggle(chapterId: string, on: boolean) {
     setSelected((prev) => {
@@ -387,7 +400,6 @@ export default function LocalMangaPage() {
           <div className="chapter-toolbar">
             <div>
               <h2 className="panel__title">Đã đọc gần đây ({history.data.total})</h2>
-              <p className="muted">Ghi nhận khi bạn đọc tới trang cuối của chương.</p>
             </div>
             <Button
               variant="ghost"
@@ -421,7 +433,18 @@ export default function LocalMangaPage() {
       )}
 
       <section className="panel" aria-label="Chương đã tải offline">
-        <h2 className="panel__title">Đã tải ({downloadedIds.size})</h2>
+        <div className="section-header section-header--compact">
+          <h2 className="panel__title">Đã có file ({downloadedIds.size})</h2>
+          {downloaded.state === "success" && downloaded.data.length > 0 && (
+            <Input
+              label="Tìm chương đã tải"
+              type="search"
+              placeholder="Tên hoặc số chương (bỏ dấu vẫn khớp)…"
+              value={downloadedQuery}
+              onChange={(event) => setDownloadedQuery(event.target.value)}
+            />
+          )}
+        </div>
         {actionError && <p className="queue-error" role="alert">{actionError}</p>}
         {downloaded.state === "loading" && <Skeleton height="6rem" />}
         {downloaded.state === "error" && (
@@ -432,8 +455,11 @@ export default function LocalMangaPage() {
         )}
         {downloaded.state === "success" && downloaded.data.length > 0 && (
           <>
+            {visibleDownloaded.length === 0 && (
+              <p className="muted">Không chương nào khớp bộ lọc “{downloadedQuery}”.</p>
+            )}
             <ul className="chapter-select-list">
-              {downloaded.data.map((chapter) => (
+              {visibleDownloaded.map((chapter) => (
                 <li key={chapter.id} className="chapter-select-row">
                   <span className="chapter-select-row__text">
                     <span className="chapter-row__title">{chapter.title}</span>
@@ -474,7 +500,7 @@ export default function LocalMangaPage() {
                       )}
                     </>
                   ) : (
-                    <StatusBadge tone="error">File missing — cần tải lại</StatusBadge>
+                    <StatusBadge tone="error">Thiếu file — cần tải lại</StatusBadge>
                   )}
                 </li>
               ))}
@@ -505,6 +531,13 @@ export default function LocalMangaPage() {
         <div className="section-header section-header--compact">
           <h2 className="panel__title">Tải chương</h2>
           <div className="chip-row">
+            <Input
+              label="Tìm chương"
+              type="search"
+              placeholder="Tên hoặc số chương (bỏ dấu vẫn khớp)…"
+              value={queueQuery}
+              onChange={(event) => setQueueQuery(event.target.value)}
+            />
             <Button variant="ghost" onClick={() => toggleAll(true)} disabled={!canDownload}>
               Chọn tất cả
             </Button>
@@ -577,9 +610,7 @@ export default function LocalMangaPage() {
         </div>
         {!canDownload && (
           <p className="panel__description">
-            Nguồn này chưa khai báo khả năng tải trang (hoặc là MangaDex — cần at-home
-            host động chưa được duyệt). Nút tải bị ẩn và server từ chối mọi yêu cầu tải
-            cho truyện này.
+Nguồn này chỉ đọc được metadata — không hỗ trợ tải trang.
           </p>
         )}
         {submitError && <p className="queue-error" role="alert">{submitError}</p>}
@@ -608,9 +639,11 @@ export default function LocalMangaPage() {
             title="Mọi chương đã có offline"
             description="Không còn chương nào chưa tải của truyện này."
           />
+        ) : visibleActionable.length === 0 ? (
+          <p className="muted">Không chương nào khớp bộ lọc “{queueQuery}”.</p>
         ) : (
           <ul className="chapter-select-list">
-            {actionable.map((chapter) => (
+            {visibleActionable.map((chapter) => (
               <li key={chapter.id} className="chapter-select-row">
                 <input
                   id={`chapter-${chapter.id}`}
@@ -623,8 +656,8 @@ export default function LocalMangaPage() {
                 <label htmlFor={`chapter-${chapter.id}`} className="chapter-select-row__text">
                   <span className="chapter-row__title">{chapter.title}</span>
                   <span className="chapter-row__meta">
-                    {chapter.number !== null ? `Số ${chapter.number}` : "Không số"}
-                    {chapter.downloaded ? " · đã tải" : ""}
+                    {chapter.number !== null ? `Chương ${chapter.number}` : "Không rõ số"}
+                    {chapter.downloaded ? " · đã có file" : ""}
                   </span>
                 </label>
               </li>

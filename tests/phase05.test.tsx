@@ -232,7 +232,7 @@ describe("T05 remote preview and explicit save", () => {
   it("saves metadata only once and distinguishes saved from downloaded", async () => {
     renderAt("/remote/madara-truyentuoitho-com/ninja-loan-thi");
     expect(await screen.findByRole("heading", { name: "Ninja Loạn Thị" })).toBeDefined();
-    expect(screen.getByText("Remote preview")).toBeDefined();
+    expect(screen.getByText("Xem trước từ xa")).toBeDefined();
     expect(screen.getByText("Chưa tải — Phase 06")).toBeDefined();
     expect(screen.getByText("Chương (2)")).toBeDefined();
 
