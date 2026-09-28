@@ -33,7 +33,7 @@ export default function SettingsPage() {
     return (
       <ErrorState
         title="Không tải được cài đặt"
-        description={`${normalizeIpcError(settings.error).message} — đường dẫn này là SQLite thật, không có mock.`}
+        description={normalizeIpcError(settings.error).message}
       />
     );
   }
@@ -133,8 +133,8 @@ function SettingsForm({ initial }: { initial: AppSettings }) {
             value={draft.outputFormat === "pdf" ? "cbz" : draft.outputFormat}
             onChange={(event) => setDraft({ ...draft, outputFormat: event.target.value as OutputFormat })}
           >
-            <option value="cbz">CBZ (xuất thật — đã kiểm chứng ZIP STORE)</option>
-            <option value="folder">Thư mục ảnh (xuất thật)</option>
+            <option value="cbz">CBZ</option>
+            <option value="folder">Thư mục ảnh</option>
           </select>
         </label>
       </section>

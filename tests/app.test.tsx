@@ -66,11 +66,10 @@ describe("App shell", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText("0.1.0")).toBeDefined();
+      expect(screen.getByRole("link", { name: "Trang chủ" })).toBeDefined();
     });
 
-    expect(screen.getByText("windows")).toBeDefined();
-    expect(screen.getByText("ready")).toBeDefined();
+    expect(screen.getByText("Manga Downloader 1989")).toBeDefined();
   });
 
   it("renders error state when invoke rejects", async () => {
@@ -99,8 +98,8 @@ describe("App shell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("heading", { name: "Downloads" })).toBeDefined();
-    expect(screen.getByRole("link", { name: "Downloads" }).className).toContain("sidebar__link--active");
+    expect(screen.getByRole("heading", { name: "Tải truyện" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Tải truyện" }).className).toContain("sidebar__link--active");
     await waitFor(() => {
       expect(screen.getByText(/Hàng đợi tải —/)).toBeDefined();
     });

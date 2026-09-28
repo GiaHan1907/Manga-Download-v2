@@ -39,8 +39,8 @@ export default function ReaderPage() {
     return (
       <ErrorState
         title="Chương này chưa có trang mẫu"
-        description="Reader chỉ hoạt động với chapter có ảnh mẫu đóng gói trong bản demo. Không có giải mã CBZ hay tải ảnh thật."
-        action={<Button to={`/manga/${mangaId}`} variant="primary">Về Manga Detail</Button>}
+        description="Reader chỉ hoạt động với chapter có ảnh mẫu đóng gói trong bản demo."
+        action={<Button to={`/manga/${mangaId}`} variant="primary">Về chi tiết truyện</Button>}
       />
     );
   }
@@ -173,7 +173,7 @@ function ReaderView({
       <header className="reader__bar">
         <div className="reader__meta">
           <StatusBadge tone="warning">Sample Reader</StatusBadge>
-          <span className="muted">Trang {page + 1}/{total} · ảnh nội bộ, không phải trang truyện thật</span>
+          <span className="muted">Trang {page + 1}/{total}</span>
         </div>
         <div className="reader__controls" aria-label="Điều khiển reader">
           <label className="reader__select" htmlFor="reader-chapter">

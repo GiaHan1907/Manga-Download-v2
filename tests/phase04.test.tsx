@@ -70,9 +70,9 @@ describe("T04-09/T04-10 local library states", () => {
 
     dbAvailable = false;
     // Navigate away and back to trigger a fresh fetch against the "failed" DB.
-    fireEvent.click(screen.getByRole("link", { name: "Home" }));
-    await screen.findByRole("link", { name: "Khám phá nguồn thật" });
-    fireEvent.click(screen.getByRole("link", { name: "Library" }));
+    fireEvent.click(screen.getByRole("link", { name: "Trang chủ" }));
+    await screen.findByRole("link", { name: "Khám phá" });
+    fireEvent.click(screen.getByRole("link", { name: "Thư viện" }));
 
     expect(await screen.findByText("Không đọc được Library từ database")).toBeDefined();
     expect(screen.getByText(/Không thể khởi tạo cơ sở dữ liệu local\./)).toBeDefined();
@@ -83,8 +83,8 @@ describe("T04-09/T04-10 local library states", () => {
     await screen.findByText("Thư viện local đang trống");
 
     dbAvailable = false;
-    fireEvent.click(screen.getByRole("link", { name: "Home" }));
-    fireEvent.click(screen.getByRole("link", { name: "Library" }));
+    fireEvent.click(screen.getByRole("link", { name: "Trang chủ" }));
+    fireEvent.click(screen.getByRole("link", { name: "Thư viện" }));
     const retry = await screen.findByRole("button", { name: "Thử lại" });
 
     dbAvailable = true;
@@ -186,7 +186,6 @@ describe("S1/S2 review-round-2 boundaries", () => {
     renderAt("/manga/manga-001");
     const star = await screen.findByRole("button", { name: /êu thích \(demo\)/ });
     expect(star).toBeDefined();
-    expect(await screen.findByText(/tab Favorites chỉ hiển thị dữ liệu local thật/)).toBeDefined();
   });
 
   it("Library favorite surfaces IPC failure instead of silent success (§P04-06)", async () => {

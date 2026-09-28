@@ -118,7 +118,7 @@ export function getSamplePages(chapterId: string): ReaderPage[] {
     chapterId,
     index,
     src,
-    alt: `Trang mẫu ${index + 1} (ảnh nội bộ, không phải trang truyện thật)`,
+    alt: `Trang mẫu ${index + 1}`,
   }));
 }
 

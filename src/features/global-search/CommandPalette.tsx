@@ -16,13 +16,13 @@ type Item =
 type ActionItem = { kind: "action"; id: string; label: string; path: string };
 
 const ACTIONS: ActionItem[] = [
-  { kind: "action", id: "a-home", label: "Home", path: "/" },
-  { kind: "action", id: "a-discover", label: "Discover (nguồn thật)", path: "/discover" },
-  { kind: "action", id: "a-library", label: "Library", path: "/library" },
-  { kind: "action", id: "a-favorites", label: "Favorites", path: "/favorites" },
-  { kind: "action", id: "a-downloads", label: "Downloads", path: "/downloads" },
-  { kind: "action", id: "a-settings", label: "Settings", path: "/settings" },
-  { kind: "action", id: "a-sources", label: "Sources", path: "/settings/sources" },
+  { kind: "action", id: "a-home", label: "Trang chủ", path: "/" },
+  { kind: "action", id: "a-discover", label: "Khám phá", path: "/discover" },
+  { kind: "action", id: "a-library", label: "Thư viện", path: "/library" },
+  { kind: "action", id: "a-favorites", label: "Yêu thích", path: "/favorites" },
+  { kind: "action", id: "a-downloads", label: "Tải truyện", path: "/downloads" },
+  { kind: "action", id: "a-settings", label: "Cài đặt", path: "/settings" },
+  { kind: "action", id: "a-sources", label: "Nguồn", path: "/settings/sources" },
 ];
 
 export const OPEN_PALETTE_EVENT = "open-command-palette";

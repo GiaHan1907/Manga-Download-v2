@@ -38,7 +38,7 @@ function RealSources() {
   }
 
   if (sources.state === "loading") {
-    return <Skeleton height="10rem" label="Đang tải nguồn thật" />;
+    return <Skeleton height="10rem" label="Đang tải nguồn" />;
   }
   if (sources.state === "error") {
     const error = normalizeIpcError(sources.error);
@@ -53,10 +53,6 @@ function RealSources() {
 
   return (
     <div className="page-stack">
-      <p className="muted">
-        Nguồn thật chạy trong Rust (source engine Phase 05). Người dùng đăng ký site Madara/WordPress bằng
-        tên + URL gốc; renderer không tự thêm host vào tầng mạng.
-      </p>
       <div className="sources-list">
         {sources.data.map((source) => (
           <div key={source.id} className="source-row">
@@ -180,10 +176,6 @@ function DemoSources() {
 
   return (
     <div className="page-stack">
-      <p className="muted">
-        Bật/tắt ở đây chỉ ảnh hưởng bộ lọc tab &quot;Demo sandbox&quot; trong Discover — trạng thái mock của
-        phiên demo, khác với registry nguồn thật ở trên.
-      </p>
       <div className="sources-list">
         {sources.data.map((source) => (
           <div key={source.id} className="source-row">
@@ -212,7 +204,7 @@ function DemoSources() {
 export default function SourcesPage() {
   return (
     <div className="page-stack">
-      <h2>Nguồn thật (Rust registry)</h2>
+      <h2>Nguồn truyện</h2>
       <RealSources />
       {/* Plan §2.7: the mock sandbox is dev-build only — never rendered in a
           production app where it could be mistaken for real sources. */}

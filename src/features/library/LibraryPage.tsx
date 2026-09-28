@@ -123,15 +123,6 @@ export default function LibraryPage() {
   return (
     <div className="page-stack">
       <div className="section-header">
-        <div>
-          <p className="muted">
-            Thư viện <StatusBadge tone="success">Local — SQLite thật</StatusBadge>
-          </p>
-          <p className="muted">
-            Truyện đã lưu từ Discover; chương hiện “offline” khi file CBZ/thư mục đã được
-            kiểm chứng. Không có dữ liệu demo ở màn này.
-          </p>
-        </div>
         <Input
           label="Tìm theo tên/tác giả"
           type="search"
@@ -216,7 +207,7 @@ export default function LibraryPage() {
           title={filter === "all" ? "Thư viện local đang trống" : "Không có kết quả khớp bộ lọc"}
           description={
             filter === "all"
-              ? "Chưa có truyện nào được lưu. Lưu từ Discover (nguồn thật) để nó xuất hiện ở đây."
+              ? "Chưa có truyện nào được lưu. Lưu từ Khám phá để nó xuất hiện ở đây."
               : "Đổi bộ lọc/sắp xếp, hoặc xóa từ khóa tìm kiếm."
           }
           action={<Button to="/discover" variant="secondary">Tới Discover</Button>}

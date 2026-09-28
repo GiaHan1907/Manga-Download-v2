@@ -104,7 +104,7 @@ export default function UrlImportPanel({ catalog }: UrlImportPanelProps) {
               coverUrl={feedback.manga.coverAsset}
             />
             <Button to={`/manga/${feedback.manga.id}`} variant="primary">
-              Mở Manga Detail
+              Mở chi tiết truyện
             </Button>
           </div>
         </section>

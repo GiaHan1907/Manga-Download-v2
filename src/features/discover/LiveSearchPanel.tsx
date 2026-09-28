@@ -142,7 +142,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   }
 
   if (sources.state === "loading") {
-    return <Skeleton height="10rem" label="Đang tải danh sách nguồn thật" />;
+    return <Skeleton height="10rem" label="Đang tải danh sách nguồn" />;
   }
   if (sources.state === "error") {
     const error = normalizeIpcError(sources.error);
@@ -161,17 +161,16 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
     <div className="page-stack">
       <div className="discover-controls">
         <Input
-          label="Tìm kiếm thật (qua Rust source engine)"
+          label="Tìm kiếm"
           type="search"
           placeholder="Nhập tên truyện (tối thiểu 2 ký tự)..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          hint="Debounce 300ms; truy vấn được gửi tới từng adapter đã đăng ký, lỗi từng nguồn hiển thị riêng."
         />
-        <fieldset className="source-filter" aria-label="Lọc theo nguồn thật">
+        <fieldset className="source-filter" aria-label="Lọc theo nguồn">
           <legend>Nguồn</legend>
           {searchable.length === 0 && (
-            <p className="muted">Chưa có nguồn thật nào bật hỗ trợ tìm kiếm. Đăng ký trong Settings → Sources.</p>
+            <p className="muted">Chưa có nguồn nào bật hỗ trợ tìm kiếm. Đăng ký trong Cài đặt → Nguồn.</p>
           )}
           {searchable.map((source) => (
             <label key={source.id} className="source-filter__option">
@@ -215,7 +214,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
       {results.state === "success" && results.data === null && (
         <EmptyState
           title="Chưa có truy vấn"
-          description="Nhập ít nhất 2 ký tự để tìm qua các nguồn thật đã bật."
+          description="Nhập ít nhất 2 ký tự để tìm."
         />
       )}
       {results.state === "success" &&

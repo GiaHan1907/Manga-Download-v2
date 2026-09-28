@@ -59,7 +59,6 @@ function SearchPanel({ sources }: { sources: CatalogSource[] }) {
           placeholder="Nhập tên, tác giả hoặc thể loại (bỏ dấu vẫn khớp)..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          hint="Debounce 300ms, chỉ khớp fixture nội bộ — không có tìm kiếm thật."
         />
         <fieldset className="source-filter" aria-label="Lọc theo nguồn demo">
           <legend>Nguồn</legend>
@@ -105,7 +104,7 @@ function SearchPanel({ sources }: { sources: CatalogSource[] }) {
         </div>
       )}
       <p className="muted">
-        <Search size={13} aria-hidden="true" /> Kết quả hiển thị theo thứ tự fixture ổn định; chọn một thẻ để mở Manga Detail.
+        <Search size={13} aria-hidden="true" /> Kết quả hiển thị theo thứ tự fixture ổn định; chọn một thẻ để mở chi tiết truyện.
       </p>
     </div>
   );
@@ -151,8 +150,8 @@ export default function DiscoverPage() {
   const demoInitialTab = requested === "url" || requested === "demo-url" ? "url" : "search";
 
   const items = [
-    { id: "search", label: "Tìm kiếm (thật)", content: <LiveSearchPanel initialQuery={onlineQuery} /> },
-    { id: "url", label: "Import URL (thật)", content: <LiveUrlImportPanel /> },
+    { id: "search", label: "Tìm kiếm", content: <LiveSearchPanel initialQuery={onlineQuery} /> },
+    { id: "url", label: "Import URL", content: <LiveUrlImportPanel /> },
   ];
   if (demoEnabled) {
     items.push({

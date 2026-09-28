@@ -112,9 +112,6 @@ export default function MangaDetailPage() {
           <p className="muted">
             {manga.author} · nguồn demo: {manga.sourceId} ({manga.sourceMangaId})
           </p>
-          <p className="muted">
-            Trang này thuộc sandbox demo: ★ chỉ đổi trạng thái mock của phiên, không xuống database — tab Favorites chỉ hiển thị dữ liệu local thật.
-          </p>
           <div className="chip-row">
             <StatusBadge tone="neutral">{manga.status}</StatusBadge>
             {manga.genres.map((genre) => (

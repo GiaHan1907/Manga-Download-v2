@@ -299,7 +299,7 @@ describe("T08-15/T08-16 favorites pagination + storage panel", () => {
   it("Settings exposes an entry link to the sources registry page", async () => {
     renderAt("/settings");
     fireEvent.click(await screen.findByRole("link", { name: "Quản lý nguồn (Sources)" }));
-    expect(await screen.findByText("Nguồn thật (Rust registry)")).toBeDefined();
+    expect(await screen.findByText("Nguồn truyện")).toBeDefined();
   });
 
   it("surfaces a broken custom link as an alert, never an empty library", async () => {    const base = vi.mocked(invoke).getMockImplementation()!;

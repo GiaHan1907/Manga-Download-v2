@@ -126,7 +126,7 @@ export default function RemoteDetailPage() {
         <p role="status" className="muted">
           {saveState.result.updated
             ? `Đã cập nhật metadata — ${saveState.result.savedChapterCount} chương (id Library: ${saveState.result.mangaId}).`
-            : `Đã lưu vào Library (chỉ metadata) — ${saveState.result.savedChapterCount} chương. Chưa tải file nào; tải thật xuất hiện ở Phase 06.`}{" "}
+            : `Đã lưu vào Library (chỉ metadata) — ${saveState.result.savedChapterCount} chương.`}{" "}
           <Button to="/library" variant="secondary">
             Mở Library
           </Button>

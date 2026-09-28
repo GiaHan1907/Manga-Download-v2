@@ -10,9 +10,6 @@ export default function WindowTitlebar() {
           <div className="window-titlebar__name" data-tauri-drag-region>
             Manga Downloader 1989
           </div>
-          <div className="window-titlebar__subtitle" data-tauri-drag-region>
-            Design System & UI Shell
-          </div>
         </div>
       </div>
       <div className="window-titlebar__controls" role="group" aria-label="Điều khiển cửa sổ">

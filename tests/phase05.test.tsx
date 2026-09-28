@@ -221,7 +221,7 @@ describe("T05 URL import", () => {
     renderAt("/discover?tab=url");
     const input = await screen.findByPlaceholderText(/thuộc nguồn đã đăng ký/);
     fireEvent.change(input, { target: { value: "https://not-registered.test/manga/x/" } });
-    fireEvent.click(screen.getByRole("button", { name: "Kiểm tra URL (thật)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Kiểm tra URL" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("URL không thuộc nguồn nào được hỗ trợ.");
     expect(alert.textContent).toContain("UNSUPPORTED_SOURCE");
@@ -239,7 +239,7 @@ describe("T05 remote preview and explicit save", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lưu vào Library" }));
     const status = await screen.findByRole("status");
     expect(status.textContent).toContain("Đã lưu vào Library (chỉ metadata) — 2 chương");
-    expect(status.textContent).toContain("Chưa tải file nào");
+    expect(status.textContent).toContain("chỉ metadata");
 
     // After refetch the backend reports the saved internal id via savedMangaId.
     expect(await screen.findByText("Đã lưu metadata")).toBeDefined();
@@ -268,10 +268,9 @@ describe("T05 sources management", () => {
 
   it("keeps the demo sandbox section separate from the real registry", async () => {
     renderAt("/settings/sources");
-    expect(await screen.findByText("Nguồn thật (Rust registry)")).toBeDefined();
+    expect(await screen.findByText("Nguồn truyện")).toBeDefined();
     expect(screen.getByText("Demo sandbox (Phase 03)")).toBeDefined();
-    expect(screen.getByText(/trạng thái mock của phiên demo/)).toBeDefined();
-    // Demo mock sources render their own toggles, separate from real ones.
+        // Demo mock sources render their own toggles, separate from real ones.
     const demoToggles = await screen.findAllByRole("button", { name: "Tắt nguồn" });
     expect(demoToggles.length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Tắt", hidden: false })).toBeDefined();

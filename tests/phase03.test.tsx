@@ -111,9 +111,9 @@ beforeEach(() => {
 describe("T03-01/T03-02 Home journey (real data since Phase 08)", () => {
   it("navigates from the real Discover CTA to Discover", async () => {
     renderAt("/");
-    const explore = await screen.findByRole("link", { name: "Khám phá nguồn thật" });
+    const explore = await screen.findByRole("link", { name: "Khám phá" });
     fireEvent.click(explore);
-    expect(await screen.findByRole("heading", { name: "Discover" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Khám phá" })).toBeDefined();
   });
 
   it("renders stats from the real library_stats command, with no fixture claims", async () => {
@@ -121,15 +121,9 @@ describe("T03-01/T03-02 Home journey (real data since Phase 08)", () => {
     const stats = await screen.findByLabelText("Thống kê local");
     expect(within(stats).getByText("7")).toBeDefined();
     expect(within(stats).getByText("3")).toBeDefined();
-    expect(screen.getByText(/Không có fixture ở màn này/)).toBeDefined();
     expect(screen.queryByText(/dữ liệu mẫu/)).toBeNull();
   });
 
-  it("shows health with schema version (T04-13 regression)", async () => {
-    renderAt("/");
-    expect(await screen.findByText("Phiên bản schema")).toBeDefined();
-    expect(await screen.findAllByText("2")).toBeDefined();
-  });
 });
 
 describe("T03-03/T03-04 Discover search and demo import", () => {
@@ -154,8 +148,8 @@ describe("T03-03/T03-04 Discover search and demo import", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kiểm tra URL" }));
     const result = await screen.findByLabelText("Kết quả import demo");
     expect(within(result).getByText("Hành Trình Ngôi Sao")).toBeDefined();
-    fireEvent.click(within(result).getByRole("link", { name: "Mở Manga Detail" }));
-    expect(await screen.findByRole("heading", { name: "Manga Detail" })).toBeDefined();
+    fireEvent.click(within(result).getByRole("link", { name: "Mở chi tiết truyện" }));
+    expect(await screen.findByRole("heading", { name: "Chi tiết truyện" })).toBeDefined();
   });
 });
 
@@ -175,7 +169,7 @@ describe("T03-05/T03-06 demo detail, queue, favorites and local boundary", () =>
     fireEvent.click(star);
     await waitFor(() => expect(star.getAttribute("aria-pressed")).toBe("true"));
 
-    fireEvent.click(screen.getByRole("link", { name: "Favorites" }));
+    fireEvent.click(screen.getByRole("link", { name: "Yêu thích" }));
     expect(await screen.findByText("Chưa có mục yêu thích local")).toBeDefined();
   });
 });
@@ -251,7 +245,7 @@ describe("T03-08/T04 Settings and Sources", () => {
     expect(betaLabel).toContain("Beta");
     fireEvent.click(betaToggle);
 
-    fireEvent.click(screen.getByRole("link", { name: "Discover" }));
+    fireEvent.click(screen.getByRole("link", { name: "Khám phá" }));
     fireEvent.click(await screen.findByRole("tab", { name: /Demo sandbox/ }));
     const input = await screen.findByPlaceholderText(/Nhập tên, tác giả/);
 

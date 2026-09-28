@@ -2,7 +2,6 @@ import { Search, Settings } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { resolvePageTitle } from "../../app/routes";
 import Button from "../ui/Button";
-import StatusBadge from "../ui/StatusBadge";
 import { OPEN_PALETTE_EVENT } from "../../features/global-search/CommandPalette";
 
 export default function Topbar() {
@@ -13,9 +12,6 @@ export default function Topbar() {
   return (
     <header className="topbar">
       <div>
-        <p className="muted">
-          Manga Downloader 1989 <StatusBadge tone="neutral">Prototype · Dữ liệu thật</StatusBadge>
-        </p>
         <h1 className="topbar__title">{pageTitle}</h1>
       </div>
       <div className="topbar__actions">

@@ -16,7 +16,7 @@ export default function ReaderImage({ page, fit, zoom, onPageIndex }: ReaderImag
     return (
       <div className="reader-image reader-image--failed" role="img" aria-label={`Không tải được trang ${onPageIndex + 1}`}>
         <ImageOff size={28} aria-hidden="true" />
-        <p>Không tải được ảnh trang mẫu {onPageIndex + 1}. Thử trang khác hoặc quay lại Manga Detail.</p>
+        <p>Không tải được ảnh trang mẫu {onPageIndex + 1}. Thử trang khác hoặc quay lại chi tiết truyện.</p>
       </div>
     );
   }

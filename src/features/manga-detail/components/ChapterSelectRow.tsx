@@ -46,7 +46,7 @@ export default function ChapterSelectRow({ chapter, selected, onSelectChange, qu
           </Button>
         ) : (
           <Tooltip
-            content="Chương này chưa có trang mẫu trong demo (dev-only) — truyện thật đã tải thì đọc ở Reader offline."
+            content="Chương này chưa có trang mẫu."
             focusableWhenDisabled
           >
             <Button disabled aria-label={`Read sample không khả dụng cho ${chapter.title}`}>

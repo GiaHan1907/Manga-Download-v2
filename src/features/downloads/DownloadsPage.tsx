@@ -211,11 +211,6 @@ export default function DownloadsPage() {
         <h2 className="panel__title">
           Hàng đợi tải — {tasks.length}/{total} tác vụ (trang {Math.floor(offset / 100) + 1})
         </h2>
-        <p className="panel__description">
-          Trạng thái, tiến độ và file đều là dữ liệu thật từ engine Rust + SQLite. Bộ lọc áp dụng trên
-          trang đang xem; tốc độ chỉ hiện khi đo được; chương chỉ báo &quot;hoàn tất&quot; sau khi mục
-          tin đã được kiểm tra toàn vẹn.
-        </p>
         <div className="chip-row">
           {FILTERS.map((item) => (
             <button

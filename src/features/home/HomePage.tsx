@@ -4,7 +4,6 @@ import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
-import SystemStatus from "../system/SystemStatus";
 import {
   listLocalDownloadTasks,
   libraryStats,
@@ -62,15 +61,11 @@ export default function HomePage() {
       <section className="panel home-hero">
         <div>
           <h2 className="panel__title">Bảng điều khiển</h2>
-          <p className="panel__description">
-            Số liệu dưới đây là dữ liệu thật từ SQLite + đĩa máy bạn (Phase 04–07). Không có fixture
-            ở màn này.
-          </p>
         </div>
         <div className="home-hero__actions">
           <Button to="/discover" variant="primary">
             <Compass size={16} aria-hidden="true" />
-            Khám phá nguồn thật
+            Khám phá
           </Button>
           <Button to="/discover?tab=url" variant="secondary">
             <Link2 size={16} aria-hidden="true" />
@@ -140,7 +135,6 @@ export default function HomePage() {
         )}
       </section>
 
-      <SystemStatus />
     </div>
   );
 }
