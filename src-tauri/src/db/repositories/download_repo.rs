@@ -520,6 +520,55 @@ pub async fn retry_failed(pool: &SqlitePool, task_id: &str) -> Result<Option<Tas
     transition(pool, task_id, &["failed"], "queued").await
 }
 
+/// Bulk lifecycle move for queue-wide actions (global pause/resume). Applies
+/// the same guarded column updates as `transition` to every task currently in
+/// `from` and returns the updated rows. Bounded by MAX_TRACKED_TASKS anyway.
+pub async fn transition_status_all(
+    pool: &SqlitePool,
+    from: &str,
+    to: &str,
+) -> Result<Vec<TaskRow>, AppError> {
+    if !STATUS_STATES.contains(&from) || !STATUS_STATES.contains(&to) {
+        return Err(AppError::validation(
+            "Trạng thái chuyển đổi hàng loạt không hợp lệ.",
+        ));
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let ts = now_iso();
+    // Capture the moved population BEFORE the update so the returned set is
+    // exactly "rows this call touched", not every row already sitting in `to`.
+    let ids: Vec<(String,)> =
+        sqlx::query_as("SELECT id FROM download_tasks WHERE status = ?1 ORDER BY id")
+            .bind(from)
+            .fetch_all(&mut *tx)
+            .await?;
+    let clear_error = if to == "failed" {
+        ""
+    } else {
+        ", error_code = NULL, error_message = NULL, next_retry_at = NULL"
+    };
+    let set_finished = if matches!(to, "completed" | "cancelled") {
+        ", finished_at = ?4"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "UPDATE download_tasks SET status = ?2, revision = revision + 1, updated_at = ?3\
+         {set_finished}{clear_error} WHERE status = ?1"
+    );
+    let mut query = sqlx::query(&sql).bind(from).bind(to).bind(&ts);
+    if matches!(to, "completed" | "cancelled") {
+        query = query.bind(&ts);
+    }
+    query.execute(&mut *tx).await?;
+    let mut rows = Vec::with_capacity(ids.len());
+    for (id,) in ids {
+        rows.push(task_by_id(&mut tx, &id).await?);
+    }
+    tx.commit().await?;
+    Ok(rows)
+}
+
 /// Automatic-retry requeue: back to `queued` from any active state with a
 /// new attempt counted and the retry window persisted. The informative
 /// error stays visible on the queued card until the next success clears it.
@@ -798,6 +847,47 @@ mod tests {
             .await
             .unwrap();
         chapter_id
+    }
+
+    #[tokio::test]
+    async fn transition_status_all_moves_only_tasks_in_source_state() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let c1 = seed_chapter(&pool, "c1").await;
+        let c2 = seed_chapter(&pool, "c2").await;
+        let c3 = seed_chapter(&pool, "c3").await;
+        let outcome = queue_batch(&pool, &[c1, c2, c3], "cbz", 0).await.unwrap();
+        assert_eq!(outcome.created.len(), 3);
+        // One task leaves the queued population before the bulk move.
+        let pre_moved = transition(&pool, &outcome.created[0].id, &["queued"], "paused")
+            .await
+            .unwrap();
+        assert!(pre_moved.is_some());
+
+        let moved = transition_status_all(&pool, "queued", "paused")
+            .await
+            .unwrap();
+        // Only the two still-queued rows move; the pre-paused one is not
+        // re-published (its id must not appear in the returned set).
+        assert_eq!(moved.len(), 2);
+        assert!(moved.iter().all(|row| row.status == "paused"));
+        assert!(!moved.iter().any(|row| row.id == outcome.created[0].id));
+        let (paused_total,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM download_tasks WHERE status = 'paused'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(paused_total, 3);
+
+        // Same-value move is a no-op result set boundary check: moving from a
+        // state nobody occupies returns empty, not an error.
+        let none = transition_status_all(&pool, "verifying", "paused")
+            .await
+            .unwrap();
+        assert!(none.is_empty());
+        // Unknown states are rejected before any write.
+        assert!(transition_status_all(&pool, "queued", "teleported")
+            .await
+            .is_err());
     }
 
     #[tokio::test]

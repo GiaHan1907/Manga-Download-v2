@@ -42,6 +42,8 @@ pub struct Coordinator {
     /// Shared with every worker: set on app exit. Workers exit WITHOUT
     /// writing a terminal state so startup recovery re-queues them.
     shutdown: Arc<AtomicBool>,
+    /// Global queue gate: while set the dispatcher claims nothing new.
+    queue_paused: AtomicBool,
 }
 
 impl Coordinator {
@@ -59,6 +61,7 @@ impl Coordinator {
             wake: tokio::sync::Notify::new(),
             active: Mutex::new(HashMap::new()),
             shutdown: Arc::new(AtomicBool::new(false)),
+            queue_paused: AtomicBool::new(false),
         })
     }
 
@@ -84,7 +87,43 @@ impl Coordinator {
         self.wake.notify_one();
     }
 
+    /// Whether the global queue gate currently blocks new dispatches.
+    pub fn is_queue_paused(&self) -> bool {
+        self.queue_paused.load(Ordering::Relaxed)
+    }
+
+    /// Global pause/resume. Pause: gate the dispatcher, cooperatively pause
+    /// every live worker and bulk-move `queued` → `paused`. Resume: clear
+    /// the gate, drop worker pause flags and requeue every `paused` task —
+    /// by design this also restarts tasks the user paused individually.
+    /// Returns the number of persisted rows moved.
+    pub async fn set_queue_paused(&self, paused: bool) -> Result<u32, AppError> {
+        self.queue_paused.store(paused, Ordering::Relaxed);
+        {
+            let active = self.active.lock().unwrap();
+            for handle in active.values() {
+                handle.pause.store(paused, Ordering::Relaxed);
+            }
+        }
+        let (from, to) = if paused {
+            ("queued", "paused")
+        } else {
+            ("paused", "queued")
+        };
+        let moved = download_repo::transition_status_all(&self.pool, from, to).await?;
+        for row in &moved {
+            self.publish_now(row);
+        }
+        if !paused {
+            self.notify_new_work();
+        }
+        Ok(moved.len() as u32)
+    }
+
     async fn dispatch_available(self: &Arc<Self>) {
+        if self.queue_paused.load(Ordering::Relaxed) {
+            return;
+        }
         let settings = match settings_service::load(&self.pool).await {
             Ok(settings) => settings,
             Err(_) => return,

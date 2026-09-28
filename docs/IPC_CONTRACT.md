@@ -56,6 +56,8 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 | `reveal_download` | `{ taskId? }` | — | Mở Explorer tại nơi lưu tải: có `taskId` (phải `completed`, `output_relpath` được validate relpath + tồn tại trên đĩa) → chọn đúng file/thư mục ảnh trong folder; không có id → mở thư mục library gốc. Đường dẫn chỉ tồn tại phía Rust (hành động, không getter) |
 | `get_download_task` | `{ taskId }` | `DownloadTaskDto` | snapshot bền vững; `NOT_FOUND` |
 | `pause_download` | `{ taskId }` | `DownloadTaskDto` | queued→paused ngay; `resolving`/`downloading` → flag hợp tác, worker tự chốt `pausing→paused` khi writes dừng; `verifying`/`exporting` → **từ chối bằng `VALIDATION_ERROR`** (cửa sổ commit ngắn, pause không thể giữa chừng — review 4 vòng); transition sai khác cũng `VALIDATION_ERROR` |
+| `set_download_queue_paused` | `{ paused: bool }` | `u32` (số dòng status bị chuyển hàng loạt) | Cổng hàng đợi toàn cục: pause chặn dispatcher giành task mới, cooperative-pause mọi worker đang chạy và chuyển queued->paused; resume làm ngược lại (kể cả task người dùng tạm dừng riêng lẻ cũng được resume theo thiết kế). Cờ gate chỉ sống trong bộ nhớ — khởi động lại app luôn bắt đầu chạy tiếp |
+| `get_download_queue_paused` | `()` | `bool` | Đọc trạng thái cổng hàng đợi cho UI |
 | `resume_download` | `{ taskId }` | `DownloadTaskDto` | chỉ paused→queued |
 | `cancel_download` | `{ taskId }` | `DownloadTaskDto` | queued/paused ngay; worker nhận flag tự chốt cancelled; staging của task bị xóa, **không đụng file đã publish** |
 | `retry_download` | `{ taskId }` | `DownloadTaskDto` | chỉ failed→queued; giữ attempts/backoff đã lưu |

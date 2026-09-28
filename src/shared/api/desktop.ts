@@ -238,6 +238,17 @@ export async function clearDownloadHistory(args: {
 }
 
 /// Feature plan F5: bulk requeue of `failed` tasks (cap server-side, 200).
+/// Global queue gate (Rust `set_download_queue_paused`). Returns the number
+/// of persisted task rows the bulk move touched. The gate itself is in-memory:
+/// an app restart always resumes dispatching (documented behavior).
+export async function setDownloadQueuePaused(paused: boolean): Promise<number> {
+  return invoke<number>("set_download_queue_paused", { paused });
+}
+
+export async function getDownloadQueuePaused(): Promise<boolean> {
+  return invoke<boolean>("get_download_queue_paused");
+}
+
 export async function retryAllFailedDownloads(): Promise<number> {
   return invoke<number>("retry_all_failed_downloads");
 }

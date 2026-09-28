@@ -145,6 +145,8 @@ pub fn run() {
             commands::downloads::resume_download,
             commands::downloads::cancel_download,
             commands::downloads::retry_download,
+            commands::downloads::set_download_queue_paused,
+            commands::downloads::get_download_queue_paused,
             commands::downloads::set_download_priority,
             commands::downloads::reveal_download,
             commands::downloads::clear_download_history,

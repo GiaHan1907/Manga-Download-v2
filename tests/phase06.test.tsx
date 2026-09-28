@@ -101,6 +101,29 @@ describe("T06 Downloads manager (real backend)", () => {
     });
   });
 
+  it("global gate: reads paused state, shows marker, resumes on click", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "get_download_queue_paused") return Promise.resolve(true);
+      if (cmd === "set_download_queue_paused") return Promise.resolve(1);
+      if (cmd === "app_list_local_download_tasks") {
+        return Promise.resolve({ items: [], total: 0, limit: 100, offset: 0 });
+      }
+      if (cmd === "app_get_info") return Promise.resolve({ name: "x", version: "0.1.0", platform: "windows" });
+      if (cmd === "app_health_check") return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 4 });
+      return Promise.reject(new Error(`unexpected command ${cmd}`));
+    });
+    renderDownloads();
+    const resumeButton = await screen.findByRole("button", { name: "Tiếp tục toàn bộ" });
+    expect(screen.getByText("Hàng đợi đang tạm dừng")).toBeDefined();
+    fireEvent.click(resumeButton);
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("set_download_queue_paused", { paused: false });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Dừng toàn bộ" })).toBeDefined();
+    });
+  });
+
   it("drops an out-of-order event with an older revision (T06-22 race)", async () => {
     mockQueue([baseTask("t1", "downloading", 5)]);
     renderDownloads();

@@ -20,6 +20,7 @@ export function useDownloadQueue() {
   const [speedHistory, setSpeedHistory] = useState<Record<string, number[]>>({});
   const [etaSeconds, setEtaSeconds] = useState<Record<string, number | null>>({});
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+  const [queuePaused, setQueuePausedState] = useState(false);
   const progressSample = useRef<Map<string, { pages: number; ts: number }>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,12 @@ export function useDownloadQueue() {
     // Deferred so the first setState happens outside the synchronous effect
     // body (avoids render cascades; same pattern the async hooks rely on).
     void Promise.resolve().then(refresh);
+    void Promise.resolve()
+      .then(() => downloadsApi.getQueuePaused())
+      .then((paused) => {
+        if (mounted.current) setQueuePausedState(paused);
+      })
+      .catch(() => undefined);
   }, [refresh, reloadNonce]);
 
   // Subscribe once; re-query on reconnect focuses handled by actions/refresh.
@@ -202,7 +209,21 @@ export function useDownloadQueue() {
     [refresh],
   );
 
+  /// Global gate action: Rust is authoritative; on success we sync the flag
+  /// and refetch the snapshot (paused rows appear immediately).
+  const setQueuePaused = useCallback(
+    async (paused: boolean): Promise<number> => {
+      const moved = await downloadsApi.setQueuePaused(paused);
+      setQueuePausedState(paused);
+      await refresh();
+      return moved;
+    },
+    [refresh],
+  );
+
   return {
+    queuePaused,
+    setQueuePaused,
     tasks,
     live,
     speedHistory,

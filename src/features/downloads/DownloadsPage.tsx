@@ -85,6 +85,8 @@ const PURGE_STATUS_LABELS: Record<string, string> = {
 
 export default function DownloadsPage() {
   const {
+    queuePaused,
+    setQueuePaused,
     tasks,
     live,
     speedHistory,
@@ -123,6 +125,21 @@ export default function DownloadsPage() {
     void retryAllFailed()
       .then((count) => pushToast(count > 0 ? `Đã xếp hàng lại ${count} tác vụ lỗi.` : "Không còn tác vụ lỗi nào."))
       .catch((err: unknown) => pushToast(err instanceof Error ? err.message : "Bulk retry thất bại."))
+      .finally(() => setBulkBusy(false));
+  }
+
+  function toggleQueueGate() {
+    const next = !queuePaused;
+    setBulkBusy(true);
+    void setQueuePaused(next)
+      .then((moved) =>
+        pushToast(
+          next
+            ? `Đã tạm dừng hàng đợi — ${moved} tác vụ chờ được giữ nguyên.`
+            : `Đã tiếp tục — ${moved} tác vụ vào lại hàng đợi.`,
+        ),
+      )
+      .catch((err: unknown) => pushToast(err instanceof Error ? err.message : "Không đổi được trạng thái hàng đợi."))
       .finally(() => setBulkBusy(false));
   }
 
@@ -221,6 +238,18 @@ export default function DownloadsPage() {
               <RotateCcw size={14} aria-hidden="true" />
               Thử lại tất cả lỗi ({counts.failed})
             </Button>
+          )}
+          <Button
+            variant={queuePaused ? "primary" : "secondary"}
+            disabled={bulkBusy}
+            onClick={() => void toggleQueueGate()}
+          >
+            {queuePaused ? "Tiếp tục toàn bộ" : "Dừng toàn bộ"}
+          </Button>
+          {queuePaused && (
+            <span className="status-badge status-badge--warning" role="status">
+              Hàng đợi đang tạm dừng
+            </span>
           )}
           <Button variant="ghost" disabled={bulkBusy} onClick={() => setPurgeOpen(true)}>
             <Eraser size={14} aria-hidden="true" />

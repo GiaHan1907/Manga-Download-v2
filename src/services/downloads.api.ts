@@ -22,6 +22,8 @@ export interface DownloadManagerService {
   clearHistory(args: { statuses?: string[]; olderThanDays?: number }): Promise<ClearHistoryDto>;
   retryAllFailed(): Promise<number>;
   cancelForManga(mangaId: string): Promise<number>;
+  setQueuePaused(paused: boolean): Promise<number>;
+  getQueuePaused(): Promise<boolean>;
   subscribe(handler: (event: DownloadTaskEvent) => void): Promise<UnlistenFn>;
 }
 
@@ -72,5 +74,7 @@ export const downloadsApi: DownloadManagerService = {
   clearHistory: (args) => desktop.clearDownloadHistory(args).catch(rethrow),
   retryAllFailed: () => desktop.retryAllFailedDownloads().catch(rethrow),
   cancelForManga: (mangaId) => desktop.cancelDownloadsForManga(mangaId).catch(rethrow),
+  setQueuePaused: (paused) => desktop.setDownloadQueuePaused(paused).catch(rethrow),
+  getQueuePaused: () => desktop.getDownloadQueuePaused().catch(rethrow),
   subscribe: (handler) => desktop.subscribeDownloadTask(handler),
 };

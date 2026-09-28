@@ -248,6 +248,24 @@ pub async fn retry_download(
     state.downloads.retry(&task_id).await
 }
 
+/// Global queue gate. `paused = true` stops new dispatches and cooperatively
+/// pauses every live worker plus queued tasks; `false` requeues and resumes.
+/// Returns the number of tasks whose persisted status row moved.
+#[tauri::command]
+pub async fn set_download_queue_paused(
+    paused: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<u32, AppError> {
+    state.downloads.set_queue_paused(paused).await
+}
+
+#[tauri::command]
+pub async fn get_download_queue_paused(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, AppError> {
+    Ok(state.downloads.is_queue_paused())
+}
+
 #[tauri::command]
 pub async fn set_download_priority(
     task_id: String,
