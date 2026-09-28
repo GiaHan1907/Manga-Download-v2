@@ -307,8 +307,8 @@ describe("T05 Library truthfulness (round-1 finding)", () => {
     });
     renderAt("/library");
     // Saved metadata with zero downloaded chapters must NOT look downloaded.
-    expect(await screen.findByText("Chưa tải chương nào")).toBeDefined();
-    expect(screen.getByText("0/2 chương offline · không rõ tác giả")).toBeDefined();
+    expect(await screen.findByText("0/2 chương offline · không rõ tác giả")).toBeDefined();
+    expect(screen.queryByText(/đã có file|chương offline \d/)).toBeNull();
   });
 });
 

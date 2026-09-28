@@ -1,10 +1,9 @@
-import { Star } from "lucide-react";
+import { BellRing, ArrowRight, LayoutGrid, RefreshCw, Rows3, Star } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
-import Input from "../../components/ui/Input";
 import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
@@ -122,39 +121,47 @@ export default function LibraryPage() {
 
   return (
     <div className="page-stack">
-      <div className="section-header">
-        <Input
-          label="Tìm theo tên/tác giả"
+      <div className="library-toolbar" role="toolbar" aria-label="Điều khiển thư viện">
+        <input
+          className="input library-toolbar__search"
           type="search"
+          placeholder="Tìm theo tên hoặc tác giả…"
+          aria-label="Tìm theo tên/tác giả"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
             setOffset(0);
           }}
         />
-      </div>
-
-      <div className="library-toolbar" role="toolbar" aria-label="Điều khiển thư viện">
+        <div className="chip-row" role="group" aria-label="Lọc">
+          {FILTERS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={option.id === filter ? "filter-chip filter-chip--active" : "filter-chip"}
+              aria-pressed={option.id === filter}
+              onClick={() => {
+                setFilter(option.id);
+                setOffset(0);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <label className="library-field">
           <span className="muted">Sắp xếp</span>
-          <select value={sort} onChange={(event) => { setSort(event.target.value as LibrarySort); setOffset(0); }}>
+          <select className="input" value={sort} onChange={(event) => { setSort(event.target.value as LibrarySort); setOffset(0); }}>
             {SORTS.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
           </select>
         </label>
-        <label className="library-field">
-          <span className="muted">Lọc</span>
-          <select value={filter} onChange={(event) => { setFilter(event.target.value as LibraryFilter); setOffset(0); }}>
-            {FILTERS.map((option) => (
-              <option key={option.id} value={option.id}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <Button variant="ghost" onClick={toggleView} aria-label="Đổi dạng lưới/danh sách">
-          {view === "grid" ? "Dạng danh sách" : "Dạng lưới"}
+        <Button variant="ghost" iconOnly onClick={toggleView} aria-label="Đổi dạng lưới/danh sách">
+          {view === "grid" ? <Rows3 size={16} aria-hidden="true" /> : <LayoutGrid size={16} aria-hidden="true" />}
         </Button>
         <Button variant="ghost" onClick={() => void runReconcile()}>
+          <RefreshCw size={14} aria-hidden="true" />
           Kiểm tra file
         </Button>
         <Button
@@ -178,6 +185,7 @@ export default function LibraryPage() {
               });
           }}
         >
+          <BellRing size={14} aria-hidden="true" />
           Kiểm tra chương mới
         </Button>
         <span className="muted library-count">
@@ -300,15 +308,11 @@ function LibraryEntry({
       ) : (
         card
       )}
-      <p className="muted library-item__offline">
-        {manga.hasMissing ? (
+      {manga.hasMissing && (
+        <p className="library-item__offline">
           <StatusBadge tone="error">Có file đã mất — cần tải lại</StatusBadge>
-        ) : manga.downloadedChapters > 0 ? (
-          <StatusBadge tone="success">{`${manga.downloadedChapters} chương offline`}</StatusBadge>
-        ) : (
-          <StatusBadge tone="neutral">Chưa tải chương nào</StatusBadge>
-        )}
-      </p>
+        </p>
+      )}
       {manga.progress && (
         <p className="muted library-item__progress" role="status">
           Đang đọc · {pct}%
@@ -317,15 +321,15 @@ function LibraryEntry({
       <div className="library-item__actions">
         <Button
           variant={manga.favorite ? "primary" : "ghost"}
+          iconOnly
           aria-pressed={manga.favorite}
           aria-label={`${manga.favorite ? "Bỏ yêu thích" : "Yêu thích"} ${manga.title}`}
           onClick={onToggleFavorite}
         >
-          <Star size={14} aria-hidden="true" />
-          {manga.favorite ? "Đang yêu thích" : "Yêu thích"}
+          <Star size={15} aria-hidden="true" />
         </Button>
-        <Button to={`/library/${manga.id}`} variant="secondary" aria-label={`Mở ${manga.title}`}>
-          Mở
+        <Button to={`/library/${manga.id}`} variant="ghost" iconOnly aria-label={`Mở ${manga.title}`}>
+          <ArrowRight size={15} aria-hidden="true" />
         </Button>
       </div>
     </div>
