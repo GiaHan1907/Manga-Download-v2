@@ -54,7 +54,7 @@ export default function FavoritesPage() {
       {favorites.state === "success" && favorites.data.items.length === 0 && (
         <EmptyState
           title={offset > 0 ? "Trang này không còn bản ghi" : "Chưa có mục yêu thích local"}
-          description="Bật ★ trong Library khi database đã có manga đăng ký (Phase 05)."
+          description="Bật ★ trong Thư viện để thêm truyện vào đây."
           action={<Button to="/library" variant="secondary">Tới Library</Button>}
         />
       )}
