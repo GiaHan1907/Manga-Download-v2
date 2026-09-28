@@ -1,7 +1,7 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { libraryReconcile, normalizeIpcError, revealDownload, watchRunNow } from "../../shared/api/desktop";
+import { libraryReconcile, normalizeIpcError, queueChapterDownloadByUrl, revealDownload, watchRunNow } from "../../shared/api/desktop";
 import { pushToast } from "../../components/ui/toastStore";
 import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
@@ -13,7 +13,8 @@ const RESULT_LIMIT = 6;
 type Item =
   | { kind: "action"; id: string; label: string; path?: string; run?: () => void }
   | { kind: "manga"; id: string; manga: LibraryMangaDto }
-  | { kind: "online"; id: string; query: string };
+  | { kind: "online"; id: string; query: string }
+  | { kind: "queue-url"; id: string; url: string };
 
 type ActionItem = { kind: "action"; id: string; label: string; path?: string; run?: () => void };
 
@@ -196,6 +197,9 @@ export default function CommandPalette() {
     }));
     const lower = trimmed.toLowerCase();
     const actions = ACTIONS.filter((item) => item.label.toLowerCase().includes(lower));
+    if (/^https?:\/\//i.test(trimmed)) {
+      return [{ kind: "queue-url", id: "queue-url", url: trimmed }, ...mangaItems, ...actions];
+    }
     const online: Item[] = [{ kind: "online", id: "online", query: trimmed }];
     return [...mangaItems, ...online, ...actions];
   }, [trimmed, manga]);
@@ -214,6 +218,20 @@ export default function CommandPalette() {
       }
     } else if (item.kind === "manga") {
       navigate(`/library/${item.manga.id}`);
+    } else if (item.kind === "queue-url") {
+      void queueChapterDownloadByUrl({ url: item.url })
+        .then((result) => {
+          pushToast(
+            result.tasks.length > 0
+              ? `Đã xếp hàng ${result.tasks.length} chương từ link.`
+              : result.reused.length > 0
+                ? "Chương này đã có trong hàng đợi."
+                : "Không tạo được tác vụ nào — kiểm tra lại link.",
+          );
+          bumpDomain("downloads");
+          bumpDomain("library");
+        })
+        .catch((error: unknown) => pushToast(normalizeIpcError(error).message));
     } else {
       navigate(`/discover?q=${encodeURIComponent(item.query)}`);
     }
@@ -300,6 +318,9 @@ export default function CommandPalette() {
               )}
               {item.kind === "online" && (
                 <span>Tìm online “{item.query}” trong Discover</span>
+              )}
+              {item.kind === "queue-url" && (
+                <span>Tải chương từ link: {item.url}</span>
               )}
             </li>
           ))}

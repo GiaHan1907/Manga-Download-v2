@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
@@ -60,12 +60,39 @@ type MoreState = {
 
 const EMPTY_MORE: MoreState = { key: "", pages: [], loading: false, error: null };
 
+/// Remembered across screen switches: query + source filter only (page 1 is
+/// always refetched fresh). Deep links via ?q= win over the stored value.
+const RESTORE_KEY = "m1989.discover.search.v1";
+
+function readStoredSearch(): { query: string; selected: string[] } | null {
+  try {
+    const raw = sessionStorage.getItem(RESTORE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const { query, selected } = parsed as { query?: unknown; selected?: unknown };
+    if (typeof query !== "string" || !Array.isArray(selected)) return null;
+    return { query, selected: selected.filter((x): x is string => typeof x === "string") };
+  } catch {
+    return null;
+  }
+}
+
 export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: string }) {
-  const [query, setQuery] = useState(initialQuery);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [stored] = useState(() => (initialQuery ? null : readStoredSearch()));
+  const [query, setQuery] = useState(initialQuery || stored?.query || "");
+  const [selected, setSelected] = useState<string[]>(stored?.selected ?? []);
   const [reload, setReload] = useState(0);
   const sourcesVersion = useDomainVersion("sources");
   const debounced = useDebouncedValue(query.trim(), 300);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(RESTORE_KEY, JSON.stringify({ query: debounced, selected }));
+    } catch {
+      /* private-mode quota — memory aid, not function-critical */
+    }
+  }, [debounced, selected]);
 
   const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [
     reload,

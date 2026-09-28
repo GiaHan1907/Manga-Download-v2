@@ -49,3 +49,33 @@ pub async fn library_import_cbz(
     .await?;
     Ok(Some(dto))
 }
+
+/// Drag-and-drop variant: the path comes from the webview's native drop
+/// event relayed by the renderer, so it is NOT dialog-produced. Guards:
+/// hard `.cbz` extension requirement, then the same untrusted-archive
+/// validation (traversal, zip-bomb, image-only, size cap) and canonical
+/// UUID-named copy as the dialog flow. Nothing but ids + metadata returns.
+#[tauri::command]
+pub async fn library_import_cbz_path(
+    manga_id: String,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ImportedChapterDto, AppError> {
+    let source = std::path::PathBuf::from(&path);
+    let is_cbz = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("cbz"));
+    if !is_cbz {
+        return Err(AppError::validation("Chỉ nhận tệp .cbz."));
+    }
+    import_service::import_cbz(
+        &state.db,
+        &state.app_data_dir,
+        &source,
+        &manga_id,
+        None,
+        None,
+    )
+    .await
+}

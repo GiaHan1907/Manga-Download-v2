@@ -162,6 +162,7 @@ pub fn run() {
             commands::library::library_remove_chapter,
             commands::library::library_remove_manga_files,
             commands::import::library_import_cbz,
+            commands::import::library_import_cbz_path,
             commands::reader::reader_open_chapter,
             commands::reader::reader_get_page_bytes,
             commands::storage::storage_status,

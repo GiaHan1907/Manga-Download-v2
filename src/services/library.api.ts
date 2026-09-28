@@ -27,6 +27,7 @@ export interface LibraryApi {
     chapterNumber?: number;
     chapterTitle?: string;
   }): Promise<ImportResultDto | null>;
+  importCbzPath(args: { mangaId: string; path: string }): Promise<ImportResultDto>;
   getWatch(mangaId: string): Promise<desktop.WatchStateDto>;
   setWatch(args: { mangaId: string; enabled: boolean | null }): Promise<void>;
   listAlerts(mangaId: string): Promise<desktop.ChapterAlertDto[]>;
@@ -51,6 +52,7 @@ export const libraryApi: LibraryApi = {
   removeChapter: (chapterId) => desktop.libraryRemoveChapter(chapterId).catch(rethrow),
   removeMangaFiles: (mangaId) => desktop.libraryRemoveMangaFiles(mangaId).catch(rethrow),
   importCbz: (args) => desktop.libraryImportCbz(args).catch(rethrow),
+  importCbzPath: (args) => desktop.libraryImportCbzPath(args).catch(rethrow),
   getWatch: (mangaId) => desktop.libraryGetWatch(mangaId).catch(rethrow),
   setWatch: (args) => desktop.librarySetWatch(args).catch(rethrow),
   listAlerts: (mangaId) => desktop.libraryListAlerts(mangaId).catch(rethrow),

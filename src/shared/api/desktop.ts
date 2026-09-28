@@ -319,6 +319,13 @@ export async function libraryImportCbz(args: {
   return invoke<ImportResultDto | null>("library_import_cbz", args);
 }
 
+/// Drag-and-drop companion of `libraryImportCbz`: the path arrives from the
+/// webview's NATIVE drop event; Rust hard-requires the `.cbz` extension and
+/// runs the same untrusted-archive validation. Metadata only crosses back.
+export async function libraryImportCbzPath(args: { mangaId: string; path: string }): Promise<ImportResultDto> {
+  return invoke<ImportResultDto>("library_import_cbz_path", args);
+}
+
 export async function readerOpenChapter(chapterId: string): Promise<ReaderManifestDto> {
   return invoke<ReaderManifestDto>("reader_open_chapter", { chapterId });
 }

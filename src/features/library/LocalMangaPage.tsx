@@ -1,5 +1,5 @@
 import { Download, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Button from "../../components/ui/Button";
 import Input from "../../components/ui/Input";
@@ -42,6 +42,62 @@ export default function LocalMangaPage() {
   const [downloadedQuery, setDownloadedQuery] = useState("");
   const [queueQuery, setQueueQuery] = useState("");
   const [chapterLimit, setChapterLimit] = useState(CHAPTER_PAGE);
+  const [dropActive, setDropActive] = useState(false);
+  const importBusyRef = useRef(false);
+
+  const importCbzPath = async (path: string) => {
+    if (importBusyRef.current) {
+      return;
+    }
+    importBusyRef.current = true;
+    setImportBusy(true);
+    setActionError(null);
+    try {
+      const result = await localServices.libraryV2.importCbzPath({ mangaId, path });
+      pushToast(`Đã nhập “${result.title}” · ${result.pageCount} trang.`);
+      bumpDomain("library");
+      bumpDomain("home");
+      setNonce((value) => value + 1);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Nhập CBZ thất bại.");
+    } finally {
+      importBusyRef.current = false;
+      setImportBusy(false);
+    }
+  };
+
+  // Drag-and-drop import. Guarded so jsdom tests (no Tauri host) skip it.
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+    let alive = true;
+    let unlisten: (() => void) | null = null;
+    void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
+      getCurrentWebview().onDragDropEvent((event) => {
+        if (!alive) return;
+        if (event.payload.type === "enter") {
+          setDropActive(event.payload.paths.some((p) => p.toLowerCase().endsWith(".cbz")));
+        } else if (event.payload.type === "leave") {
+          setDropActive(false);
+        } else if (event.payload.type === "drop") {
+          setDropActive(false);
+          const file = event.payload.paths.find((p) => p.toLowerCase().endsWith(".cbz"));
+          if (file) void importCbzPath(file);
+        }
+      }),
+    ).then((fn) => {
+      if (alive) unlisten = fn;
+      else fn();
+    });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mangaId]);
+
+
   const libraryVersion = useDomainVersion("library");
   const downloadsVersion = useDomainVersion("downloads");
 
@@ -682,6 +738,12 @@ Nguồn này chỉ đọc được metadata — không hỗ trợ tải trang.
         )}
         <p className="muted">Định dạng xuất theo Settings → Output (mặc định CBZ).</p>
       </section>
+
+      {dropActive && (
+        <div className="drop-overlay" role="status">
+          Thả tệp .cbz vào đây để nhập chương
+        </div>
+      )}
     </div>
   );
 }

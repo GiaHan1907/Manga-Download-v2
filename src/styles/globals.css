@@ -1738,6 +1738,34 @@ button {
   margin-left: auto;
 }
 
+/* Chips stay one horizontally scrollable row so the toolbar never
+   breaks into 3 lines on narrow windows. */
+.library-toolbar .chip-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  max-width: 100%;
+}
+
+.library-row:hover,
+.download-card:hover {
+  border-color: var(--border-strong);
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: var(--titlebar-height) var(--space-4) var(--space-4);
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--primary);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--accent-soft) 70%, transparent);
+  color: var(--accent-text);
+  font-weight: 700;
+  pointer-events: none;
+}
+
 /* ---------- Phase 07 Home Continue Reading (local) ---------- */
 .continue-local {
   list-style: none;
