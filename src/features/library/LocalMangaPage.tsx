@@ -23,6 +23,8 @@ import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 
+const CHAPTER_PAGE = 100;
+
 export default function LocalMangaPage() {
   const { mangaId = "" } = useParams();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -39,6 +41,7 @@ export default function LocalMangaPage() {
   const [importBusy, setImportBusy] = useState(false);
   const [downloadedQuery, setDownloadedQuery] = useState("");
   const [queueQuery, setQueueQuery] = useState("");
+  const [chapterLimit, setChapterLimit] = useState(CHAPTER_PAGE);
   const libraryVersion = useDomainVersion("library");
   const downloadsVersion = useDomainVersion("downloads");
 
@@ -121,6 +124,7 @@ export default function LocalMangaPage() {
   const visibleActionable = queueQuery.trim()
     ? actionable.filter((chapter) => matchesQuery(`${chapter.title} ${chapter.number ?? ""}`, queueQuery))
     : actionable;
+  const shownActionable = visibleActionable.slice(0, chapterLimit);
   const visibleDownloaded =
     downloaded.state === "success"
       ? downloaded.data.filter((chapter) =>
@@ -266,7 +270,7 @@ export default function LocalMangaPage() {
               src={coverUrl}
               alt={`Ảnh bìa ${detail.title}`}
               width={110}
-              style={{ borderRadius: 8, objectFit: "cover", alignSelf: "flex-start" }}
+              className="local-manga__cover"
             />
           )}
           <div>
@@ -536,7 +540,10 @@ export default function LocalMangaPage() {
               type="search"
               placeholder="Tên hoặc số chương (bỏ dấu vẫn khớp)…"
               value={queueQuery}
-              onChange={(event) => setQueueQuery(event.target.value)}
+              onChange={(event) => {
+                setQueueQuery(event.target.value);
+                setChapterLimit(CHAPTER_PAGE);
+              }}
             />
             <Button variant="ghost" onClick={() => toggleAll(true)} disabled={!canDownload}>
               Chọn tất cả
@@ -642,8 +649,9 @@ Nguồn này chỉ đọc được metadata — không hỗ trợ tải trang.
         ) : visibleActionable.length === 0 ? (
           <p className="muted">Không chương nào khớp bộ lọc “{queueQuery}”.</p>
         ) : (
+          <>
           <ul className="chapter-select-list">
-            {visibleActionable.map((chapter) => (
+            {shownActionable.map((chapter) => (
               <li key={chapter.id} className="chapter-select-row">
                 <input
                   id={`chapter-${chapter.id}`}
@@ -663,6 +671,14 @@ Nguồn này chỉ đọc được metadata — không hỗ trợ tải trang.
               </li>
             ))}
           </ul>
+          {visibleActionable.length > shownActionable.length && (
+            <div className="settings-actions">
+              <Button variant="secondary" onClick={() => setChapterLimit((n) => n + CHAPTER_PAGE)}>
+                Hiện thêm (còn {visibleActionable.length - shownActionable.length})
+              </Button>
+            </div>
+          )}
+          </>
         )}
         <p className="muted">Định dạng xuất theo Settings → Output (mặc định CBZ).</p>
       </section>

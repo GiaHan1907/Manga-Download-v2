@@ -21,7 +21,7 @@ export default function MangaCard({ title, subtitle, status = "Mẫu giao diện
       <div className="manga-card__body">
         <h3 className="manga-card__title">{title}</h3>
         <p className="manga-card__meta">{subtitle}</p>
-        <div style={{ marginTop: "var(--space-3)" }}>
+        <div className="manga-card__footer">
           {(alertCount ?? 0) > 0 ? (
             <span className="manga-card__alert" role="status">
               {alertCount} chương mới

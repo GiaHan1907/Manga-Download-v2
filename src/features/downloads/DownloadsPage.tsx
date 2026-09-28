@@ -231,7 +231,7 @@ export default function DownloadsPage() {
             Mở thư mục tải
           </Button>
         </div>
-        <div className="discover-controls" style={{ marginTop: "var(--space-3)" }}>
+        <div className="discover-controls block-spaced">
           <input
             className="input-field"
             type="url"
@@ -384,7 +384,7 @@ export default function DownloadsPage() {
             </label>
           ))}
         </div>
-        <label className="input-field" style={{ marginTop: "var(--space-3)" }}>
+        <label className="input-field block-spaced">
           Cũ hơn
           <select
             className="input-field"

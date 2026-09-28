@@ -1,7 +1,9 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { normalizeIpcError } from "../../shared/api/desktop";
+import { libraryReconcile, normalizeIpcError, revealDownload, watchRunNow } from "../../shared/api/desktop";
+import { pushToast } from "../../components/ui/toastStore";
+import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
 import { libraryApi } from "../../services/library.api";
 import type { LibraryMangaDto } from "../../types/library";
@@ -9,11 +11,11 @@ import type { LibraryMangaDto } from "../../types/library";
 const RESULT_LIMIT = 6;
 
 type Item =
-  | { kind: "action"; id: string; label: string; path: string }
+  | { kind: "action"; id: string; label: string; path?: string; run?: () => void }
   | { kind: "manga"; id: string; manga: LibraryMangaDto }
   | { kind: "online"; id: string; query: string };
 
-type ActionItem = { kind: "action"; id: string; label: string; path: string };
+type ActionItem = { kind: "action"; id: string; label: string; path?: string; run?: () => void };
 
 const ACTIONS: ActionItem[] = [
   { kind: "action", id: "a-home", label: "Trang chủ", path: "/" },
@@ -23,6 +25,54 @@ const ACTIONS: ActionItem[] = [
   { kind: "action", id: "a-downloads", label: "Tải truyện", path: "/downloads" },
   { kind: "action", id: "a-settings", label: "Cài đặt", path: "/settings" },
   { kind: "action", id: "a-sources", label: "Nguồn", path: "/settings/sources" },
+  {
+    kind: "action",
+    id: "r-watch",
+    label: "Kiểm tra chương mới",
+    run: () => {
+      void watchRunNow()
+        .then((report) => {
+          pushToast(
+            report.alertedChapters > 0
+              ? `${report.alertedChapters} chương mới từ ${report.checked} truyện.`
+              : `Đã kiểm tra ${report.checked} truyện — không có chương mới.`,
+          );
+          bumpDomain("library");
+          bumpDomain("home");
+        })
+        .catch((error: unknown) => {
+          const normalized = normalizeIpcError(error);
+          pushToast(
+            normalized.code === "DB_CONFLICT"
+              ? "Vừa kiểm tra xong — chờ ~1 phút rồi thử lại."
+              : normalized.message,
+          );
+        });
+    },
+  },
+  {
+    kind: "action",
+    id: "r-reconcile",
+    label: "Kiểm tra file thư viện",
+    run: () => {
+      void libraryReconcile()
+        .then((report) => {
+          pushToast(
+            `Kiểm tra ${report.checked} file: ${report.healthy} ổn, ${report.missing} thiếu, ${report.corrupted} lỗi.`,
+          );
+          bumpDomain("library");
+        })
+        .catch((error: unknown) => pushToast(normalizeIpcError(error).message));
+    },
+  },
+  {
+    kind: "action",
+    id: "r-reveal",
+    label: "Mở nơi tải về",
+    run: () => {
+      void revealDownload({}).catch((error: unknown) => pushToast(normalizeIpcError(error).message));
+    },
+  },
 ];
 
 export const OPEN_PALETTE_EVENT = "open-command-palette";
@@ -157,7 +207,11 @@ export default function CommandPalette() {
   function choose(item: Item) {
     closePalette();
     if (item.kind === "action") {
-      navigate(item.path);
+      if (item.run) {
+        item.run();
+      } else if (item.path) {
+        navigate(item.path);
+      }
     } else if (item.kind === "manga") {
       navigate(`/library/${item.manga.id}`);
     } else {

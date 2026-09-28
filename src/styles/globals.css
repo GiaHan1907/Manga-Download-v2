@@ -1709,6 +1709,31 @@ button {
   align-items: center;
   flex-wrap: wrap;
 }
+.manga-card__footer {
+  margin-top: var(--space-3);
+}
+
+.remote-preview__row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+.remote-preview__cover {
+  border-radius: var(--radius-md);
+  object-fit: cover;
+}
+
+.local-manga__cover {
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  align-self: flex-start;
+}
+
+.block-spaced {
+  margin-top: var(--space-3);
+}
+
 .library-count {
   margin-left: auto;
 }

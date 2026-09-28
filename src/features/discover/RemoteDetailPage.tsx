@@ -83,13 +83,13 @@ export default function RemoteDetailPage() {
 
   return (
     <div className="page-stack">
-      <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start" }}>
+      <div className="remote-preview__row">
         {coverUrl && (
           <img
             src={coverUrl}
             alt={`Ảnh bìa ${manga.title}`}
             width={160}
-            style={{ borderRadius: 8, objectFit: "cover" }}
+            className="remote-preview__cover"
           />
         )}
         <div>
