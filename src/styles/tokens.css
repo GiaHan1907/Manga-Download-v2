@@ -1,27 +1,40 @@
-:root {
-  color-scheme: dark;
+/* Paper & Ink — single theme (design source: truyen.html, 2026-09-25).
+   Calm, literate: paper background, ink-blue accent, serif headlines,
+   thin rules, no shadows. Variable names kept from the Dark Purple era so
+   components resolve unchanged; new roles (serif, soft tints) added below. */
+@import "./fonts.css";
 
-  --background: #101016;
-  --sidebar: #171720;
-  --surface: #20202C;
-  --elevated: #292938;
-  --primary: #A78BFA;
-  --primary-hover: #8B5CF6;
-  --text-primary: #F5F3FF;
-  --text-muted: #A1A1B5;
-  --success: #34D399;
-  --warning: #FBBF24;
-  --error: #F87171;
+:root {
+  color-scheme: light;
+
+  --background: #fafaf8;
+  --sidebar: #fafaf8;
+  --surface: #f1f1ec;
+  --elevated: #dcdcd5;
+  --primary: #1d3f8f;
+  --primary-hover: #34549b;
+  --text-primary: #1b1c1e;
+  --text-muted: #5b5e66;
+  --success: #1f7a4d;
+  --warning: #956009;
+  --error: #b42318;
 
   --foreground: var(--text-primary);
   --muted-foreground: var(--text-muted);
   --surface-foreground: var(--text-primary);
-  --primary-foreground: #181225;
-  --border: rgba(245, 243, 255, 0.1);
-  --border-strong: rgba(245, 243, 255, 0.18);
-  --focus-ring: rgba(167, 139, 250, 0.58);
-  --overlay: rgba(6, 6, 12, 0.72);
-  --selection: rgba(167, 139, 250, 0.35);
+  --primary-foreground: #ffffff;
+  --border: #dcdcd5;
+  --border-strong: #c6c6bc;
+  --border-subtle: #e6e6e0;
+  --focus-ring: rgba(29, 63, 143, 0.55);
+  --overlay: rgba(27, 28, 30, 0.45);
+  --selection: #e2ecfe;
+
+  /* paper-ink extras */
+  --accent-soft: #e2ecfe;
+  --accent-text: #1d3f8f;
+  --accent-deepest: #172b57; /* cover placeholder / feature art ground */
+  --font-serif: Newsreader, Georgia, "Times New Roman", serif;
 
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-size-xs: 0.75rem;
@@ -38,17 +51,17 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
 
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.625rem;
   --radius-pill: 999px;
 
   --titlebar-height: 3rem;
   --sidebar-width: 15rem;
   --sidebar-collapsed-width: 4.5rem;
   --content-max-width: 80rem;
-  --transition-fast: 150ms ease;
-  --transition-base: 220ms ease;
+  --transition-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-base: 200ms cubic-bezier(0.2, 0, 0, 1);
 
   --color-background: var(--background);
   --color-sidebar: var(--sidebar);

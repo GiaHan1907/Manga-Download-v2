@@ -41,6 +41,17 @@ select {
   font: inherit;
 }
 
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
 button {
   border: 0;
 }
@@ -72,9 +83,7 @@ button {
 
 .app-shell {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 20% 0%, rgba(167, 139, 250, 0.13), transparent 32rem),
-    var(--background);
+  background: var(--background);
   color: var(--foreground);
   overflow: hidden;
 }
@@ -85,7 +94,7 @@ button {
   align-items: center;
   height: var(--titlebar-height);
   border-bottom: 1px solid var(--border);
-  background: rgba(16, 16, 22, 0.92);
+  background: var(--background);
   user-select: none;
 }
 
@@ -103,10 +112,13 @@ button {
   width: 1.75rem;
   height: 1.75rem;
   place-items: center;
-  border-radius: 0.6rem;
-  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
-  color: var(--primary-foreground);
-  font-weight: 800;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--primary);
+  background: transparent;
+  color: var(--accent-text);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
 }
 
 .window-titlebar__text {
@@ -170,7 +182,7 @@ button {
   flex-direction: column;
   gap: var(--space-4);
   border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--sidebar) 94%, black);
+  background: var(--background);
   padding: var(--space-4) var(--space-3);
 }
 
@@ -211,12 +223,12 @@ button {
 .sidebar__link:hover,
 .sidebar__link:focus-visible {
   background: var(--surface);
-  color: var(--foreground);
+  color: var(--accent-text);
 }
 
 .sidebar__link--active {
-  background: rgba(167, 139, 250, 0.16);
-  color: var(--foreground);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .sidebar__link--active::before {
@@ -263,14 +275,15 @@ button {
   gap: var(--space-4);
   min-height: 4.5rem;
   border-bottom: 1px solid var(--border);
-  background: rgba(16, 16, 22, 0.72);
+  background: var(--background);
   padding: var(--space-4) var(--space-6);
 }
 
 .topbar__title {
   overflow: hidden;
+  font-family: var(--font-serif);
   font-size: var(--font-size-xl);
-  font-weight: 760;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -370,23 +383,23 @@ button {
 
 .button--secondary {
   border-color: var(--border);
-  background: var(--elevated);
+  background: transparent;
   color: var(--foreground);
 }
 
 .button--secondary:hover:not(:disabled) {
   border-color: var(--border-strong);
-  background: color-mix(in srgb, var(--elevated) 84%, var(--primary));
+  background: var(--surface);
 }
 
 .button--ghost {
   background: transparent;
-  color: var(--muted-foreground);
+  color: var(--accent-text);
 }
 
 .button--ghost:hover:not(:disabled) {
-  background: var(--surface);
-  color: var(--foreground);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .button--icon {
@@ -419,6 +432,12 @@ button {
   color: var(--muted-foreground);
 }
 
+.input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .input:disabled {
   opacity: 0.55;
 }
@@ -437,8 +456,8 @@ button {
   width: min(100%, 30rem);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  background: var(--elevated);
-  box-shadow: 0 1.25rem 4rem rgba(0, 0, 0, 0.35);
+  background: var(--background);
+  box-shadow: 0 1.25rem 4rem rgba(27, 28, 30, 0.18);
 }
 
 .dialog__header,
@@ -522,7 +541,7 @@ button {
 .progress__bar {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--primary), var(--success));
+  background: var(--primary);
   transition: width var(--transition-base);
 }
 
@@ -537,22 +556,22 @@ button {
 }
 
 .status-badge--success {
-  background: rgba(52, 211, 153, 0.14);
+  background: color-mix(in oklab, var(--success) 10%, var(--background));
   color: var(--success);
 }
 
 .status-badge--warning {
-  background: rgba(251, 191, 36, 0.14);
+  background: color-mix(in oklab, var(--warning) 12%, var(--background));
   color: var(--warning);
 }
 
 .status-badge--error {
-  background: rgba(248, 113, 113, 0.14);
+  background: color-mix(in oklab, var(--error) 10%, var(--background));
   color: var(--error);
 }
 
 .status-badge--neutral {
-  background: rgba(161, 161, 181, 0.14);
+  background: var(--surface);
   color: var(--muted-foreground);
 }
 
@@ -605,7 +624,8 @@ button {
   display: grid;
   aspect-ratio: 2 / 3;
   place-items: center;
-  background: linear-gradient(135deg, var(--elevated), var(--sidebar));
+  background: var(--surface);
+  border: 1px solid var(--border);
   color: var(--muted-foreground);
 }
 
@@ -790,7 +810,7 @@ button {
 .chip {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--elevated);
+  background: var(--surface);
   color: var(--muted-foreground);
   font-size: var(--font-size-xs);
   padding: 0.2rem 0.6rem;
@@ -808,8 +828,8 @@ button {
 
 .filter-chip--active {
   border-color: var(--primary);
-  background: rgba(167, 139, 250, 0.16);
-  color: var(--foreground);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .discover-controls {
@@ -876,7 +896,8 @@ button {
   aspect-ratio: 2 / 3;
   border-radius: var(--radius-md);
   overflow: hidden;
-  background: linear-gradient(135deg, var(--elevated), var(--sidebar));
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
 .manga-hero__cover img {
@@ -983,7 +1004,7 @@ button {
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background: var(--surface-2);
+  background: var(--surface);
   display: grid;
   gap: var(--space-2);
 }
@@ -1006,7 +1027,7 @@ button {
   padding: var(--space-4);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--elevated);
+  background: var(--surface);
 }
 .continue-hero__cover {
   display: grid;
@@ -1016,7 +1037,7 @@ button {
   height: 132px;
   flex-shrink: 0;
   border-radius: var(--radius-sm);
-  background: linear-gradient(160deg, var(--primary), var(--primary-hover));
+  background: var(--primary);
   color: var(--primary-foreground);
   font-size: 2rem;
   font-weight: 700;
@@ -1117,10 +1138,10 @@ button {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: var(--elevated);
-  color: var(--text-primary);
+  background: var(--text-primary);
+  color: var(--background);
   font-size: var(--font-size-sm);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px rgba(27, 28, 30, 0.22);
 }
 @media (prefers-reduced-motion: reduce) {
   .toast {
@@ -1452,8 +1473,8 @@ button {
 
 /* ---------- Phase 07 offline reader ---------- */
 .reader-shell {
-  --reader-bg: #0b0713;
-  --reader-chrome-bg: rgba(17, 11, 28, 0.85);
+  --reader-bg: #fafaf8;
+  --reader-chrome-bg: rgba(250, 250, 248, 0.92);
   --reader-chrome-fg: var(--text-primary);
   position: fixed;
   inset: var(--titlebar-height, 40px) 0 0 0;
@@ -1529,8 +1550,9 @@ button {
   font-size: var(--font-size-sm);
 }
 .reader-tool--active {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--accent-text);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 .reader-tool:disabled {
   opacity: 0.4;
@@ -1588,7 +1610,7 @@ button {
 }
 .reader-spread .reader-page__img {
   max-height: 100%;
-  box-shadow: 0 0 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 12px rgba(27, 28, 30, 0.25);
 }
 .reader-page--empty {
   width: 40%;
@@ -1647,7 +1669,7 @@ button {
   padding: var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background: var(--surface-1, rgba(255, 255, 255, 0.02));
+  background: var(--surface);
 }
 .library-row__link {
   display: grid;
@@ -1710,7 +1732,7 @@ button {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg, 12px);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 18px 48px rgba(27, 28, 30, 0.18);
   overflow: hidden;
 }
 .palette__input-row {
