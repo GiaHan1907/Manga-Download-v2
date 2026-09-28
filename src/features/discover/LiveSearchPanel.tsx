@@ -249,9 +249,6 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           Không tải được trang tiếp theo ({more.error}) — bấm "Xem thêm" để thử lại.
         </p>
       )}
-      <p className="muted">
-        Kết quả là metadata từ xa — chưa có gì được lưu hay tải về. Mở một mục để xem trước chi tiết.
-      </p>
     </div>
   );
 }

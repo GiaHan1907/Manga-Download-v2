@@ -224,7 +224,7 @@ describe("T03-08/T04 Settings and Sources", () => {
     fireEvent.change(chapterInput, { target: { value: "4" } });
     const saveButton = screen.getByRole("button", { name: "Lưu thay đổi" });
     fireEvent.click(saveButton);
-    expect((await screen.findByRole("status")).textContent).toMatch(/Đã lưu vào SQLite/);
+    expect((await screen.findByRole("status")).textContent).toMatch(/Đã lưu/);
     await waitFor(() => expect(backend.settings.chapterConcurrency).toBe(4));
   });
 

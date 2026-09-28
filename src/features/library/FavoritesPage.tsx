@@ -5,7 +5,6 @@ import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
 import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
-import StatusBadge from "../../components/ui/StatusBadge";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
@@ -37,10 +36,6 @@ export default function FavoritesPage() {
 
   return (
     <div className="page-stack">
-      <p className="muted">
-        Favorites <StatusBadge tone="success">Local — SQLite</StatusBadge> · khác với ★ demo ở Manga
-        Detail (sandbox chỉ tồn tại ở bản dev).
-      </p>
 
       {favorites.state === "loading" && <Skeleton height="16rem" label="Đang tải danh sách yêu thích local" />}
 

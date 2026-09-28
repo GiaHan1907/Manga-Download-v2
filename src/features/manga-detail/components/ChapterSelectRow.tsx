@@ -4,6 +4,7 @@ import StatusBadge, { type StatusBadgeTone } from "../../../components/ui/Status
 import Tooltip from "../../../components/ui/Tooltip";
 import type { ChapterSummary } from "../../../domain/manga";
 import type { DownloadStatus } from "../../../domain/download";
+import { DOWNLOAD_STATUS_LABEL } from "../../../types/downloads";
 
 export type ChapterSelectRowProps = {
   chapter: ChapterSummary;
@@ -38,7 +39,7 @@ export default function ChapterSelectRow({ chapter, selected, onSelectChange, qu
         </span>
       </label>
       <div className="chapter-select-row__actions">
-        {queueStatus && <StatusBadge tone={statusTone[queueStatus]}>{`demo: ${queueStatus}`}</StatusBadge>}
+        {queueStatus && <StatusBadge tone={statusTone[queueStatus]}>{DOWNLOAD_STATUS_LABEL[queueStatus] ?? queueStatus}</StatusBadge>}
         {chapter.hasSamplePages ? (
           <Button to={`/reader/${chapter.mangaId}/${chapter.id}`} variant="secondary">
             <Play size={14} aria-hidden="true" />

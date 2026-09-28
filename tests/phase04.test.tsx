@@ -92,10 +92,9 @@ describe("T04-09/T04-10 local library states", () => {
     expect(await screen.findByText("Thư viện local đang trống")).toBeDefined();
   });
 
-  it("favorites page is local and truthful about the demo sandbox", async () => {
+  it("favorites page renders the local-only empty state", async () => {
     renderAt("/favorites");
     expect(await screen.findByText("Chưa có mục yêu thích local")).toBeDefined();
-    expect(screen.getByText(/khác với ★ demo ở Manga Detail/)).toBeDefined();
   });
 });
 

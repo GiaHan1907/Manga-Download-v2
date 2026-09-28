@@ -18,6 +18,7 @@ import {
   formatBytes,
   formatEtaSeconds,
   formatSpeed,
+  DOWNLOAD_STATUS_LABEL,
   isActiveStatus,
   progressPercent,
 } from "../../types/downloads";
@@ -29,23 +30,12 @@ const FILTERS: { id: FilterId; label: string; match: (s: DownloadTaskDto["status
   { id: "all", label: "Tất cả", match: () => true },
   { id: "active", label: "Đang chạy", match: (s) => isActiveStatus(s) },
   { id: "paused", label: "Tạm dừng", match: (s) => s === "paused" || s === "pausing" },
-  { id: "completed", label: "Hoàn tất", match: (s) => s === "completed" },
+  { id: "completed", label: "Hoàn thành", match: (s) => s === "completed" },
   { id: "failed", label: "Lỗi", match: (s) => s === "failed" },
   { id: "cancelled", label: "Đã hủy", match: (s) => s === "cancelled" },
 ];
 
-const statusLabel: Record<DownloadTaskDto["status"], string> = {
-  queued: "Trong hàng đợi",
-  resolving: "Đang phân giải",
-  downloading: "Đang tải",
-  pausing: "Đang dừng",
-  paused: "Tạm dừng",
-  verifying: "Đang kiểm tra",
-  exporting: "Đang đóng gói",
-  completed: "Hoàn tất",
-  failed: "Thất bại",
-  cancelled: "Đã hủy",
-};
+const statusLabel = DOWNLOAD_STATUS_LABEL;
 
 const statusTone: Record<DownloadTaskDto["status"], "success" | "warning" | "error" | "neutral"> = {
   queued: "warning",
@@ -88,7 +78,7 @@ function runAction(actions: ReturnType<typeof useDownloadQueue>["actions"], task
 }
 
 const PURGE_STATUS_LABELS: Record<string, string> = {
-  completed: "Hoàn tất",
+  completed: "Hoàn thành",
   failed: "Lỗi",
   cancelled: "Đã hủy",
 };

@@ -258,7 +258,7 @@ export default function LocalMangaPage() {
           )}
           <div>
             <p className="muted">
-              Library · Local (SQLite){" "}
+
               {canDownload ? (
                 <StatusBadge tone="success">Nguồn cho phép tải</StatusBadge>
               ) : (

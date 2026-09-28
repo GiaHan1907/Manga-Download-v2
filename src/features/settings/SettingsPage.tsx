@@ -51,7 +51,7 @@ function SettingsForm({ initial }: { initial: AppSettings }) {
     try {
       await services.settings.save(draft);
       bumpDomain("settings");
-      setFeedback("Đã lưu vào SQLite — giá trị giữ nguyên qua khởi động lại.");
+      setFeedback("Đã lưu.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Không thể lưu cài đặt.");
     }

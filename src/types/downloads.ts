@@ -6,6 +6,19 @@ import type { DownloadTaskDto } from "./backend";
 
 export type DownloadOutputFormat = "cbz" | "folder";
 
+export const DOWNLOAD_STATUS_LABEL: Record<DownloadTaskDto["status"], string> = {
+  queued: "Trong hàng đợi",
+  resolving: "Đang phân giải",
+  downloading: "Đang tải",
+  pausing: "Đang dừng",
+  paused: "Tạm dừng",
+  verifying: "Đang kiểm tra",
+  exporting: "Đang đóng gói",
+  completed: "Hoàn thành",
+  failed: "Thất bại",
+  cancelled: "Đã hủy",
+};
+
 export type QueueErrorDto = {
   chapterId: string;
   code: string;

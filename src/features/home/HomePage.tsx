@@ -10,7 +10,7 @@ import {
   normalizeIpcError,
 } from "../../shared/api/desktop";
 import type { DownloadTaskDto, LibraryStatsDto } from "../../types/backend";
-import { formatBytes } from "../../types/downloads";
+import { DOWNLOAD_STATUS_LABEL, formatBytes } from "../../types/downloads";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useDomainVersion } from "../../shared/hooks/useInvalidation";
 import LocalContinueReading from "./components/LocalContinueReading";
@@ -75,18 +75,16 @@ export default function HomePage() {
       </section>
 
       <section className="stats-grid" aria-label="Thống kê local">
-        <StatCard label="Truyện đã lưu" value={String(stats.data.savedMangas)} hint="SQLite — mangas" />
+        <StatCard label="Truyện đã lưu" value={String(stats.data.savedMangas)} />
         <StatCard
           label="Chương offline"
           value={String(stats.data.downloadedChapters)}
-          hint="Artifact đã kiểm chứng"
         />
         <StatCard
           label="Dung lượng thư viện"
           value={stats.data.localSizeBytes > 0 ? formatBytes(stats.data.localSizeBytes) : "0 B"}
-          hint="approximate — từ DB sizes"
         />
-        <StatCard label="Yêu thích" value={String(stats.data.favorites)} hint="SQLite — favorites" />
+        <StatCard label="Yêu thích" value={String(stats.data.favorites)} />
       </section>
 
       <section aria-label="Tác vụ tải gần đây">
@@ -120,7 +118,7 @@ export default function HomePage() {
                   </span>
                   <span className="muted home-rail__chapter">{task.chapterTitle ?? task.chapterId}</span>
                   <StatusBadge tone={STAT_TONE[task.status] ?? "warning"}>
-                    {task.status}
+                    {DOWNLOAD_STATUS_LABEL[task.status] ?? task.status}
                   </StatusBadge>
                   <span className="home-rail__bar" role="presentation">
                     <span style={{ width: `${pct}%` }} />
