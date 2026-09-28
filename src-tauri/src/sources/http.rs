@@ -45,13 +45,28 @@ pub trait Transport: Send + Sync {
 pub struct HttpPolicy {
     /// Exact hostnames this transport may contact (no suffix tricks).
     pub allowed_hosts: Vec<String>,
+    /// Registrable-domain allowlist for sharded CDNs (host == domain or a
+    /// strict subdomain passes). ONLY vetted app-shipped built-ins may set
+    /// this — user-registered sources always pass an empty list. Resolved
+    /// addresses still must be public and everything stays https.
+    pub allowed_domains: Vec<String>,
 }
 
 impl HttpPolicy {
     pub fn new(allowed_hosts: &[&str]) -> Self {
         HttpPolicy {
             allowed_hosts: allowed_hosts.iter().map(|host| host.to_string()).collect(),
+            allowed_domains: Vec::new(),
         }
+    }
+
+    fn host_allowed(&self, host: &str) -> bool {
+        if self.allowed_hosts.iter().any(|allowed| allowed == host) {
+            return true;
+        }
+        self.allowed_domains
+            .iter()
+            .any(|domain| host == domain.as_str() || host.ends_with(&format!(".{domain}")))
     }
 
     pub fn validate_request_url(&self, parsed: &Url) -> Result<(), SourceError> {
@@ -59,7 +74,7 @@ impl HttpPolicy {
             return Err(SourceError::MalformedUrl);
         }
         let host = parsed.host_str().ok_or(SourceError::MalformedUrl)?;
-        if !self.allowed_hosts.iter().any(|allowed| allowed == host) {
+        if !self.host_allowed(host) {
             return Err(SourceError::MalformedUrl);
         }
         if parsed.port().is_some() && parsed.port() != Some(443) {

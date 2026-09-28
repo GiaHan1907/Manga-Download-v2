@@ -1418,6 +1418,14 @@ button {
   flex-wrap: wrap;
 }
 
+.source-edit-form {
+  display: grid;
+  gap: var(--space-3);
+  flex-basis: 100%;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
 .source-errors {
   display: grid;
   gap: var(--space-2);

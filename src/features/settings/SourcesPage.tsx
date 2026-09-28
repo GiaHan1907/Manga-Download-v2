@@ -19,6 +19,21 @@ function RealSources() {
   const [imageHostsText, setImageHostsText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editHosts, setEditHosts] = useState("");
+
+  function startEdit(source: SourceViewDto) {
+    setEditingId(source.id);
+    setEditName(source.displayName);
+    setEditUrl(source.baseUrl ?? "");
+    setEditHosts(source.imageHosts ?? "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
 
   const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [reload]);
 
@@ -80,6 +95,15 @@ function RealSources() {
               {source.attribution && <p className="muted">{source.attribution}</p>}
             </div>
             <div className="chip-row">
+              {source.baseUrl && (
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => (editingId === source.id ? cancelEdit() : startEdit(source))}
+                >
+                  {editingId === source.id ? "Hủy sửa" : "Sửa"}
+                </Button>
+              )}
               <Button
                 variant={source.enabled ? "secondary" : "primary"}
                 disabled={busy}
@@ -113,6 +137,51 @@ function RealSources() {
                 </Button>
               )}
             </div>
+            {editingId === source.id && (
+            <div className="source-edit-form">
+              <Input
+                label="Tên hiển thị"
+                value={editName}
+                onChange={(event) => setEditName(event.target.value)}
+              />
+              <Input
+                label="Tên miền mới (HTTPS)"
+                value={editUrl}
+                placeholder="https://ten-mien-moi.vn/"
+                onChange={(event) => setEditUrl(event.target.value)}
+              />
+              <Input
+                label="Host ảnh phụ trợ (phân cách bằng dấu phẩy)"
+                value={editHosts}
+                onChange={(event) => setEditHosts(event.target.value)}
+              />
+              <div className="settings-actions">
+                <Button
+                  variant="primary"
+                  disabled={busy || editName.trim() === "" || editUrl.trim() === ""}
+                  onClick={() => {
+                    const hosts = editHosts
+                      .split(",")
+                      .map((entry) => entry.trim())
+                      .filter((entry) => entry !== "");
+                    void run(() =>
+                      localServices.source.updateSource({
+                        sourceId: source.id,
+                        displayName: editName.trim(),
+                        baseUrl: editUrl.trim(),
+                        imageHosts: hosts.length > 0 ? hosts : undefined,
+                      }),
+                    ).then(() => setEditingId(null));
+                  }}
+                >
+                  {busy ? "Đang lưu..." : "Lưu tên miền"}
+                </Button>
+                <Button variant="ghost" onClick={cancelEdit}>
+                  Hủy
+                </Button>
+              </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

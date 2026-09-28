@@ -116,6 +116,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::discovery::list_supported_sources,
             commands::discovery::add_manga_source,
+            commands::discovery::update_manga_source,
             commands::discovery::remove_manga_source,
             commands::discovery::set_source_enabled,
             commands::discovery::search_manga,

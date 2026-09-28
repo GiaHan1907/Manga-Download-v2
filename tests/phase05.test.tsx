@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppRoutes } from "../src/app/router";
 
@@ -112,6 +112,14 @@ beforeEach(() => {
           },
         ];
         return Promise.resolve(backend.sources[1]);
+      }
+      case "update_manga_source": {
+        backend.sources = backend.sources.map((source) =>
+          source.id === args?.sourceId
+            ? { ...source, displayName: String(args?.displayName), baseUrl: String(args?.baseUrl) }
+            : source,
+        );
+        return Promise.resolve(backend.sources.find((source) => source.id === args?.sourceId));
       }
       case "set_source_enabled":
         return Promise.resolve(Boolean(args?.enabled));
@@ -264,6 +272,24 @@ describe("T05 sources management", () => {
     expect(await screen.findByText("VD Site")).toBeDefined();
     const addCall = backend.calls.find(([cmd]) => cmd === "add_manga_source");
     expect(addCall?.[1]).toEqual({ displayName: "VD Site", baseUrl: "https://vd-site.com/" });
+  });
+
+  it("edits a built-in source domain through update_manga_source keeping its id", async () => {
+    renderAt("/settings/sources");
+    const heading = await screen.findByText("Truyen Tuoi Tho");
+    const row = heading.closest(".source-row") as HTMLElement;
+    fireEvent.click(row.querySelector("button") as Element);
+    const domainInput = screen.getByLabelText(/Tên miền mới/);
+    fireEvent.change(domainInput, { target: { value: "https://truyentuoitho.work/" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu tên miền" }));
+    await waitFor(() => {
+      const call = backend.calls.find(([cmd]) => cmd === "update_manga_source");
+      expect(call?.[1]).toMatchObject({
+        sourceId: "madara-truyentuoitho-com",
+        baseUrl: "https://truyentuoitho.work/",
+      });
+    });
+    expect(await screen.findByText("https://truyentuoitho.work/")).toBeDefined();
   });
 
   it("keeps the demo sandbox section separate from the real registry", async () => {

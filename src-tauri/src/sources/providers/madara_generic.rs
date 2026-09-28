@@ -21,12 +21,45 @@ use crate::sources::http::{
 /// Chapter images may legitimately live on a separate CDN host, but ONLY one
 /// the user explicitly registered per source (`image_hosts`) — the transport
 /// allowlist stays exact-host and fail-closed (no wildcards, no IPs, cap 4).
+/// Layout/selector profile for the shared HTML pipeline. `Madara` is the
+/// user-registration profile (WordPress/Madara theme conventions).
+/// `TruyenQQ` is an app-vetted built-in layout: manga live at root
+/// `/<slug>`, chapters at `/<slug>/chapter-<n>`, search at
+/// `/tim-kiem?s=`, images lazy-loaded from a sharded CDN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiteProfile {
+    Madara,
+    TruyenQQ,
+}
+
+/// TruyenQQ serves chapter images from rotating shards of this CDN domain.
+/// A domain (not exact-host) allowlist is only ever set by built-in code —
+/// user-registered sources keep the exact-host fail-closed policy.
+const TRUYENQQ_IMAGE_DOMAIN: &str = "cc3t.net";
+/// Site sections whose root-level paths are never manga slugs.
+const TRUYENQQ_RESERVED: &[&str] = &[
+    "tim-kiem",
+    "truyen-hot",
+    "the-loai",
+    "tac-gia",
+    "dang-nhap",
+    "dang-ky",
+    "doi-mat-kha",
+    "gioi-thieu",
+    "lien-he",
+    "bao-tai",
+    "lich-su",
+    "trang-thai",
+    "contact",
+];
+
 pub struct MadaraGeneric {
     id: String,
     display_name: String,
     host: String,
     base: Url,
     image_hosts: Vec<String>,
+    profile: SiteProfile,
     http: Arc<dyn Transport>,
 }
 
@@ -54,10 +87,45 @@ pub fn normalize_image_host(raw: &str) -> Option<String> {
 }
 
 impl MadaraGeneric {
+    /// User-registration entry point: identity is derived from the host.
     pub fn live(
         display_name: &str,
         base_url: &str,
         image_hosts: &[String],
+    ) -> Result<Self, SourceError> {
+        let derived = Url::parse(base_url.trim()).ok().and_then(|parsed| {
+            parsed
+                .host_str()
+                .map(|host| format!("madara-{}", host.replace('.', "-")))
+        });
+        let id = derived.ok_or(SourceError::MalformedUrl)?;
+        Self::with_profile(
+            &id,
+            display_name,
+            base_url,
+            image_hosts,
+            SiteProfile::Madara,
+        )
+    }
+
+    /// Built-in entry point: the id is app-fixed and STAYS STABLE when the
+    /// domain is edited later, so saved manga keep resolving to this source.
+    pub fn built_in(
+        id: &str,
+        display_name: &str,
+        base_url: &str,
+        image_hosts: &[String],
+        profile: SiteProfile,
+    ) -> Result<Self, SourceError> {
+        Self::with_profile(id, display_name, base_url, image_hosts, profile)
+    }
+
+    fn with_profile(
+        id: &str,
+        display_name: &str,
+        base_url: &str,
+        image_hosts: &[String],
+        profile: SiteProfile,
     ) -> Result<Self, SourceError> {
         let parsed = Url::parse(base_url.trim()).map_err(|_| SourceError::MalformedUrl)?;
         if parsed.scheme() != "https"
@@ -96,13 +164,24 @@ impl MadaraGeneric {
         base.set_fragment(None);
         let mut allowed_hosts = vec![host.clone()];
         allowed_hosts.extend(extras.iter().cloned());
+        let http = Arc::new(GuardedHttp::new(match profile {
+            SiteProfile::Madara => HttpPolicy {
+                allowed_hosts,
+                allowed_domains: Vec::new(),
+            },
+            SiteProfile::TruyenQQ => HttpPolicy {
+                allowed_hosts,
+                allowed_domains: vec![TRUYENQQ_IMAGE_DOMAIN.to_string()],
+            },
+        }));
         Ok(MadaraGeneric {
-            id: format!("madara-{}", host.replace('.', "-")),
+            id: id.to_string(),
             display_name: display_name.to_string(),
-            http: Arc::new(GuardedHttp::new(HttpPolicy { allowed_hosts })),
+            http,
             host,
             base,
             image_hosts: extras,
+            profile,
         })
     }
 
@@ -158,6 +237,33 @@ impl MadaraGeneric {
         http: Arc<dyn Transport>,
         image_hosts: &[String],
     ) -> Result<Self, SourceError> {
+        Self::with_transport_profile_and_hosts(
+            display_name,
+            base_url,
+            http,
+            image_hosts,
+            SiteProfile::Madara,
+        )
+    }
+
+    #[cfg(test)]
+    pub fn with_transport_profile(
+        display_name: &str,
+        base_url: &str,
+        http: Arc<dyn Transport>,
+        profile: SiteProfile,
+    ) -> Result<Self, SourceError> {
+        Self::with_transport_profile_and_hosts(display_name, base_url, http, &[], profile)
+    }
+
+    #[cfg(test)]
+    fn with_transport_profile_and_hosts(
+        display_name: &str,
+        base_url: &str,
+        http: Arc<dyn Transport>,
+        image_hosts: &[String],
+        profile: SiteProfile,
+    ) -> Result<Self, SourceError> {
         let parsed = Url::parse(base_url).map_err(|_| SourceError::MalformedUrl)?;
         let host = parsed
             .host_str()
@@ -165,18 +271,43 @@ impl MadaraGeneric {
             .to_lowercase();
         let mut base = parsed.clone();
         base.set_path("/");
+        let id = match profile {
+            SiteProfile::Madara => format!("madara-{}", host.replace('.', "-")),
+            SiteProfile::TruyenQQ => "truyenqq".to_string(),
+        };
         Ok(MadaraGeneric {
-            id: format!("madara-{}", host.replace('.', "-")),
+            id,
             display_name: display_name.to_string(),
             host,
             base,
             image_hosts: image_hosts.to_vec(),
+            profile,
             http,
         })
     }
 
     fn manga_url(&self, slug: &str) -> String {
-        format!("{}manga/{slug}/", self.base)
+        match self.profile {
+            SiteProfile::Madara => format!("{}manga/{slug}/", self.base),
+            SiteProfile::TruyenQQ => format!("{}{slug}", self.base),
+        }
+    }
+
+    fn chapter_url(&self, manga_slug: &str, chapter_slug: &str) -> String {
+        match self.profile {
+            SiteProfile::Madara => format!("{}manga/{}/{}/", self.base, manga_slug, chapter_slug),
+            SiteProfile::TruyenQQ => format!("{}{}/{}", self.base, manga_slug, chapter_slug),
+        }
+    }
+
+    /// Detail-page fetch URL. TruyenQQ ships ~70 latest chapters inline;
+    /// ANY `?page-chap=` request renders the FULL list (live-verified
+    /// 2026-09-28), so the built-in always asks for page 1.
+    fn detail_chapter_list_url(&self, slug: &str) -> String {
+        match self.profile {
+            SiteProfile::Madara => self.manga_url(slug),
+            SiteProfile::TruyenQQ => format!("{}{slug}?page-chap=1", self.base),
+        }
     }
 
     fn owns_host(&self, candidate: &str) -> bool {
@@ -196,10 +327,21 @@ impl MadaraGeneric {
         let mut segments = parsed
             .path_segments()?
             .filter(|segment| !segment.is_empty());
-        if segments.next()? != "manga" {
-            return None;
-        }
-        let slug = segments.next()?;
+        let slug = match self.profile {
+            SiteProfile::Madara => {
+                if segments.next()? != "manga" {
+                    return None;
+                }
+                segments.next()?
+            }
+            SiteProfile::TruyenQQ => {
+                let slug = segments.next()?;
+                if TRUYENQQ_RESERVED.contains(&slug) {
+                    return None;
+                }
+                slug
+            }
+        };
         // Deeper paths are chapter links, not manga identities.
         if segments.next().is_some() || !valid_slug(slug) {
             return None;
@@ -218,8 +360,17 @@ impl MadaraGeneric {
         let mut segments = parsed
             .path_segments()?
             .filter(|segment| !segment.is_empty());
-        if segments.next()? != "manga" || segments.next()? != manga_slug {
-            return None;
+        match self.profile {
+            SiteProfile::Madara => {
+                if segments.next()? != "manga" || segments.next()? != manga_slug {
+                    return None;
+                }
+            }
+            SiteProfile::TruyenQQ => {
+                if segments.next()? != manga_slug {
+                    return None;
+                }
+            }
         }
         let chapter = segments.next()?;
         if segments.next().is_some() || !valid_slug(chapter) {
@@ -284,9 +435,14 @@ impl MadaraGeneric {
     /// same-manga, same-host slugs survive — sidebar/related links for other
     /// series are filtered out by `chapter_slug_from_url`.
     fn parse_chapter_nodes(&self, document: &Html, source_manga_id: &str) -> Vec<RemoteChapter> {
-        let chapters_selector = Selector::parse(
-            "ul.main.version-chap a[href], li.wp-manga-chapter a[href], div.chapter-item a[href]",
-        )
+        let chapters_selector = Selector::parse(match self.profile {
+            SiteProfile::Madara => {
+                "ul.main.version-chap a[href], li.wp-manga-chapter a[href], div.chapter-item a[href]"
+            }
+            SiteProfile::TruyenQQ => {
+                "#chapter-list a.chapter-name[href], .reading-list .item-name a[href]"
+            }
+        })
         .unwrap();
         let mut seen: HashSet<String> = HashSet::new();
         let mut chapters: Vec<RemoteChapter> = Vec::new();
@@ -352,14 +508,43 @@ impl SourceAdapter for MadaraGeneric {
             ],
             status: SourceStatus::Ready,
             attribution: Some(format!(
-                "Site do bên thứ ba vận hành — nguồn do người dùng đăng ký: {}",
+                "Site do bên thứ ba vận hành — {}: {}",
+                if crate::sources::registry::is_builtin(&self.id) {
+                    "nguồn tích hợp sẵn"
+                } else {
+                    "nguồn do người dùng đăng ký"
+                },
                 self.host
             )),
         }
     }
 
     fn owns_url(&self, url: &Url) -> bool {
-        url.host_str() == Some(self.host.as_str()) && url.path().starts_with("/manga/")
+        if url.host_str() != Some(self.host.as_str()) {
+            return false;
+        }
+        match self.profile {
+            SiteProfile::Madara => url.path().starts_with("/manga/"),
+            SiteProfile::TruyenQQ => {
+                // Root-level single or double segment paths are manga/chapter
+                // links; reserved site sections never are.
+                let mut segments = url
+                    .path_segments()
+                    .into_iter()
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                let Some(first) = segments.next() else {
+                    return false;
+                };
+                if TRUYENQQ_RESERVED.contains(&first) || !valid_slug(first) {
+                    return false;
+                }
+                match segments.next() {
+                    None => true,
+                    Some(chapter) => segments.next().is_none() && valid_slug(chapter),
+                }
+            }
+        }
     }
 
     fn chapter_from_url(&self, url: &Url) -> Option<(String, String)> {
@@ -367,13 +552,18 @@ impl SourceAdapter for MadaraGeneric {
             return None;
         }
         let mut segments = url.path_segments()?.filter(|segment| !segment.is_empty());
-        if segments.next()? != "manga" {
-            return None;
-        }
-        let manga = segments.next()?;
+        let manga = match self.profile {
+            SiteProfile::Madara => {
+                if segments.next()? != "manga" {
+                    return None;
+                }
+                segments.next()?
+            }
+            SiteProfile::TruyenQQ => segments.next()?,
+        };
         let chapter = segments.next()?;
-        // Exactly /manga/<manga>/<chapter>/ — deeper paths and bad slugs are
-        // not chapter links.
+        // Exactly <manga>/<chapter> — deeper paths and bad slugs are not
+        // chapter links.
         if segments.next().is_some() || !valid_slug(manga) || !valid_slug(chapter) {
             return None;
         }
@@ -381,66 +571,104 @@ impl SourceAdapter for MadaraGeneric {
     }
 
     async fn search(&self, query: &str, page: u32) -> Result<RemoteSearchPage, SourceError> {
-        // The theme's own search results page — the admin-ajax suggest
-        // endpoint it replaced ships titles only, while every card here
-        // carries the cover thumbnail. `paged` is standard WP pagination.
         let page = page.max(1);
         let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
-        let search_url = if page == 1 {
-            format!("{}?s={}&post_type=wp-manga", self.base, encoded)
-        } else {
-            format!(
-                "{}?s={}&post_type=wp-manga&paged={}",
-                self.base, encoded, page
-            )
+        let search_url = match self.profile {
+            SiteProfile::Madara => {
+                // The theme's own search results page — the admin-ajax suggest
+                // endpoint it replaced ships titles only, while every card here
+                // carries the cover thumbnail. `paged` is standard WP pagination.
+                if page == 1 {
+                    format!("{}?s={}&post_type=wp-manga", self.base, encoded)
+                } else {
+                    format!(
+                        "{}?s={}&post_type=wp-manga&paged={}",
+                        self.base, encoded, page
+                    )
+                }
+            }
+            SiteProfile::TruyenQQ => {
+                // The site's own search form: GET /tim-kiem with `s=`.
+                if page == 1 {
+                    format!("{}tim-kiem?s={}", self.base, encoded)
+                } else {
+                    format!("{}tim-kiem?s={}&page={}", self.base, encoded, page)
+                }
+            }
         };
         let html = self.http.get_text(&search_url).await?;
         let document = Html::parse_document(&html);
         let mut items: Vec<RemoteMangaSummary> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        // Primary: the tabbed search layout most Madara sites ship.
-        self.collect_cards(
-            &document,
-            &Selector::parse("div.row.c-tabs-item__content").unwrap(),
-            &Selector::parse("div.post-title h3 a[href], div.post-title a[href]").unwrap(),
-            &Selector::parse("div.tab-thumb img, .c-image img").unwrap(),
-            &mut seen,
-            &mut items,
-        );
-        if items.is_empty() {
-            // Fallback: grid forks (.page-item-detail). Scoped to the two
-            // listing wrappers so sidebar "popular" widgets can never
-            // masquerade as search results.
-            self.collect_cards(
-                &document,
-                &Selector::parse(
-                    ".page-content-listing .page-item-detail, .tab-content-wrap .page-item-detail",
-                )
-                .unwrap(),
-                &Selector::parse("div.post-title a[href], h3 a[href]").unwrap(),
-                &Selector::parse(".poster img, .c-image img, img").unwrap(),
-                &mut seen,
-                &mut items,
-            );
+        match self.profile {
+            SiteProfile::Madara => {
+                // Primary: the tabbed search layout most Madara sites ship.
+                self.collect_cards(
+                    &document,
+                    &Selector::parse("div.row.c-tabs-item__content").unwrap(),
+                    &Selector::parse("div.post-title h3 a[href], div.post-title a[href]").unwrap(),
+                    &Selector::parse("div.tab-thumb img, .c-image img").unwrap(),
+                    &mut seen,
+                    &mut items,
+                );
+                if items.is_empty() {
+                    // Fallback: grid forks (.page-item-detail). Scoped to the two
+                    // listing wrappers so sidebar "popular" widgets can never
+                    // masquerade as search results.
+                    self.collect_cards(
+                        &document,
+                        &Selector::parse(
+                            ".page-content-listing .page-item-detail, .tab-content-wrap .page-item-detail",
+                        )
+                        .unwrap(),
+                        &Selector::parse("div.post-title a[href], h3 a[href]").unwrap(),
+                        &Selector::parse(".poster img, .c-image img, img").unwrap(),
+                        &mut seen,
+                        &mut items,
+                    );
+                }
+            }
+            SiteProfile::TruyenQQ => {
+                // Results are `.item` cards inside `.listing` only — the
+                // homepage-style popular/genres blocks outside it never count.
+                self.collect_cards(
+                    &document,
+                    &Selector::parse(".listing .item").unwrap(),
+                    &Selector::parse("div.info h3 a[href]").unwrap(),
+                    &Selector::parse("div.cover img").unwrap(),
+                    &mut seen,
+                    &mut items,
+                );
+            }
         }
-        let has_more = document
-            .select(
-                &Selector::parse("a.next.page-numbers, .c-pagination a[href*='paged']").unwrap(),
-            )
-            .next()
-            .is_some();
+        let has_more = match self.profile {
+            SiteProfile::Madara => document
+                .select(
+                    &Selector::parse("a.next.page-numbers, .c-pagination a[href*='paged']")
+                        .unwrap(),
+                )
+                .next()
+                .is_some(),
+            SiteProfile::TruyenQQ => document
+                .select(&Selector::parse(".pagination a[href*='page']").unwrap())
+                .next()
+                .is_some(),
+        };
         Ok(RemoteSearchPage { items, has_more })
     }
 
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError> {
-        let slug = url
-            .path_segments()
-            .and_then(|mut segments| {
+        let slug = match self.profile {
+            SiteProfile::Madara => url.path_segments().and_then(|mut segments| {
                 segments.next();
                 segments.next().map(str::to_string)
-            })
-            .filter(|candidate| valid_slug(candidate))
-            .ok_or(SourceError::MalformedUrl)?;
+            }),
+            SiteProfile::TruyenQQ => url
+                .path_segments()
+                .and_then(|mut segments| segments.next().map(str::to_string)),
+        }
+        .filter(|candidate| valid_slug(candidate))
+        .ok_or(SourceError::MalformedUrl)?;
         Ok(slug)
     }
 
@@ -452,29 +680,61 @@ impl SourceAdapter for MadaraGeneric {
         if !valid_slug(source_manga_id) || !valid_slug(source_chapter_id) {
             return Err(SourceError::MalformedUrl);
         }
-        let page_url = format!(
-            "{}manga/{}/{}/",
-            self.base, source_manga_id, source_chapter_id
-        );
+        let page_url = self.chapter_url(source_manga_id, source_chapter_id);
         let html = self.http.get_text(&page_url).await?;
         let document = Html::parse_document(&html);
-        // Primary dom-hint documented by the site's own theme; the page-box
-        // variant covers the common "chapter image on a registered CDN host"
-        // layout; the loose fallback keeps plain Madara forks working. An
-        // image host outside the source's explicit allowlist fails the WHOLE
-        // manifest — it is never widened silently.
-        let allowed = self.allowed_image_hosts();
-        let strict = Selector::parse(".reading-content img.wp-manga-chapter-img").unwrap();
         let mut urls: Vec<String> = Vec::new();
-        collect_page_urls(&document, &strict, &self.base, &allowed, &mut urls)?;
-        if urls.is_empty() {
-            let boxed = Selector::parse(".reading-content .page-box img, .page-box img.page-image")
-                .unwrap();
-            collect_page_urls(&document, &boxed, &self.base, &allowed, &mut urls)?;
-        }
-        if urls.is_empty() {
-            let loose = Selector::parse(".reading-content img").unwrap();
-            collect_page_urls(&document, &loose, &self.base, &allowed, &mut urls)?;
+        if self.profile == SiteProfile::TruyenQQ {
+            // Lazy reader: real pages are img[data-src] on the reviewed CDN
+            // domain; plain-src images are ads and never become pages.
+            let lazy = Selector::parse("img[data-src]").unwrap();
+            let mut seen: HashSet<Url> = HashSet::new();
+            for node in document.select(&lazy) {
+                let Some(raw) = node
+                    .value()
+                    .attr("data-src")
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                else {
+                    continue;
+                };
+                let Ok(joined) = self.base.join(raw) else {
+                    continue;
+                };
+                if joined.scheme() != "https"
+                    || !joined.host_str().is_some_and(|host| {
+                        host == TRUYENQQ_IMAGE_DOMAIN
+                            || host.ends_with(&format!(".{TRUYENQQ_IMAGE_DOMAIN}"))
+                    })
+                {
+                    continue;
+                }
+                if seen.insert(joined.clone()) {
+                    urls.push(joined.to_string());
+                }
+                if urls.len() >= MAX_PAGE_COUNT {
+                    break;
+                }
+            }
+        } else {
+            // Primary dom-hint documented by the site's own theme; the page-box
+            // variant covers the common "chapter image on a registered CDN host"
+            // layout; the loose fallback keeps plain Madara forks working. An
+            // image host outside the source's explicit allowlist fails the WHOLE
+            // manifest — it is never widened silently.
+            let allowed = self.allowed_image_hosts();
+            let strict = Selector::parse(".reading-content img.wp-manga-chapter-img").unwrap();
+            collect_page_urls(&document, &strict, &self.base, &allowed, &mut urls)?;
+            if urls.is_empty() {
+                let boxed =
+                    Selector::parse(".reading-content .page-box img, .page-box img.page-image")
+                        .unwrap();
+                collect_page_urls(&document, &boxed, &self.base, &allowed, &mut urls)?;
+            }
+            if urls.is_empty() {
+                let loose = Selector::parse(".reading-content img").unwrap();
+                collect_page_urls(&document, &loose, &self.base, &allowed, &mut urls)?;
+            }
         }
         if urls.is_empty() || urls.len() > MAX_PAGE_COUNT {
             return Err(SourceError::Parse);
@@ -507,7 +767,7 @@ impl SourceAdapter for MadaraGeneric {
         if !valid_slug(source_manga_id) {
             return Err(SourceError::MalformedUrl);
         }
-        let page_url = self.manga_url(source_manga_id);
+        let page_url = self.detail_chapter_list_url(source_manga_id);
         let html = self.http.get_text(&page_url).await?;
         // Madara "load chapters via AJAX" pattern: the page ships only an
         // empty #manga-chapters-holder. The site's own frontend POSTs to
@@ -1110,5 +1370,178 @@ mod tests {
             provider.page_manifest("m", "tap-1").await,
             Err(SourceError::Parse)
         ));
+    }
+
+    // ----- TruyenQQ profile (built-in layout) --------------------------------
+
+    fn qq(replies: Vec<Result<&'static str, &'static str>>) -> (MadaraGeneric, Arc<MockTransport>) {
+        let transport = Arc::new(MockTransport::with(replies));
+        let provider = MadaraGeneric::with_transport_profile(
+            "TruyenQQ",
+            "https://truyenqq.com.vn/",
+            transport.clone(),
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        (provider, transport)
+    }
+
+    const QQ_SEARCH: &str = r#"<html><body>
+        <h1>TÌM KIẾM TRUYỆN: <span class="keyword">"ninja"</span></h1>
+        <div class="listing"><div class="inner">
+            <div class="item">
+                <div class="cover"><a href="/ninja-to-koroshiya" class="cover"><img src="/media/book/ninja.jpg" alt="Ninja"></a></div>
+                <div class="info"><h3><a href="/ninja-to-koroshiya">Ninja To Koroshiya</a></h3></div>
+            </div>
+            <div class="item">
+                <div class="cover"><a href="/vo-luyen-dinh-phong"><img src="/media/book/vo.jpg"></a></div>
+                <div class="info"><h3><a href="/vo-luyen-dinh-phong">V&#245; Luyện Đỉnh Phong</a></h3></div>
+            </div>
+        </div></div>
+        <div class="pagination"><div class="page-total">16 kết quả</div></div>
+        </body></html>"#;
+
+    #[tokio::test]
+    async fn qq_search_hits_tim_kiem_and_maps_listing_cards() {
+        let (provider, transport) = qq(vec![Ok(QQ_SEARCH)]);
+        let page = provider.search("ninja", 1).await.unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.items[0].source_id, "truyenqq");
+        assert_eq!(page.items[0].source_manga_id, "ninja-to-koroshiya");
+        assert_eq!(page.items[0].title, "Ninja To Koroshiya");
+        assert_eq!(
+            page.items[1].title, "Võ Luyện Đỉnh Phong",
+            "entities decode"
+        );
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/media/book/ninja.jpg")
+        );
+        assert!(!page.has_more, "count text is not a next-page link");
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(requested[0].1, "https://truyenqq.com.vn/tim-kiem?s=ninja");
+    }
+
+    #[tokio::test]
+    async fn qq_search_ignores_popular_blocks_outside_listing() {
+        let (provider, _) = qq(vec![Ok(r#"<html><body>
+            <div class="slide"><div class="item"><a href="/hot-one"><img src="/media/book/h.jpg"></a></div></div>
+            <div class="listing"></div>
+        </body></html>"#)]);
+        let page = provider.search("x", 1).await.unwrap();
+        assert!(
+            page.items.is_empty(),
+            "carousel items outside .listing never count"
+        );
+    }
+
+    #[tokio::test]
+    async fn qq_detail_uses_full_list_param_and_parses_chapter_rows() {
+        let (provider, transport) = qq(vec![Ok(r#"<html><body>
+            <h1 itemprop="name">V&#245; Luyện Đỉnh Phong</h1>
+            <div id="chapter-list" class="chapter-list"><div class="inner"><div class="reading-list">
+                <div class="item"><div class="item-name"><a href="/vo-luyen/chapter-2" class="chapter-name d-block">Chapter 2</a></div></div>
+                <div class="item"><div class="item-name"><a href="/vo-luyen/chapter-1" class="chapter-name d-block">Chapter 1</a></div></div>
+            </div></div></div>
+        </body></html>"#)]);
+        let detail = provider.manga_detail("vo-luyen").await.unwrap();
+        assert_eq!(detail.summary.title, "Võ Luyện Đỉnh Phong");
+        assert_eq!(detail.chapters.len(), 2);
+        assert_eq!(
+            detail.chapters[0].source_chapter_id, "chapter-1",
+            "chronological"
+        );
+        assert_eq!(detail.chapters[0].number, Some(1.0));
+        assert_eq!(detail.chapters[1].number, Some(2.0));
+        assert!(!detail.available_offline);
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(
+            requested[0].1, "https://truyenqq.com.vn/vo-luyen?page-chap=1",
+            "full chapter list requested"
+        );
+    }
+
+    #[tokio::test]
+    async fn qq_pages_prefer_data_src_and_follow_cdn_shards() {
+        let (provider, _) = qq(vec![Ok(r#"<html><body>
+            <div class="image-box"><img class="lazy" data-src="https://s34.cc3t.net/chapters/b469/chapter-1/p0.PNG" src="/images/placeholder.jpg"></div>
+            <div class="image-box"><img class="lazy" data-src="https://s12.cc3t.net/chapters/b469/chapter-1/p1.jpg" src="/images/loading.svg"></div>
+            <div class="image-box"><img src="https://cdn.adnetwork.example/banner.gif"></div>
+        </body></html>"#)]);
+        let manifest = provider
+            .page_manifest("vo-luyen", "chapter-1")
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2, "ads without data-src are skipped");
+        assert!(manifest.pages[0].url.starts_with("https://s34.cc3t.net/"));
+        assert!(manifest.pages[1].url.starts_with("https://s12.cc3t.net/"));
+    }
+
+    #[tokio::test]
+    #[ignore = "live network probe: built-in TruyenQQ search -> detail -> pages over the app transport (wreq + ECH)"]
+    async fn live_builtin_qq_probe() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqq.com.vn/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let page = adapter.search("ninja", 1).await.expect("live search");
+        assert!(!page.items.is_empty(), "search returned zero cards");
+        let first = &page.items[0];
+        println!(
+            "LIVE search: {} items; first {} ({})",
+            page.items.len(),
+            first.title,
+            first.source_manga_id
+        );
+        let detail = adapter
+            .manga_detail(&first.source_manga_id)
+            .await
+            .expect("live detail");
+        println!(
+            "LIVE detail: {} — {} chapters",
+            detail.summary.title,
+            detail.chapters.len()
+        );
+        assert!(!detail.chapters.is_empty(), "chapter list empty");
+        let last = &detail.chapters[detail.chapters.len() - 1];
+        let manifest = adapter
+            .page_manifest(&first.source_manga_id, &last.source_chapter_id)
+            .await
+            .expect("live pages");
+        println!(
+            "LIVE pages: chapter {} -> {} images",
+            last.source_chapter_id,
+            manifest.pages.len()
+        );
+        assert!(manifest.pages.len() >= 5, "implausibly small page set");
+    }
+
+    #[test]
+    fn qq_owns_root_slugs_but_not_reserved_sections() {
+        let (provider, _) = qq(vec![]);
+        let manga: Url = "https://truyenqq.com.vn/vo-luyen-dinh-phong"
+            .parse()
+            .unwrap();
+        assert!(provider.owns_url(&manga));
+        let chapter: Url = "https://truyenqq.com.vn/vo-luyen-dinh-phong/chapter-12"
+            .parse()
+            .unwrap();
+        assert!(provider.owns_url(&chapter));
+        assert_eq!(
+            provider.chapter_from_url(&chapter),
+            Some(("vo-luyen-dinh-phong".to_string(), "chapter-12".to_string()))
+        );
+        for reserved in ["tim-kiem", "the-loai", "truyen-hot", "contact"] {
+            let url: Url = format!("https://truyenqq.com.vn/{reserved}")
+                .parse()
+                .unwrap();
+            assert!(!provider.owns_url(&url), "{reserved} is a site section");
+        }
+        let foreign: Url = "https://other.example/vo-luyen".parse().unwrap();
+        assert!(!provider.owns_url(&foreign));
     }
 }

@@ -15,6 +15,12 @@ export interface SourceService {
     imageHosts?: string[];
   }): Promise<SourceViewDto>;
   removeSource(sourceId: string): Promise<void>;
+  updateSource(args: {
+    sourceId: string;
+    displayName: string;
+    baseUrl: string;
+    imageHosts?: string[];
+  }): Promise<SourceViewDto>;
   setSourceEnabled(args: { sourceId: string; enabled: boolean }): Promise<boolean>;
   search(args: {
     query: string;
@@ -40,6 +46,7 @@ export const sourceApi: SourceService = {
   listSources: () => desktop.listSupportedSources(),
   addSource: (args) => desktop.addMangaSource(args),
   removeSource: (sourceId) => desktop.removeMangaSource(sourceId),
+  updateSource: (args) => desktop.updateMangaSource(args),
   setSourceEnabled: (args) => desktop.setSourceEnabled(args),
   search: (args) => desktop.searchManga(args),
   resolveUrl: (url) => desktop.resolveMangaUrl(url),

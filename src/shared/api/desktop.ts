@@ -131,6 +131,18 @@ export async function removeMangaSource(sourceId: string): Promise<void> {
   return invoke<void>("remove_manga_source", { sourceId });
 }
 
+/// Edit name/domain/image hosts of an HTML source (built-ins included —
+/// sites rotate domains). The source id NEVER changes, so saved manga keep
+/// resolving through the same identity. MangaDex (fixed REST host) is refused.
+export async function updateMangaSource(args: {
+  sourceId: string;
+  displayName: string;
+  baseUrl: string;
+  imageHosts?: string[];
+}): Promise<SourceViewDto> {
+  return invoke<SourceViewDto>("update_manga_source", args);
+}
+
 export async function setSourceEnabled(args: {
   sourceId: string;
   enabled: boolean;

@@ -55,6 +55,32 @@ pub async fn remove_manga_source(
     Ok(())
 }
 
+/// Edit name/domain/(image hosts) of an HTML source — built-ins included,
+/// because sites rotate domains. The source id NEVER changes, so saved manga
+/// and their chapters keep resolving through the same identity.
+#[tauri::command]
+pub async fn update_manga_source(
+    source_id: String,
+    display_name: String,
+    base_url: String,
+    image_hosts: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<SourceView, AppError> {
+    let registry = snapshot(&state)?;
+    let view = discovery_service::update_manga_source(
+        &registry,
+        &state.db,
+        &source_id,
+        &display_name,
+        &base_url,
+        image_hosts,
+    )
+    .await?;
+    let fresh = discovery_service::registry_from_pool(&state.db).await?;
+    *state.registry.lock().map_err(|_| AppError::Internal)? = fresh;
+    Ok(view)
+}
+
 #[tauri::command]
 pub async fn set_source_enabled(
     source_id: String,

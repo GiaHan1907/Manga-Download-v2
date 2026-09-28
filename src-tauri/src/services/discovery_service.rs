@@ -74,24 +74,21 @@ pub async fn list_sources_view(
         .map(|adapter| {
             let info = adapter.info();
             let builtin = crate::sources::registry::is_builtin(&info.id);
+            let row = row_by_id.get(&info.id);
+            // Built-in rows may carry a user-edited domain/name (sites rotate
+            // domains); fall back to the shipped spec when no row exists.
+            let spec = crate::sources::registry::builtin_html_spec(&info.id);
+            let base_url = row
+                .and_then(|r| r.base_url.clone())
+                .or_else(|| spec.map(|s| s.base_url.to_string()));
+            let image_hosts = row
+                .and_then(|r| r.image_hosts.clone())
+                .or_else(|| spec.and_then(|s| s.image_hosts.map(str::to_string)));
             SourceView {
                 enabled: *enabled.get(&info.id).unwrap_or(&true),
                 builtin,
-                base_url: if builtin {
-                    match info.id.as_str() {
-                        "madara-truyentuoitho-com" => {
-                            Some(crate::sources::registry::TTT_BASE_URL.to_string())
-                        }
-                        _ => None,
-                    }
-                } else {
-                    row_by_id.get(&info.id).and_then(|r| r.base_url.clone())
-                },
-                image_hosts: if builtin {
-                    None
-                } else {
-                    row_by_id.get(&info.id).and_then(|r| r.image_hosts.clone())
-                },
+                base_url,
+                image_hosts,
                 info,
             }
         })
@@ -182,6 +179,143 @@ pub async fn remove_manga_source(pool: &SqlitePool, source_id: &str) -> Result<(
     source_repo::delete_source(pool, source_id).await
 }
 
+/// Edit name + base URL (+ exact image hosts) of any HTML source — user rows
+/// AND built-ins (domains rotate; the source id never changes, so saved
+/// manga keep working). MangaDex (fixed REST host) is not editable. Validation
+/// runs through the same constructor the registry uses; the stored row id IS
+/// the identity.
+pub async fn update_manga_source(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+    display_name: &str,
+    base_url: &str,
+    image_hosts: Option<Vec<String>>,
+) -> Result<SourceView, AppError> {
+    validate_id(source_id, "sourceId")?;
+    let display_name = display_name.trim();
+    validate_text_len(display_name, 80, "Tên nguồn")?;
+    if display_name.is_empty() {
+        return Err(AppError::validation("Tên nguồn không được để trống."));
+    }
+    let rows = source_repo::list_sources(pool).await?;
+    let row = rows.iter().find(|r| r.id == source_id);
+    let spec = crate::sources::registry::builtin_html_spec(source_id);
+    let (adapter_kind, profile) = match (spec, row) {
+        (Some(spec), _) => (spec.adapter.to_string(), spec.profile),
+        (None, Some(row)) if row.adapter == "madara" => (
+            row.adapter.clone(),
+            crate::sources::providers::madara_generic::SiteProfile::Madara,
+        ),
+        (None, Some(_)) => return Err(AppError::Unsupported),
+        (None, None) => {
+            if registry.get(source_id).is_some() {
+                return Err(AppError::Unsupported);
+            }
+            return Err(AppError::not_found("source"));
+        }
+    };
+    if registry.get(source_id).is_none() && row.is_none() {
+        return Err(AppError::not_found("source"));
+    }
+    let image_hosts = image_hosts.unwrap_or_default();
+    if image_hosts.len() > 4 {
+        return Err(AppError::validation(
+            "Tối đa 4 host ảnh phụ trợ cho một nguồn.",
+        ));
+    }
+    let mut normalized_hosts: Vec<String> = Vec::new();
+    for host in &image_hosts {
+        let Some(normalized) =
+            crate::sources::providers::madara_generic::normalize_image_host(host)
+        else {
+            return Err(AppError::validation(format!(
+                "Host ảnh không hợp lệ: {host}"
+            )));
+        };
+        if !normalized_hosts.contains(&normalized) {
+            normalized_hosts.push(normalized);
+        }
+    }
+    // Constructor doubles as the validator (https, no port/credentials, no IP
+    // host, slugs, host sanity).
+    crate::sources::providers::madara_generic::MadaraGeneric::built_in(
+        source_id,
+        display_name,
+        base_url,
+        &normalized_hosts,
+        profile,
+    )
+    .map_err(AppError::Source)?;
+    // A new domain must not collide with a DIFFERENT source's host.
+    let new_host = Url::parse(base_url.trim())
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_lowercase));
+    if let Some(host) = new_host {
+        for other in registry.adapters() {
+            let info = other.info();
+            if info.id == source_id {
+                continue;
+            }
+            let other_base = match (
+                crate::sources::registry::builtin_html_spec(&info.id),
+                rows.iter().find(|r| r.id == info.id),
+            ) {
+                (Some(spec), r) => r
+                    .and_then(|r| r.base_url.clone())
+                    .or(Some(spec.base_url.to_string())),
+                (None, r) => r.and_then(|r| r.base_url.clone()),
+            };
+            let same = other_base
+                .as_deref()
+                .and_then(|u| Url::parse(u.trim()).ok())
+                .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
+                .is_some_and(|other_host| other_host == host);
+            if same {
+                return Err(AppError::Conflict);
+            }
+        }
+    }
+    let csv = (!normalized_hosts.is_empty()).then(|| normalized_hosts.join(","));
+    source_repo::upsert_source(
+        pool,
+        source_id,
+        display_name,
+        &adapter_kind,
+        Some(base_url.trim()),
+        csv.as_deref(),
+    )
+    .await?;
+    let fresh = source_repo::list_sources(pool).await?;
+    let stored = fresh
+        .iter()
+        .find(|r| r.id == source_id)
+        .ok_or(AppError::Internal)?;
+    let adapter = crate::sources::providers::madara_generic::MadaraGeneric::built_in(
+        source_id,
+        &stored.display_name,
+        stored
+            .base_url
+            .as_deref()
+            .ok_or_else(|| AppError::validation("Nguồn thiếu base_url."))?,
+        &csv.clone()
+            .unwrap_or_default()
+            .split(',')
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<String>>(),
+        profile,
+    )
+    .map_err(AppError::Source)?;
+    Ok(SourceView {
+        info: adapter.info(),
+        enabled: stored.enabled,
+        builtin: crate::sources::registry::is_builtin(source_id),
+        base_url: stored.base_url.clone(),
+        image_hosts: stored.image_hosts.clone(),
+    })
+}
+
 pub async fn set_source_enabled(
     registry: &SourceRegistry,
     pool: &SqlitePool,
@@ -196,19 +330,23 @@ pub async fn set_source_enabled(
         source_repo::set_enabled(pool, source_id, enabled).await?;
         return Ok(enabled);
     }
-    // Built-ins have a row created on first toggle.
-    use crate::sources::registry as reg;
-    let (name, adapter, base, hosts) = if source_id == "mangadex" {
-        ("MangaDex", "mangadex", None, None)
-    } else {
-        (
-            reg::TTT_DISPLAY_NAME,
-            "madara",
-            Some(reg::TTT_BASE_URL),
-            Some(reg::TTT_IMAGE_HOSTS),
-        )
-    };
-    source_repo::upsert_source(pool, source_id, name, adapter, base, hosts).await?;
+    // Built-ins get a row on first toggle. An EXISTING row keeps the user's
+    // edited domain/name (toggling must never reset a migration override).
+    let rows = source_repo::list_sources(pool).await?;
+    if !rows.iter().any(|r| r.id == source_id) {
+        let (name, adapter, base, hosts) =
+            if let Some(spec) = crate::sources::registry::builtin_html_spec(source_id) {
+                (
+                    spec.display_name,
+                    spec.adapter,
+                    Some(spec.base_url),
+                    spec.image_hosts,
+                )
+            } else {
+                ("MangaDex", "mangadex", None, None)
+            };
+        source_repo::upsert_source(pool, source_id, name, adapter, base, hosts).await?;
+    }
     source_repo::set_enabled(pool, source_id, enabled).await?;
     Ok(enabled)
 }
@@ -625,11 +763,12 @@ mod tests {
         let builtins = list_sources_view(&SourceRegistry::from_rows(&[]), &pool)
             .await
             .unwrap();
-        assert_eq!(builtins.len(), 2);
+        assert_eq!(builtins.len(), 3);
         assert!(builtins.iter().all(|v| v.builtin));
         let ids: Vec<&str> = builtins.iter().map(|v| v.info.id.as_str()).collect();
         assert!(ids.contains(&"mangadex"));
         assert!(ids.contains(&"madara-truyentuoitho-com"));
+        assert!(ids.contains(&"truyenqq"));
         let ttt = builtins
             .iter()
             .find(|v| v.info.id == "madara-truyentuoitho-com")
@@ -907,8 +1046,8 @@ mod tests {
         let after_remove = registry_from_pool(&pool).await.unwrap();
         assert_eq!(
             after_remove.adapters().len(),
-            2,
-            "only the two built-ins remain"
+            3,
+            "only the built-ins remain"
         );
         assert!(matches!(
             remove_manga_source(&pool, "mangadex").await,
