@@ -981,6 +981,7 @@ button {
 
 .home-aside {
   min-width: 0;
+  overflow: hidden;
   position: sticky;
   top: 0;
 }
@@ -1458,26 +1459,30 @@ button {
 }
 
 /* ---------- UI plan C4: home hierarchy (hero + rail) ---------- */
+/* Two fixed columns: an unshrinkable thumb plus a text column that can
+   actually shrink. The old flex row let the two action buttons set a
+   min-content width larger than the rail, so the card burst its panel. */
 .continue-hero {
-  display: flex;
-  gap: var(--space-4);
-  align-items: center;
-  padding: var(--space-4);
+  align-items: start;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  padding: var(--space-3);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface);
+  overflow: hidden;
 }
 .continue-hero__cover {
   display: grid;
   place-items: center;
   overflow: hidden;
-  width: 96px;
-  height: 132px;
-  flex-shrink: 0;
+  width: 3.5rem;
+  height: 4.75rem;
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--primary-foreground);
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 700;
 }
 .continue-hero__cover img {
@@ -1492,7 +1497,8 @@ button {
 }
 .continue-hero__title {
   margin: 0;
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-md);
+  overflow-wrap: break-word;
 }
 .continue-hero__bar {
   height: 6px;
@@ -1507,7 +1513,14 @@ button {
 }
 .continue-hero__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
+  grid-column: 1 / -1;
+}
+
+.continue-hero__actions > * {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ---------- UI plan C5: success toast stack ---------- */
