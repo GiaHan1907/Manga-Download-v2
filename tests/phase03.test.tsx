@@ -58,6 +58,7 @@ function installBackendMock() {
               coverKey: null,
               status: "unknown",
               latestChapter: "Chapter 3824",
+              latestTime: null,
             },
           ],
           newest: [
@@ -70,6 +71,7 @@ function installBackendMock() {
               coverKey: null,
               status: "unknown",
               latestChapter: "Chapter 12",
+              latestTime: "37 phút trước",
             },
           ],
           popular: [
@@ -82,6 +84,7 @@ function installBackendMock() {
               coverKey: null,
               status: "unknown",
               latestChapter: null,
+              latestTime: null,
             },
           ],
         });
@@ -159,10 +162,14 @@ describe("T03-01/T03-02 Home journey (real data since Phase 08)", () => {
     renderAt("/");
     const hero = await screen.findByLabelText("Nổi bật");
     expect(within(hero).getByText("Võ Luyện Đỉnh Phong")).toBeDefined();
-    expect(within(hero).getByText("Chapter 3824")).toBeDefined();
+    expect(within(hero).getByText(/Chapter 3824/)).toBeDefined();
 
-    const updated = await screen.findByLabelText("Mới cập nhật");
+    const hot = await screen.findByLabelText("Truyện đang hot");
+    expect(within(hot).getByText("Võ Luyện Đỉnh Phong")).toBeDefined();
+
+    const updated = await screen.findByLabelText("Cập nhật gần đây");
     expect(within(updated).getByText("Đối Thủ Định Mệnh")).toBeDefined();
+    expect(within(updated).getByText("37 phút trước")).toBeDefined();
 
     const ranking = await screen.findByLabelText("Xem nhiều");
     expect(within(ranking).getByText("Đại Quản Gia Là Ma Hoàng")).toBeDefined();

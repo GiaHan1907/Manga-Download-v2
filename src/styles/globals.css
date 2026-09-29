@@ -719,9 +719,9 @@ button {
 }
 
 /* Home: spotlight hero fed by the source's own front page. */
-.home-hero-card {
+.home-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
   gap: var(--space-6);
   align-items: center;
   position: relative;
@@ -729,76 +729,96 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--hero-gradient);
-  padding: var(--space-6);
+  min-height: 19rem;
+  padding: var(--space-8) var(--space-8) var(--space-8);
 }
 
-.home-hero-card__art {
-  display: flex;
-  justify-content: center;
-  min-height: 12rem;
-}
-
-.home-hero-card__art .home-card__cover {
-  width: min(14rem, 100%);
-  height: auto;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
-  border-radius: var(--radius-md);
-  box-shadow: 0 18px 48px rgba(6, 6, 12, 0.55);
-}
-
-.home-hero-card__body {
+.home-hero__body {
   display: grid;
   gap: var(--space-3);
   justify-items: start;
+  z-index: 1;
 }
 
-.home-hero-card__title {
-  font-size: var(--font-size-2xl);
-  line-height: 1.2;
+.home-hero__title {
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
 }
 
-.home-hero-card__chapter {
+.home-hero__meta {
   font-size: var(--font-size-sm);
 }
 
-.home-hero-card__actions {
+.home-hero__actions {
   display: flex;
   gap: var(--space-3);
   flex-wrap: wrap;
   margin-top: var(--space-2);
 }
 
-.home-hero-card__nav {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+.home-hero__note {
+  color: var(--success);
+  font-size: var(--font-size-sm);
 }
 
-.home-hero-card__arrow {
-  background: transparent;
+.home-hero__art {
+  align-self: stretch;
+  display: flex;
+  justify-content: flex-end;
+  mask-image: linear-gradient(90deg, transparent, #000 22%);
+}
+
+.home-hero__art .home-card__cover {
+  border-radius: var(--radius-md);
+  height: 100%;
+  max-height: 22rem;
+  object-fit: cover;
+  width: min(15rem, 100%);
+}
+
+.home-hero__art .home-card__placeholder {
+  font-size: 5rem;
+  width: min(15rem, 100%);
+}
+
+.home-hero__arrow {
+  background: rgba(16, 16, 22, 0.55);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-pill);
   color: var(--text-primary);
   cursor: pointer;
   display: grid;
+  height: 2.1rem;
   place-items: center;
-  height: 1.75rem;
-  width: 1.75rem;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.1rem;
+  z-index: 2;
 }
 
-.home-hero-card__dots {
+.home-hero__arrow--left {
+  left: var(--space-3);
+}
+
+.home-hero__arrow--right {
+  right: var(--space-3);
+}
+
+.home-hero__dots {
+  bottom: var(--space-4);
   display: flex;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  left: var(--space-8);
   list-style: none;
   margin: 0;
   padding: 0;
+  position: absolute;
 }
 
-.home-hero-card__dot {
+.home-hero__dot {
   background: var(--border-strong);
   border: 0;
   border-radius: var(--radius-pill);
@@ -808,18 +828,77 @@ button {
   width: 0.4rem;
 }
 
-.home-hero-card__dot--on {
+.home-hero__dot--on {
   background: var(--primary);
-  width: 1.1rem;
+  width: 1.4rem;
 }
 
-.home-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+/* "Truyện đang hot" is a single scrollable rail, like the source's own row. */
+.home-hot {
+  display: flex;
   gap: var(--space-4);
   list-style: none;
   margin: 0;
+  overflow-x: auto;
+  padding: 0 0 var(--space-2);
+  scroll-snap-type: x proximity;
+}
+
+.home-hot > .home-card {
+  flex: 0 0 10.5rem;
+  scroll-snap-align: start;
+}
+
+.home-updated-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
   padding: 0;
+}
+
+.home-updated__link {
+  align-items: center;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+  text-decoration: none;
+}
+
+.home-updated__art {
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: block;
+  overflow: hidden;
+}
+
+.home-updated__art .home-card__cover {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.home-updated__text {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.home-updated__chapter {
+  font-size: var(--font-size-xs);
+}
+
+.home-updated__time {
+  color: var(--accent-text);
+  font-size: var(--font-size-xs);
+}
+
+.home-side {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
 }
 
 .home-card__link {

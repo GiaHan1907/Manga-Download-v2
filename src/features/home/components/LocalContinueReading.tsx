@@ -25,9 +25,9 @@ export default function LocalContinueReading() {
   }
   const [hero, ...rest] = items;
   return (
-    <section className="panel continue-home" aria-label="Đọc tiếp (local)">
+    <section className="panel continue-home" aria-label="Đang đọc tiếp (local)">
       <h2 className="panel__title">
-        <History size={16} aria-hidden="true" /> Đọc tiếp
+        <History size={16} aria-hidden="true" /> Đang đọc tiếp
       </h2>
       <ContinueHero manga={hero} />
       {rest.length > 0 && (

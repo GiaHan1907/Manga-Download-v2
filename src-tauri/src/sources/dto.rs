@@ -88,6 +88,10 @@ pub struct HomeFeedItem {
     #[serde(flatten)]
     pub summary: RemoteMangaSummary,
     pub latest_chapter: Option<String>,
+    /// Relative age the source itself printed for that chapter, e.g.
+    /// "37 phút trước". Never computed locally, so it cannot drift off the
+    /// source's own wording.
+    pub latest_time: Option<String>,
 }
 
 /// A source's own front page, split into the three rails the Home screen

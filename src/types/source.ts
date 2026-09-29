@@ -64,6 +64,8 @@ export interface SaveResultDto {
 export interface HomeFeedItemDto extends RemoteMangaSummaryDto {
   /** Chapter label the source printed next to the card, e.g. "Chapter 3824". */
   latestChapter: string | null;
+  /** Relative age the source printed, e.g. "37 phút trước". */
+  latestTime: string | null;
 }
 
 export interface HomeFeedDto {

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Compass, Star, Flame, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Flame, Library, Star } from "lucide-react";
 import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
@@ -15,6 +15,10 @@ import LocalContinueReading from "./components/LocalContinueReading";
 /// a fixed product decision, not a user-selectable setting.
 const HOME_SOURCE_ID = "truyenqq";
 
+function remotePath(item: HomeFeedItemDto) {
+  return `/remote/${item.sourceId}/${item.sourceMangaId}`;
+}
+
 function CoverImage({ item, label }: { item: HomeFeedItemDto; label: string }) {
   const url = useCoverUrl(item.sourceId, item.sourceMangaId, item.coverKey);
   if (!url) {
@@ -27,22 +31,11 @@ function CoverImage({ item, label }: { item: HomeFeedItemDto; label: string }) {
   return <img className="home-card__cover" src={url} alt={label} loading="lazy" />;
 }
 
-function MangaTile({ item }: { item: HomeFeedItemDto }) {
-  return (
-    <li className="home-card">
-      <a className="home-card__link" href={`#/remote/${item.sourceId}/${item.sourceMangaId}`}>
-        <span className="home-card__art">
-          <CoverImage item={item} label={item.title} />
-        </span>
-        <span className="home-card__title">{item.title}</span>
-        {item.latestChapter && <span className="muted home-card__chapter">{item.latestChapter}</span>}
-      </a>
-    </li>
-  );
-}
-
 function Hero({ items }: { items: HomeFeedItemDto[] }) {
   const [index, setIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const count = items.length;
   if (count === 0) {
     return null;
@@ -51,40 +44,85 @@ function Hero({ items }: { items: HomeFeedItemDto[] }) {
   const at = index % count;
   const active = items[at];
   const step = (delta: number) => setIndex((current) => (current + delta + count) % count);
+
+  async function addToLibrary() {
+    setSaving(true);
+    setSaved(null);
+    setSaveError(null);
+    try {
+      const result = await localServices.source.save({
+        sourceId: active.sourceId,
+        sourceMangaId: active.sourceMangaId,
+      });
+      setSaved(`Đã lưu ${result.savedChapterCount} chương`);
+      bumpDomain("library");
+      bumpDomain("home");
+    } catch (error: unknown) {
+      setSaveError(normalizeIpcError(error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const meta = [active.latestChapter, active.latestTime].filter(Boolean).join(" · ");
   return (
-    <section className="home-hero-card" aria-label="Nổi bật">
-      <div className="home-hero-card__art">
-        <CoverImage item={active} label={active.title} />
-      </div>
-      <div className="home-hero-card__body">
-        <span className="chip chip--accent">
-          <Flame size={12} aria-hidden="true" /> Nổi bật
-        </span>
-        <h2 className="home-hero-card__title">{active.title}</h2>
-        {active.latestChapter && (
-          <p className="muted home-hero-card__chapter">{active.latestChapter}</p>
-        )}
-        <div className="home-hero-card__actions">
-          <Button variant="primary" to={`/remote/${active.sourceId}/${active.sourceMangaId}`}>
+    <section className="home-hero" aria-label="Nổi bật">
+      <div className="home-hero__body">
+        <div className="chip-row">
+          <span className="chip chip--accent">
+            <Flame size={12} aria-hidden="true" /> Nổi bật
+          </span>
+          <span className="chip">{active.sourceDisplayName}</span>
+        </div>
+        <h2 className="home-hero__title">{active.title}</h2>
+        {meta && <p className="muted home-hero__meta">{meta}</p>}
+        <div className="home-hero__actions">
+          <Button variant="primary" to={remotePath(active)}>
+            <Library size={16} aria-hidden="true" />
             Xem chi tiết
           </Button>
-          <Button variant="ghost" to="/discover">
-            <Compass size={16} aria-hidden="true" />
-            Khám phá
+          <Button variant="secondary" onClick={() => void addToLibrary()} disabled={saving}>
+            {saving ? "Đang lưu…" : "Thêm vào thư viện"}
           </Button>
         </div>
+        {saved && (
+          <p className="home-hero__note" role="status">
+            {saved}
+          </p>
+        )}
+        {saveError && (
+          <p className="queue-error" role="alert">
+            {saveError}
+          </p>
+        )}
+      </div>
+      <div className="home-hero__art">
+        <CoverImage item={active} label={active.title} />
       </div>
       {count > 1 && (
-        <div className="home-hero-card__nav">
-          <button type="button" className="home-hero-card__arrow" onClick={() => step(-1)} aria-label="Truyện trước">
+        <>
+          <button
+            type="button"
+            className="home-hero__arrow home-hero__arrow--left"
+            onClick={() => step(-1)}
+            aria-label="Truyện trước"
+          >
             <ChevronLeft size={18} aria-hidden="true" />
           </button>
-          <ul className="home-hero-card__dots" aria-label="Chọn truyện nổi bật">
+          <button
+            type="button"
+            className="home-hero__arrow home-hero__arrow--right"
+            onClick={() => step(1)}
+            aria-label="Truyện kế tiếp"
+          >
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+          <ul className="home-hero__dots" aria-label="Chọn truyện nổi bật">
             {items.map((item, dot) => (
               <li key={item.sourceMangaId}>
                 <button
                   type="button"
-                  className={`home-hero-card__dot${dot === at ? " home-hero-card__dot--on" : ""}`}
+                  className={`home-hero__dot${dot === at ? " home-hero__dot--on" : ""}`}
                   onClick={() => setIndex(dot)}
                   aria-label={item.title}
                   aria-current={dot === at}
@@ -92,12 +130,44 @@ function Hero({ items }: { items: HomeFeedItemDto[] }) {
               </li>
             ))}
           </ul>
-          <button type="button" className="home-hero-card__arrow" onClick={() => step(1)} aria-label="Truyện kế tiếp">
-            <ChevronRight size={18} aria-hidden="true" />
-          </button>
-        </div>
+        </>
       )}
     </section>
+  );
+}
+
+function HotCard({ item }: { item: HomeFeedItemDto }) {
+  return (
+    <li className="home-card">
+      <a className="home-card__link" href={`#${remotePath(item)}`}>
+        <span className="home-card__art">
+          <CoverImage item={item} label={item.title} />
+        </span>
+        <span className="home-card__title">{item.title}</span>
+        {item.latestChapter && (
+          <span className="muted home-card__chapter">{item.latestChapter}</span>
+        )}
+      </a>
+    </li>
+  );
+}
+
+function UpdatedRow({ item }: { item: HomeFeedItemDto }) {
+  return (
+    <li className="home-updated">
+      <a className="home-updated__link" href={`#${remotePath(item)}`}>
+        <span className="home-updated__art">
+          <CoverImage item={item} label={item.title} />
+        </span>
+        <span className="home-updated__text">
+          <span className="home-card__title">{item.title}</span>
+          {item.latestChapter && (
+            <span className="muted home-updated__chapter">{item.latestChapter}</span>
+          )}
+          {item.latestTime && <span className="home-updated__time">{item.latestTime}</span>}
+        </span>
+      </a>
+    </li>
   );
 }
 
@@ -112,7 +182,8 @@ export default function HomePage() {
   if (feed.state === "loading") {
     return (
       <div className="page-stack" aria-busy="true" aria-label="Đang tải trang chủ">
-        <Skeleton height="18rem" label="Đang tải truyện nổi bật" />
+        <Skeleton height="19rem" label="Đang tải truyện nổi bật" />
+        <Skeleton height="15rem" label="Đang tải truyện đang hot" />
         <Skeleton height="14rem" label="Đang tải mới cập nhật" />
       </div>
     );
@@ -143,36 +214,54 @@ export default function HomePage() {
     <div className="page-stack">
       <Hero items={featured} />
 
-      <section aria-label="Mới cập nhật">
+      <section aria-label="Truyện đang hot">
         <div className="section-header">
           <h2>
-            <Clock size={16} aria-hidden="true" /> Mới cập nhật
+            <Flame size={16} aria-hidden="true" /> Truyện đang hot
           </h2>
           <Button to="/discover" variant="ghost">
             Xem tất cả
           </Button>
         </div>
-        <ul className="home-grid" aria-label="Truyện mới cập nhật">
-          {newest.map((item) => (
-            <MangaTile key={item.sourceMangaId} item={item} />
+        <ul className="home-hot" aria-label="Danh sách truyện đang hot">
+          {featured.map((item) => (
+            <HotCard key={item.sourceMangaId} item={item} />
           ))}
         </ul>
       </section>
 
       <div className="home-split">
-        <LocalContinueReading />
-        <section className="panel home-ranking" aria-label="Xem nhiều">
-          <h2 className="panel__title">
-            <Star size={16} aria-hidden="true" /> Xem nhiều
-          </h2>
-          <ol className="home-ranking__list">
-            {popular.map((item) => (
-              <li key={item.sourceMangaId}>
-                <a href={`#/remote/${item.sourceId}/${item.sourceMangaId}`}>{item.title}</a>
-              </li>
+        <section aria-label="Cập nhật gần đây">
+          <div className="section-header">
+            <h2>
+              <Clock size={16} aria-hidden="true" /> Cập nhật gần đây
+            </h2>
+            <Button to="/discover" variant="ghost">
+              Xem tất cả
+            </Button>
+          </div>
+          <ul className="home-updated-grid" aria-label="Truyện mới cập nhật">
+            {newest.map((item) => (
+              <UpdatedRow key={item.sourceMangaId} item={item} />
             ))}
-          </ol>
+          </ul>
         </section>
+
+        <div className="home-side">
+          <LocalContinueReading />
+          <section className="panel home-ranking" aria-label="Xem nhiều">
+            <h2 className="panel__title">
+              <Star size={16} aria-hidden="true" /> Xem nhiều
+            </h2>
+            <ol className="home-ranking__list">
+              {popular.map((item) => (
+                <li key={item.sourceMangaId}>
+                  <a href={`#${remotePath(item)}`}>{item.title}</a>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </div>
       </div>
     </div>
   );

@@ -914,6 +914,7 @@ impl SourceAdapter for MadaraGeneric {
                     status: "unknown".to_string(),
                 },
                 latest_chapter: text_of(&chapter_line),
+                latest_time: None,
             });
             if featured.len() >= 8 {
                 break;
@@ -927,6 +928,7 @@ impl SourceAdapter for MadaraGeneric {
         let story_title = Selector::parse("div.info h3.name a[href]").unwrap();
         let story_cover = Selector::parse("div.cover img[src]").unwrap();
         let story_chapter = Selector::parse("a.chapter-name[href]").unwrap();
+        let story_time = Selector::parse("div.chap span.time").unwrap();
         for node in document.select(&story_item) {
             let title_anchor = node.select(&story_title).next();
             let Some(href) = title_anchor
@@ -968,6 +970,11 @@ impl SourceAdapter for MadaraGeneric {
                     .next()
                     .map(|a| a.text().collect::<String>().trim().to_string())
                     .filter(|value| !value.is_empty()),
+                latest_time: node
+                    .select(&story_time)
+                    .next()
+                    .map(|t| t.text().collect::<String>().trim().to_string())
+                    .filter(|value| !value.is_empty()),
             });
             if newest.len() >= 12 {
                 break;
@@ -990,6 +997,7 @@ impl SourceAdapter for MadaraGeneric {
             .map(|summary| HomeFeedItem {
                 summary,
                 latest_chapter: None,
+                latest_time: None,
             })
             .collect();
         let feed = RemoteHomeFeed {
@@ -2025,7 +2033,7 @@ mod tests {
         <div class="item">
           <div class="cover"><a href="/doi-thu-dinh-menh"><img src="/media/book/doi-thu.jpg"></a></div>
           <div class="info"><h3 class="name"><a href="/doi-thu-dinh-menh">Đối Thủ Định Mệnh</a></h3>
-            <div class="latest"><div class="chap"><a class="chapter-name" href="/doi-thu-dinh-menh/chapter-12">Chapter 12</a></div></div>
+            <div class="latest"><div class="chap"><a class="chapter-name" href="/doi-thu-dinh-menh/chapter-12">Chapter 12</a><span class="time">37 phút trước</span></div></div>
           </div>
         </div>
       </div></div></div>
@@ -2063,6 +2071,8 @@ mod tests {
             "the first chapter link is the newest"
         );
         assert_eq!(feed.popular[0].summary.title, "Đại Quản Gia Là Ma Hoàng");
+        assert_eq!(feed.newest[0].latest_time.as_deref(), Some("37 phút trước"));
+        assert_eq!(feed.featured[0].latest_time, None);
         assert!(feed.popular[0].summary.cover_key.is_none());
         assert!(feed.popular[0].latest_chapter.is_none());
     }
@@ -2102,10 +2112,11 @@ mod tests {
             assert!(!rail.is_empty(), "{label} rail is empty");
             let first = &rail[0];
             println!(
-                "  {label}[0]: {} / {} / chap={:?} / cover={:?}",
+                "  {label}[0]: {} / {} / chap={:?} / time={:?} / cover={:?}",
                 first.summary.source_manga_id,
                 first.summary.title,
                 first.latest_chapter,
+                first.latest_time,
                 first.summary.cover_key
             );
             assert!(
@@ -2114,6 +2125,12 @@ mod tests {
             );
         }
         // Covers must be mintable from the keys the rails published.
+        assert!(
+            feed.newest
+                .iter()
+                .any(|item| item.latest_time.as_deref().is_some_and(|t| !t.is_empty())),
+            "newest rail must carry the source's own relative timestamps"
+        );
         let with_cover = feed
             .newest
             .iter()
