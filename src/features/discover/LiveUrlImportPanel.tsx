@@ -40,17 +40,13 @@ export default function LiveUrlImportPanel() {
         placeholder="https://<domain>/manga/<slug> — thuộc nguồn đã đăng ký"
         value={url}
         onChange={(event) => setUrl(event.target.value)}
-        hint="Chỉ nhận HTTPS, host đúng khớp danh sách nguồn đã đăng ký; app không fetch URL lạ để đoán."
       />
       <div className="settings-actions">
         <Button variant="primary" onClick={() => void submit()} disabled={busy || url.trim() === ""}>
-          {busy ? "Đang kiểm tra..." : "Kiểm tra URL"}
+          {busy ? "Đang phân tích..." : "Phân tích URL"}
         </Button>
       </div>
       {failure && <ErrorState title="Không nhận dạng được URL" description={failure} />}
-      <p className="muted">
-        URL hợp lệ sẽ mở trang xem trước từ xa. Việc dán URL không tự lưu vào Library và không tải bất kỳ file nào.
-      </p>
     </div>
   );
 }

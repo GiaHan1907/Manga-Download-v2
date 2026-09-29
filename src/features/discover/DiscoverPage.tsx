@@ -1,115 +1,20 @@
-import { Search } from "lucide-react";
-import { useState } from "react";
+import { Compass, Link2, Sparkles } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
-import Button from "../../components/ui/Button";
-import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
-import Input from "../../components/ui/Input";
-import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
 import Tabs from "../../components/ui/Tabs";
-import type { MangaSummary } from "../../domain/manga";
 import { services } from "../../services/provider";
-import type { CatalogSource } from "../../services/catalog.service";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useServicesVersion } from "../../shared/hooks/useServices";
+import DiscoverSourcesPanel from "./DiscoverSourcesPanel";
+import DiscoverSuggestions from "./DiscoverSuggestions";
 import LiveSearchPanel from "./LiveSearchPanel";
 import LiveUrlImportPanel from "./LiveUrlImportPanel";
 import UrlImportPanel from "./components/UrlImportPanel";
-import { useDebouncedValue } from "./hooks/useDebouncedValue";
+import SearchPanel from "./components/SearchPanel";
 
-function SearchPanel({ sources }: { sources: CatalogSource[] }) {
-  const version = useServicesVersion();
-  const [query, setQuery] = useState("");
-  const [selectedSources, setSelectedSources] = useState<string[]>([]);
-  const debouncedQuery = useDebouncedValue(query, 300);
-
-  const enabledSourceIds = sources.filter((source) => source.enabled).map((source) => source.id);
-  const effectiveSourceIds = (
-    selectedSources.length > 0 ? selectedSources : enabledSourceIds
-  ).filter((id) => enabledSourceIds.includes(id));
-
-  const results = useAsyncData<MangaSummary[]>(
-    () =>
-      effectiveSourceIds.length === 0
-        ? Promise.resolve([])
-        : services.catalog.search(debouncedQuery, effectiveSourceIds),
-    [debouncedQuery, selectedSources, version],
-  );
-
-  const enabledSources = sources.filter((source) => source.enabled);
-
-  function toggleSource(sourceId: string) {
-    setSelectedSources((current) =>
-      current.includes(sourceId) ? current.filter((id) => id !== sourceId) : [...current, sourceId],
-    );
-  }
-
-  function clearFilters() {
-    setQuery("");
-    setSelectedSources([]);
-  }
-
-  return (
-    <div className="page-stack">
-      <div className="discover-controls">
-        <Input
-          label="Tìm kiếm demo"
-          type="search"
-          placeholder="Nhập tên, tác giả hoặc thể loại (bỏ dấu vẫn khớp)..."
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <fieldset className="source-filter" aria-label="Lọc theo nguồn demo">
-          <legend>Nguồn</legend>
-          {enabledSources.length === 0 && <p className="muted">Không có nguồn nào đang bật. Bật lại trong Settings → Sources.</p>}
-          {enabledSources.map((source) => (
-            <label key={source.id} className="source-filter__option">
-              <input type="checkbox" checked={selectedSources.includes(source.id)} onChange={() => toggleSource(source.id)} />
-              {source.label}
-            </label>
-          ))}
-        </fieldset>
-      </div>
-
-      {results.state === "loading" && (
-        <div className="card-grid" aria-busy="true">
-          <Skeleton height="18rem" />
-          <Skeleton height="18rem" />
-          <Skeleton height="18rem" />
-        </div>
-      )}
-      {results.state === "error" && (
-        <ErrorState title="Dịch vụ demo lỗi" description="Không thực hiện được truy vấn mẫu. Thử lại hoặc đổi bộ lọc." />
-      )}
-      {results.state === "success" && results.data.length === 0 && (
-        <EmptyState
-          title="Không có kết quả mẫu"
-          description="Câu truy vấn hoặc bộ lọc nguồn không khớp fixture nào. Thử từ khóa khác như “hanh trinh” hoặc “giấy”."
-          action={<Button onClick={clearFilters}>Xóa bộ lọc</Button>}
-        />
-      )}
-      {results.state === "success" && (
-        <div className="card-grid">
-          {results.data.map((manga) => (
-            <Link key={manga.id} to={`/manga/${manga.id}`} className="card-link" aria-label={`Mở ${manga.title}`}>
-              <MangaCard
-                title={manga.title}
-                subtitle={`${manga.author ?? "Không rõ tác giả"} · ${manga.genres.join(", ")}`}
-                status={manga.status}
-                coverUrl={manga.coverAsset}
-              />
-            </Link>
-          ))}
-        </div>
-      )}
-      <p className="muted">
-        <Search size={13} aria-hidden="true" /> Kết quả hiển thị theo thứ tự fixture ổn định; chọn một thẻ để mở chi tiết truyện.
-      </p>
-    </div>
-  );
-}
-
+/// Dev-only fixture sandbox, kept reachable on its old routes so existing
+/// tests and bookmarks keep working while the live screen is the default.
 function DemoSandbox({ initialTab }: { initialTab: string }) {
   const version = useServicesVersion();
   const sources = useAsyncData(() => services.catalog.listSources(), [version]);
@@ -118,9 +23,13 @@ function DemoSandbox({ initialTab }: { initialTab: string }) {
     return <Skeleton height="12rem" label="Đang tải nguồn demo" />;
   }
   if (sources.state === "error") {
-    return <ErrorState title="Không tải được danh sách nguồn demo" description="Dịch vụ catalog lỗi. Reload để thử lại." />;
+    return (
+      <ErrorState
+        title="Không tải được danh sách nguồn demo"
+        description="Dịch vụ catalog lỗi. Reload để thử lại."
+      />
+    );
   }
-
   return (
     <Tabs
       defaultValue={initialTab === "url" ? "url" : "search"}
@@ -136,34 +45,81 @@ export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
   const requested = searchParams.get("tab") ?? "search";
   const onlineQuery = searchParams.get("q") ?? "";
-  // Plan §2.7: demo fixture sandbox is dev-build only — never rendered in a
-  // production app where it could be mistaken for real sources.
-  const demoEnabled = import.meta.env.DEV;
-  const initialTab =
-    requested === "url" ||
-    requested === "search" ||
-    (demoEnabled && (requested === "demo" || requested === "demo-url"))
-      ? requested === "demo-url"
-        ? "demo"
-        : requested
-      : "search";
-  const demoInitialTab = requested === "url" || requested === "demo-url" ? "url" : "search";
+  const showDemo =
+    import.meta.env.DEV && (requested === "demo" || requested === "demo-url");
 
-  const items = [
-    { id: "search", label: "Tìm kiếm", content: <LiveSearchPanel initialQuery={onlineQuery} /> },
-    { id: "url", label: "Import URL", content: <LiveUrlImportPanel /> },
-  ];
-  if (demoEnabled) {
-    items.push({
-      id: "demo",
-      label: "Demo sandbox (dev)",
-      content: <DemoSandbox initialTab={demoInitialTab} />,
-    });
+  // Rendered as its own screen rather than a section of the live page: two
+  // import boxes on one screen made the same control name ambiguous.
+  if (showDemo) {
+    return (
+      <div className="page-stack">
+        <div className="section-header">
+          <h1>Demo sandbox (chỉ bản dev)</h1>
+          <Link to="/discover" className="muted">
+            Về Khám phá thật
+          </Link>
+        </div>
+        <DemoSandbox initialTab={requested === "demo-url" ? "url" : "search"} />
+      </div>
+    );
   }
 
   return (
     <div className="page-stack">
-      <Tabs defaultValue={initialTab} items={items} />
+      <section className="discover-hero" aria-label="Giới thiệu Khám phá">
+        <div className="discover-hero__text">
+          <h1 className="discover-hero__title">
+            Khám phá <span className="discover-hero__accent">truyện</span>
+          </h1>
+          <p className="muted">
+            Tìm truyện theo tên hoặc tác giả, nhập URL từ nguồn được hỗ trợ, hoặc lưu nhanh một bộ đang nổi bật.
+          </p>
+        </div>
+        <span className="discover-hero__mark" aria-hidden="true">
+          <Compass size={26} />
+        </span>
+      </section>
+
+      <div className="discover-layout">
+        <div className="discover-main page-stack">
+          <section aria-label="Tìm kiếm truyện">
+            <div className="section-header">
+              <h2>
+                <Sparkles size={16} aria-hidden="true" /> Tìm kiếm truyện
+              </h2>
+            </div>
+            <LiveSearchPanel initialQuery={onlineQuery} />
+          </section>
+
+          <section className="panel" aria-label="Thêm bằng URL">
+            <div className="section-header">
+              <h2 className="panel__title">
+                <Link2 size={16} aria-hidden="true" /> Thêm bằng URL
+              </h2>
+            </div>
+            <p className="muted discover-url__hint">
+              Dán liên kết một truyện thuộc nguồn đã đăng ký để phân tích và thêm vào thư viện.
+            </p>
+            <LiveUrlImportPanel />
+          </section>
+
+          <section aria-label="Truyện nổi bật trên nguồn">
+            <div className="section-header">
+              <h2>
+                <Sparkles size={16} aria-hidden="true" /> Đề xuất cho bạn
+              </h2>
+            </div>
+            <p className="muted discover-suggestions__caption">
+              Những bộ đang nổi bật trên TruyenQQ — chưa có gợi ý theo sở thích cá nhân.
+            </p>
+            <DiscoverSuggestions />
+          </section>
+        </div>
+
+        <aside className="discover-aside">
+          <DiscoverSourcesPanel />
+        </aside>
+      </div>
     </div>
   );
 }

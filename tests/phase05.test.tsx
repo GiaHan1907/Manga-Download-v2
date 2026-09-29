@@ -125,6 +125,8 @@ beforeEach(() => {
         return Promise.resolve(Boolean(args?.enabled));
       case "remove_manga_source":
         return Promise.resolve(undefined);
+      case "get_home_feed":
+        return Promise.resolve({ featured: [], newest: [], popular: [] });
       default:
         return Promise.reject(new Error(`Unknown command ${cmd}`));
     }
@@ -175,6 +177,9 @@ describe("T05 live search", () => {
           hasMore: false,
         });
       }
+      if (cmd === "get_home_feed") {
+        return Promise.resolve({ featured: [], newest: [], popular: [] });
+      }
       return Promise.resolve([]);
     });
     renderAt("/discover");
@@ -204,6 +209,9 @@ describe("T05 live search", () => {
             : { items: [item(2)], sourceErrors: [], hasMore: false },
         );
       }
+      if (cmd === "get_home_feed") {
+        return Promise.resolve({ featured: [], newest: [], popular: [] });
+      }
       return Promise.resolve([]);
     });
     renderAt("/discover");
@@ -226,10 +234,10 @@ describe("T05 live search", () => {
 
 describe("T05 URL import", () => {
   it("surfaces the structured rejection code without fetching unknown hosts", async () => {
-    renderAt("/discover?tab=url");
+    renderAt("/discover");
     const input = await screen.findByPlaceholderText(/thuộc nguồn đã đăng ký/);
     fireEvent.change(input, { target: { value: "https://not-registered.test/manga/x/" } });
-    fireEvent.click(screen.getByRole("button", { name: "Kiểm tra URL" }));
+    fireEvent.click(screen.getByRole("button", { name: "Phân tích URL" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("URL không thuộc nguồn nào được hỗ trợ.");
     expect(alert.textContent).toContain("UNSUPPORTED_SOURCE");
@@ -335,6 +343,57 @@ describe("T05 Library truthfulness (round-1 finding)", () => {
     // Saved metadata with zero downloaded chapters must NOT look downloaded.
     expect(await screen.findByText("0/2 chương offline · không rõ tác giả")).toBeDefined();
     expect(screen.queryByText(/đã có file|chương offline \d/)).toBeNull();
+  });
+});
+
+describe("T05 Discover Phase 1 panels", () => {
+  const FEATURED = {
+    ...SEARCH_ITEM,
+    sourceId: "truyenqq",
+    sourceMangaId: "vo-luyen-dinh-phong",
+    sourceDisplayName: "TruyenQQ",
+    title: "Võ Luyện Đỉnh Phong",
+    status: "unknown",
+    latestChapter: "Chapter 3824",
+    latestTime: null,
+  };
+
+  it("saves a featured suggestion through the quick add button", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      backend.calls.push([cmd, args]);
+      if (cmd === "get_home_feed") {
+        return Promise.resolve({ featured: [FEATURED], newest: [], popular: [] });
+      }
+      if (cmd === "list_supported_sources") return Promise.resolve(backend.sources);
+      if (cmd === "save_discovered_manga") {
+        return Promise.resolve({ mangaId: "m-77", savedChapterCount: 2, updated: false });
+      }
+      return Promise.resolve({ items: [], sourceErrors: [], hasMore: false });
+    });
+
+    renderAt("/discover");
+    expect(await screen.findByText("Võ Luyện Đỉnh Phong")).toBeDefined();
+    // The rail is labelled for what it actually is, not as a taste model.
+    expect(screen.getByText(/chưa có gợi ý theo sở thích cá nhân/)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Thêm Võ Luyện Đỉnh Phong vào thư viện" }));
+    expect(await screen.findByText("Đã lưu 2 chương")).toBeDefined();
+    const call = backend.calls.find(([cmd]) => cmd === "save_discovered_manga");
+    expect(call?.[1]).toEqual({ sourceId: "truyenqq", sourceMangaId: "vo-luyen-dinh-phong" });
+  });
+
+  it("toggles a source from the supported-sources rail and links to the registry", async () => {
+    renderAt("/discover");
+    const box = await screen.findByRole("checkbox", { name: "Kích hoạt Truyen Tuoi Tho" });
+    expect((box as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(box);
+    await waitFor(() => {
+      const call = backend.calls.find(([cmd]) => cmd === "set_source_enabled");
+      expect(call?.[1]).toEqual({ sourceId: "madara-truyentuoitho-com", enabled: false });
+    });
+    expect(
+      screen.getByRole("link", { name: /Quản lý nguồn truyện/ }).getAttribute("href"),
+    ).toContain("/settings/sources");
   });
 });
 

@@ -291,15 +291,16 @@ describe("T03-08/T04 Settings and Sources", () => {
   });
 
   it("disabling a source removes its manga from Discover results (§3.7)", async () => {
-    renderAt("/settings/sources");
+    const settingsScreen = renderAt("/settings/sources");
     const rows = await screen.findAllByRole("button", { name: "Tắt nguồn" });
     const betaToggle = rows[1];
     const betaLabel = betaToggle.closest(".source-row")?.textContent ?? "";
     expect(betaLabel).toContain("Beta");
     fireEvent.click(betaToggle);
 
-    fireEvent.click(screen.getByRole("link", { name: "Khám phá" }));
-    fireEvent.click(await screen.findByRole("tab", { name: /Demo sandbox/ }));
+    // The fixture sandbox is a separate dev-only screen (/discover?tab=demo).
+    settingsScreen.unmount();
+    renderAt("/discover?tab=demo");
     const input = await screen.findByPlaceholderText(/Nhập tên, tác giả/);
 
     fireEvent.change(input, { target: { value: "kỷ nguyên" } });
