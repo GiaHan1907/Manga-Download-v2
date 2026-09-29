@@ -974,7 +974,7 @@ button {
   align-items: start;
   display: grid;
   gap: var(--space-6);
-  grid-template-columns: minmax(0, 1fr) 15rem;
+  grid-template-columns: minmax(0, 1fr) 17.5rem;
   max-width: 100%;
   min-width: 0;
 }
@@ -1120,9 +1120,12 @@ button {
   border-radius: var(--radius-pill);
   color: var(--muted-foreground);
   cursor: pointer;
-  flex: 1;
-  font-size: var(--font-size-xs);
-  padding: 0.3rem 0.35rem;
+  flex: 1 1 0;
+  font-size: 0.7rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.3rem 0.25rem;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1150,6 +1153,13 @@ button {
   gap: var(--space-2);
 }
 
+/* Without an explicit basis the aspect-ratio thumb grows and squeezes the
+   title column to a single character per line. */
+.home-ranking__row .home-updated__art {
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+}
+
 .home-ranking__list {
   gap: var(--space-2);
 }
@@ -1171,7 +1181,7 @@ button {
   display: grid;
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
   text-decoration: none;
 }
 

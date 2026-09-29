@@ -19,9 +19,9 @@ const HOME_SOURCE_ID = "truyenqq";
 const HOT_PAGE_SIZE = 6;
 
 const RANKING_TABS: { id: RankingPeriod; label: string }[] = [
-  { id: "day", label: "Theo ngày" },
-  { id: "month", label: "Theo tháng" },
-  { id: "week", label: "Theo tuần" },
+  { id: "day", label: "Ngày" },
+  { id: "month", label: "Tháng" },
+  { id: "week", label: "Tuần" },
 ];
 
 function Ranking({ seed }: { seed: HomeFeedItemDto[] }) {
