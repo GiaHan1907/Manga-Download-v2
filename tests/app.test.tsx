@@ -50,6 +50,9 @@ function mockHealthySystem() {
     if (cmd === "library_list") {
       return Promise.resolve({ items: [], total: 0, limit: 3, offset: 0 });
     }
+    if (cmd === "get_home_feed") {
+      return Promise.resolve({ featured: [], newest: [], popular: [] });
+    }
     return Promise.reject(new Error("Unknown command"));
   });
 }
@@ -81,12 +84,12 @@ describe("App shell", () => {
 
     render(<App />);
 
-    // Home's authoritative stats query fails → real error state (no silent
-    // fallback to demo numbers), with the sanitized IPC message.
+    // Home's authoritative front-page query fails → real error state (no
+    // silent fallback to demo numbers), with the sanitized IPC message.
     await waitFor(() => {
-      expect(screen.getByText("Không tải được số liệu thư viện")).toBeDefined();
+      expect(screen.getByText("Không lấy được bảng tin trang chủ")).toBeDefined();
     });
-    expect(screen.getByText("Test error")).toBeDefined();
+    expect(screen.getByText(/Test error/)).toBeDefined();
   });
 
   it("renders the downloads screen and highlights active sidebar item", async () => {

@@ -120,6 +120,7 @@ pub fn run() {
             commands::discovery::remove_manga_source,
             commands::discovery::set_source_enabled,
             commands::discovery::search_manga,
+            commands::discovery::get_home_feed,
             commands::discovery::resolve_manga_url,
             commands::discovery::get_remote_manga_details,
             commands::discovery::get_remote_chapters,

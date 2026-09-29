@@ -50,6 +50,10 @@ pub struct HttpPolicy {
     /// this — user-registered sources always pass an empty list. Resolved
     /// addresses still must be public and everything stays https.
     pub allowed_domains: Vec<String>,
+    /// `Referer` sent on every request. Hotlink-protected CDNs reject image
+    /// GETs (403) without the site's own origin; ONLY app-shipped built-ins
+    /// set it, always to their own base origin (never a caller-supplied URL).
+    pub referer: Option<String>,
 }
 
 impl HttpPolicy {
@@ -57,6 +61,7 @@ impl HttpPolicy {
         HttpPolicy {
             allowed_hosts: allowed_hosts.iter().map(|host| host.to_string()).collect(),
             allowed_domains: Vec::new(),
+            referer: None,
         }
     }
 
@@ -261,6 +266,14 @@ impl GuardedHttp {
         Err(SourceError::Network)
     }
 
+    /// Attach the policy's own-origin `Referer` when a built-in needs it.
+    fn with_referer(&self, request: wreq::RequestBuilder) -> wreq::RequestBuilder {
+        match &self.policy.referer {
+            Some(referer) => request.header(wreq::header::REFERER, referer.as_str()),
+            None => request,
+        }
+    }
+
     async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, SourceError> {
         self.fetch_bytes_bounded(url, MAX_BODY_BYTES).await
     }
@@ -269,7 +282,8 @@ impl GuardedHttp {
         let mut current = self.validate(url)?;
         for _ in 0..=MAX_REDIRECTS {
             self.pace().await;
-            let response = match self.client.get(current.as_str()).send().await {
+            let request = self.with_referer(self.client.get(current.as_str()));
+            let response = match request.send().await {
                 Ok(response) => response,
                 Err(error) if error.is_connect() => {
                     return self.fetch_via_ech(&current, max_bytes).await;
@@ -347,13 +361,15 @@ impl GuardedHttp {
         let parsed = self.validate(url)?;
         self.pace().await;
         let result = self
-            .client
-            .post(parsed.as_str())
-            .header(
-                wreq::header::HeaderName::from_static("x-requested-with"),
-                "XMLHttpRequest",
+            .with_referer(
+                self.client
+                    .post(parsed.as_str())
+                    .header(
+                        wreq::header::HeaderName::from_static("x-requested-with"),
+                        "XMLHttpRequest",
+                    )
+                    .form(form),
             )
-            .form(form)
             .send()
             .await;
         let response = match result {

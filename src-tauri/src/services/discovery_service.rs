@@ -493,6 +493,19 @@ pub async fn resolve_url(
     fetch_detail(&source_id, adapter.as_ref(), pool, &slug).await
 }
 
+/// The Home screen's three rails, read from one vetted source's own front
+/// page. The source must be registered and enabled like any other call.
+pub async fn home_feed(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+) -> Result<crate::sources::dto::RemoteHomeFeed, AppError> {
+    validate_id(source_id, "sourceId")?;
+    let rows = source_repo::list_sources(pool).await?;
+    let adapter = require_enabled(registry, &rows, source_id)?;
+    adapter.home_feed().await.map_err(AppError::Source)
+}
+
 pub async fn remote_detail(
     registry: &SourceRegistry,
     pool: &SqlitePool,

@@ -59,3 +59,15 @@ export interface SaveResultDto {
   savedChapterCount: number;
   updated: boolean;
 }
+
+/** A source's own front page, split into the three Home rails. */
+export interface HomeFeedItemDto extends RemoteMangaSummaryDto {
+  /** Chapter label the source printed next to the card, e.g. "Chapter 3824". */
+  latestChapter: string | null;
+}
+
+export interface HomeFeedDto {
+  featured: HomeFeedItemDto[];
+  newest: HomeFeedItemDto[];
+  popular: HomeFeedItemDto[];
+}

@@ -45,7 +45,7 @@ h1,
 h2,
 h3,
 h4 {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.15;
@@ -116,7 +116,7 @@ button {
   border: 1px solid var(--primary);
   background: transparent;
   color: var(--accent-text);
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.05rem;
   font-weight: 700;
 }
@@ -281,7 +281,7 @@ button {
 
 .topbar__title {
   overflow: hidden;
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: var(--font-size-xl);
   font-weight: 600;
   text-overflow: ellipsis;
@@ -718,49 +718,199 @@ button {
   color: var(--muted-foreground);
 }
 
-.home-hero {
-  display: flex;
+/* Home: spotlight hero fed by the source's own front page. */
+.home-hero-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: var(--space-6);
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--hero-gradient);
+  padding: var(--space-6);
 }
 
-.home-hero__actions {
+.home-hero-card__art {
+  display: flex;
+  justify-content: center;
+  min-height: 12rem;
+}
+
+.home-hero-card__art .home-card__cover {
+  width: min(14rem, 100%);
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  box-shadow: 0 18px 48px rgba(6, 6, 12, 0.55);
+}
+
+.home-hero-card__body {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+.home-hero-card__title {
+  font-size: var(--font-size-2xl);
+  line-height: 1.2;
+}
+
+.home-hero-card__chapter {
+  font-size: var(--font-size-sm);
+}
+
+.home-hero-card__actions {
   display: flex;
   gap: var(--space-3);
   flex-wrap: wrap;
+  margin-top: var(--space-2);
 }
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: var(--space-4);
+.home-hero-card__nav {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.stat-card {
+.home-hero-card__arrow {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  cursor: pointer;
   display: grid;
+  place-items: center;
+  height: 1.75rem;
+  width: 1.75rem;
+}
+
+.home-hero-card__dots {
+  display: flex;
   gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.home-hero-card__dot {
+  background: var(--border-strong);
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  height: 0.4rem;
+  padding: 0;
+  width: 0.4rem;
+}
+
+.home-hero-card__dot--on {
+  background: var(--primary);
+  width: 1.1rem;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.home-card__link {
+  display: grid;
+  gap: var(--space-2);
+  text-decoration: none;
+}
+
+.home-card__art {
+  display: block;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  padding: var(--space-4);
+  background: var(--accent-deepest);
+  aspect-ratio: 3 / 4;
 }
 
-.stat-card__label {
-  color: var(--muted-foreground);
-  font-size: var(--font-size-xs);
+.home-card__cover {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
 }
 
-.stat-card__value {
-  color: var(--foreground);
+.home-card__placeholder {
+  color: var(--accent-text);
+  display: grid;
   font-size: var(--font-size-2xl);
-  font-weight: 800;
+  font-weight: 700;
+  height: 100%;
+  place-items: center;
 }
 
-.stat-card__hint {
-  color: var(--muted-foreground);
+.home-card__title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-card__chapter {
   font-size: var(--font-size-xs);
+}
+
+.home-split {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.home-ranking__list {
+  counter-reset: rank;
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.home-ranking__list li {
+  counter-increment: rank;
+  display: flex;
+  gap: var(--space-3);
+}
+
+.home-ranking__list li::before {
+  color: var(--muted-foreground);
+  content: counter(rank);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.25rem;
+}
+
+.home-ranking__list a {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+}
+
+.home-ranking__list a:hover {
+  color: var(--accent-text);
+}
+
+.chip--accent {
+  align-items: center;
+  border-color: var(--primary);
+  color: var(--accent-text);
+  display: inline-flex;
+  gap: 0.3rem;
 }
 
 .section-header {
@@ -1070,48 +1220,6 @@ button {
 .continue-hero__actions {
   display: flex;
   gap: var(--space-2);
-}
-.home-rail {
-  list-style: none;
-  margin: 0;
-  padding: 0 var(--space-1) var(--space-2);
-  display: flex;
-  gap: var(--space-3);
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-}
-.home-rail__card {
-  scroll-snap-align: start;
-  flex: 0 0 220px;
-  display: grid;
-  gap: var(--space-1);
-  align-content: start;
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.home-rail__title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.home-rail__chapter {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.home-rail__bar {
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border);
-  overflow: hidden;
-}
-.home-rail__bar > span {
-  display: block;
-  height: 100%;
-  background: var(--primary);
 }
 
 /* ---------- UI plan C5: success toast stack ---------- */

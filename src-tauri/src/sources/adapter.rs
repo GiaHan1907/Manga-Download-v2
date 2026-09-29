@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use url::Url;
 
-use super::dto::{PageManifest, RemoteMangaDetail, RemoteSearchPage, SourceInfo};
+use super::dto::{PageManifest, RemoteHomeFeed, RemoteMangaDetail, RemoteSearchPage, SourceInfo};
 
 /// Distinguishable provider outcomes; commands map these to the AppError
 /// envelope so the UI can tell URL problems from source state from transport
@@ -75,6 +75,12 @@ pub trait SourceAdapter: Send + Sync {
     fn info(&self) -> SourceInfo;
     fn owns_url(&self, url: &Url) -> bool;
     async fn search(&self, query: &str, page: u32) -> Result<RemoteSearchPage, SourceError>;
+    /// The source's own front page rails (featured / newest / most-read).
+    /// Default: unsupported — only sources whose homepage is actually parsed
+    /// by a vetted adapter can feed the Home screen.
+    async fn home_feed(&self) -> Result<RemoteHomeFeed, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
     /// Extracts the stable manga id from a URL this adapter already owns.
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError>;
     /// Recognizes a CHAPTER link of this source and returns

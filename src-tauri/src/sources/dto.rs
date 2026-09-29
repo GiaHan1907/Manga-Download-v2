@@ -80,6 +80,30 @@ pub struct RemoteSearchPage {
     pub has_more: bool,
 }
 
+/// One Home card plus the chapter label the source itself printed next to it.
+/// Nothing else is invented: no rating, no synopsis, no view count.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeFeedItem {
+    #[serde(flatten)]
+    pub summary: RemoteMangaSummary,
+    pub latest_chapter: Option<String>,
+}
+
+/// A source's own front page, split into the three rails the Home screen
+/// renders. Adapters that have no front page return
+/// `SourceError::UnsupportedOperation`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHomeFeed {
+    /// The source's featured/spotlight rail (drives the hero).
+    pub featured: Vec<HomeFeedItem>,
+    /// Newest updated stories.
+    pub newest: Vec<HomeFeedItem>,
+    /// Most-read ranking.
+    pub popular: Vec<HomeFeedItem>,
+}
+
 /// One ordered page in a chapter manifest. The `url` is source-controlled and
 /// internal to Rust only — it is never serialized to the renderer. Image bytes
 /// are fetched by the engine through the owning adapter's `fetch_image`.

@@ -46,6 +46,45 @@ function installBackendMock() {
         });
       case "app_list_local_download_tasks":
         return Promise.resolve({ items: [], total: 0, limit: 5, offset: 0 });
+      case "get_home_feed":
+        return Promise.resolve({
+          featured: [
+            {
+              sourceId: "truyenqq",
+              sourceMangaId: "vo-luyen-dinh-phong",
+              sourceDisplayName: "TruyenQQ",
+              title: "Võ Luyện Đỉnh Phong",
+              author: null,
+              coverKey: null,
+              status: "unknown",
+              latestChapter: "Chapter 3824",
+            },
+          ],
+          newest: [
+            {
+              sourceId: "truyenqq",
+              sourceMangaId: "doi-thu-dinh-menh",
+              sourceDisplayName: "TruyenQQ",
+              title: "Đối Thủ Định Mệnh",
+              author: null,
+              coverKey: null,
+              status: "unknown",
+              latestChapter: "Chapter 12",
+            },
+          ],
+          popular: [
+            {
+              sourceId: "truyenqq",
+              sourceMangaId: "dai-quan-gia-la-ma-hoang",
+              sourceDisplayName: "TruyenQQ",
+              title: "Đại Quản Gia Là Ma Hoàng",
+              author: null,
+              coverKey: null,
+              status: "unknown",
+              latestChapter: null,
+            },
+          ],
+        });
       case "storage_status":
         return Promise.resolve({
           libraryBytes: 12345,
@@ -116,11 +155,18 @@ describe("T03-01/T03-02 Home journey (real data since Phase 08)", () => {
     expect(await screen.findByRole("heading", { name: "Khám phá" })).toBeDefined();
   });
 
-  it("renders stats from the real library_stats command, with no fixture claims", async () => {
+  it("renders the source front page rails from get_home_feed, with no fixture claims", async () => {
     renderAt("/");
-    const stats = await screen.findByLabelText("Thống kê local");
-    expect(within(stats).getByText("7")).toBeDefined();
-    expect(within(stats).getByText("3")).toBeDefined();
+    const hero = await screen.findByLabelText("Nổi bật");
+    expect(within(hero).getByText("Võ Luyện Đỉnh Phong")).toBeDefined();
+    expect(within(hero).getByText("Chapter 3824")).toBeDefined();
+
+    const updated = await screen.findByLabelText("Mới cập nhật");
+    expect(within(updated).getByText("Đối Thủ Định Mệnh")).toBeDefined();
+
+    const ranking = await screen.findByLabelText("Xem nhiều");
+    expect(within(ranking).getByText("Đại Quản Gia Là Ma Hoàng")).toBeDefined();
+
     expect(screen.queryByText(/dữ liệu mẫu/)).toBeNull();
   });
 

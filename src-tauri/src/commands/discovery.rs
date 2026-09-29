@@ -113,6 +113,16 @@ pub async fn search_manga(
 }
 
 #[tauri::command]
+pub async fn get_home_feed(
+    source_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::sources::dto::RemoteHomeFeed, AppError> {
+    validate_id(&source_id, "sourceId")?;
+    let registry = snapshot(&state)?;
+    discovery_service::home_feed(&registry, &state.db, &source_id).await
+}
+
+#[tauri::command]
 pub async fn resolve_manga_url(
     url: String,
     state: State<'_, AppState>,

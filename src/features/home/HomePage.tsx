@@ -1,53 +1,136 @@
-import { Compass, Download, Link2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Compass, Star, Flame, Clock } from "lucide-react";
 import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
-import StatusBadge from "../../components/ui/StatusBadge";
-import {
-  listLocalDownloadTasks,
-  libraryStats,
-  normalizeIpcError,
-} from "../../shared/api/desktop";
-import type { DownloadTaskDto, LibraryStatsDto } from "../../types/backend";
-import { DOWNLOAD_STATUS_LABEL, formatBytes } from "../../types/downloads";
+import { localServices } from "../../services/provider";
+import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
-import { useDomainVersion } from "../../shared/hooks/useInvalidation";
+import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
+import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
+import type { HomeFeedDto, HomeFeedItemDto } from "../../types/source";
 import LocalContinueReading from "./components/LocalContinueReading";
-import StatCard from "./components/StatCard";
 
-const STAT_TONE: Partial<Record<DownloadTaskDto["status"], "success" | "warning" | "error" | "neutral">> = {
-  completed: "success",
-  failed: "error",
-  cancelled: "neutral",
-};
+/// The Home screen is fed by one vetted source's own front page. TruyenQQ is
+/// a fixed product decision, not a user-selectable setting.
+const HOME_SOURCE_ID = "truyenqq";
+
+function CoverImage({ item, label }: { item: HomeFeedItemDto; label: string }) {
+  const url = useCoverUrl(item.sourceId, item.sourceMangaId, item.coverKey);
+  if (!url) {
+    return (
+      <span className="home-card__placeholder" aria-hidden="true">
+        {item.title.trim().charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return <img className="home-card__cover" src={url} alt={label} loading="lazy" />;
+}
+
+function MangaTile({ item }: { item: HomeFeedItemDto }) {
+  return (
+    <li className="home-card">
+      <a className="home-card__link" href={`#/remote/${item.sourceId}/${item.sourceMangaId}`}>
+        <span className="home-card__art">
+          <CoverImage item={item} label={item.title} />
+        </span>
+        <span className="home-card__title">{item.title}</span>
+        {item.latestChapter && <span className="muted home-card__chapter">{item.latestChapter}</span>}
+      </a>
+    </li>
+  );
+}
+
+function Hero({ items }: { items: HomeFeedItemDto[] }) {
+  const [index, setIndex] = useState(0);
+  const count = items.length;
+  if (count === 0) {
+    return null;
+  }
+  // Derived so a shrinking feed can never point past the end.
+  const at = index % count;
+  const active = items[at];
+  const step = (delta: number) => setIndex((current) => (current + delta + count) % count);
+  return (
+    <section className="home-hero-card" aria-label="Nổi bật">
+      <div className="home-hero-card__art">
+        <CoverImage item={active} label={active.title} />
+      </div>
+      <div className="home-hero-card__body">
+        <span className="chip chip--accent">
+          <Flame size={12} aria-hidden="true" /> Nổi bật
+        </span>
+        <h2 className="home-hero-card__title">{active.title}</h2>
+        {active.latestChapter && (
+          <p className="muted home-hero-card__chapter">{active.latestChapter}</p>
+        )}
+        <div className="home-hero-card__actions">
+          <Button variant="primary" to={`/remote/${active.sourceId}/${active.sourceMangaId}`}>
+            Xem chi tiết
+          </Button>
+          <Button variant="ghost" to="/discover">
+            <Compass size={16} aria-hidden="true" />
+            Khám phá
+          </Button>
+        </div>
+      </div>
+      {count > 1 && (
+        <div className="home-hero-card__nav">
+          <button type="button" className="home-hero-card__arrow" onClick={() => step(-1)} aria-label="Truyện trước">
+            <ChevronLeft size={18} aria-hidden="true" />
+          </button>
+          <ul className="home-hero-card__dots" aria-label="Chọn truyện nổi bật">
+            {items.map((item, dot) => (
+              <li key={item.sourceMangaId}>
+                <button
+                  type="button"
+                  className={`home-hero-card__dot${dot === at ? " home-hero-card__dot--on" : ""}`}
+                  onClick={() => setIndex(dot)}
+                  aria-label={item.title}
+                  aria-current={dot === at}
+                />
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="home-hero-card__arrow" onClick={() => step(1)} aria-label="Truyện kế tiếp">
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function HomePage() {
   const homeVersion = useDomainVersion("home");
   const [retryNonce, setRetryNonce] = useState(0);
-  const stats = useAsyncData<LibraryStatsDto>(() => libraryStats(), [homeVersion, retryNonce]);
-  const recentTasks = useAsyncData<DownloadTaskDto[]>(
-    async () => (await listLocalDownloadTasks({ limit: 5, offset: 0 })).items,
+  const feed = useAsyncData<HomeFeedDto>(
+    () => localServices.source.homeFeed(HOME_SOURCE_ID),
     [homeVersion, retryNonce],
   );
 
-  if (stats.state === "loading" || recentTasks.state === "loading") {
+  if (feed.state === "loading") {
     return (
-      <div className="page-stack" aria-busy="true" aria-label="Đang tải bảng điều khiển">
-        {/* Layout-shaped skeleton (UI plan C4): hero + stats row + rail. */}
-        <Skeleton height="12rem" label="Đang tải continue reading" />
-        <Skeleton height="5rem" />
-        <Skeleton height="9rem" label="Đang tải tác vụ gần đây" />
+      <div className="page-stack" aria-busy="true" aria-label="Đang tải trang chủ">
+        <Skeleton height="18rem" label="Đang tải truyện nổi bật" />
+        <Skeleton height="14rem" label="Đang tải mới cập nhật" />
       </div>
     );
   }
-  if (stats.state === "error") {
+  if (feed.state === "error") {
+    const error = normalizeIpcError(feed.error);
     return (
       <ErrorState
-        title="Không tải được số liệu thư viện"
-        description={normalizeIpcError(stats.error).message}
+        title="Không lấy được bảng tin trang chủ"
+        description={`${error.message} (mã: ${error.code})`}
         action={
-          <Button variant="primary" onClick={() => setRetryNonce((value) => value + 1)}>
+          <Button
+            variant="primary"
+            onClick={() => {
+              bumpDomain("home");
+              setRetryNonce((value) => value + 1);
+            }}
+          >
             Thử lại
           </Button>
         }
@@ -55,84 +138,42 @@ export default function HomePage() {
     );
   }
 
+  const { featured, newest, popular } = feed.data;
   return (
     <div className="page-stack">
-      <LocalContinueReading />
-      <section className="panel home-hero">
-        <div>
-          <h2 className="panel__title">Bảng điều khiển</h2>
-        </div>
-        <div className="home-hero__actions">
-          <Button to="/discover" variant="primary">
-            <Compass size={16} aria-hidden="true" />
-            Khám phá
-          </Button>
-          <Button to="/discover?tab=url" variant="secondary">
-            <Link2 size={16} aria-hidden="true" />
-            Import URL
-          </Button>
-        </div>
-      </section>
+      <Hero items={featured} />
 
-      <section className="stats-grid" aria-label="Thống kê local">
-        <StatCard label="Truyện đã lưu" value={String(stats.data.savedMangas)} />
-        <StatCard
-          label="Chương offline"
-          value={String(stats.data.downloadedChapters)}
-        />
-        <StatCard
-          label="Dung lượng thư viện"
-          value={stats.data.localSizeBytes > 0 ? formatBytes(stats.data.localSizeBytes) : "0 B"}
-        />
-        <StatCard label="Yêu thích" value={String(stats.data.favorites)} />
-      </section>
-
-      <section aria-label="Tác vụ tải gần đây">
+      <section aria-label="Mới cập nhật">
         <div className="section-header">
           <h2>
-            <Download size={16} aria-hidden="true" /> Tác vụ tải gần đây
+            <Clock size={16} aria-hidden="true" /> Mới cập nhật
           </h2>
-          <Button to="/downloads" variant="ghost">
-            Mở Downloads
+          <Button to="/discover" variant="ghost">
+            Xem tất cả
           </Button>
         </div>
-        {recentTasks.state === "error" && (
-          <p className="queue-error" role="alert">
-            {normalizeIpcError(recentTasks.error).message}
-          </p>
-        )}
-        {recentTasks.state === "success" && recentTasks.data.length === 0 && (
-          <p className="muted">Chưa có tác vụ tải nào. Lưu truyện từ Discover rồi chọn chương để tải.</p>
-        )}
-        {recentTasks.state === "success" && recentTasks.data.length > 0 && (
-          <ul className="home-rail" aria-label="Bảng ngang tác vụ tải gần đây">
-            {recentTasks.data.map((task) => {
-              const pct =
-                task.totalPages > 0
-                  ? Math.min(100, Math.round((task.completedPages / task.totalPages) * 100))
-                  : 0;
-              return (
-                <li key={task.id} className="home-rail__card">
-                  <span className="home-rail__title">
-                    {task.mangaTitle ?? task.chapterId}
-                  </span>
-                  <span className="muted home-rail__chapter">{task.chapterTitle ?? task.chapterId}</span>
-                  <StatusBadge tone={STAT_TONE[task.status] ?? "warning"}>
-                    {DOWNLOAD_STATUS_LABEL[task.status] ?? task.status}
-                  </StatusBadge>
-                  <span className="home-rail__bar" role="presentation">
-                    <span style={{ width: `${pct}%` }} />
-                  </span>
-                  <span className="muted">
-                    {task.completedPages}/{task.totalPages} trang
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <ul className="home-grid" aria-label="Truyện mới cập nhật">
+          {newest.map((item) => (
+            <MangaTile key={item.sourceMangaId} item={item} />
+          ))}
+        </ul>
       </section>
 
+      <div className="home-split">
+        <LocalContinueReading />
+        <section className="panel home-ranking" aria-label="Xem nhiều">
+          <h2 className="panel__title">
+            <Star size={16} aria-hidden="true" /> Xem nhiều
+          </h2>
+          <ol className="home-ranking__list">
+            {popular.map((item) => (
+              <li key={item.sourceMangaId}>
+                <a href={`#/remote/${item.sourceId}/${item.sourceMangaId}`}>{item.title}</a>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </div>
     </div>
   );
 }

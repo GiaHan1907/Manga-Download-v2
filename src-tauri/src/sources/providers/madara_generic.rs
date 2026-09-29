@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::sources::adapter::{SourceAdapter, SourceError};
 use crate::sources::dto::{
-    Capability, PageDescriptor, PageManifest, RemoteChapter, RemoteMangaDetail, RemoteMangaSummary,
-    RemoteSearchPage, SourceInfo, SourceStatus,
+    Capability, HomeFeedItem, PageDescriptor, PageManifest, RemoteChapter, RemoteHomeFeed,
+    RemoteMangaDetail, RemoteMangaSummary, RemoteSearchPage, SourceInfo, SourceStatus,
 };
 use crate::sources::http::{
     GuardedHttp, HttpPolicy, Transport, COVER_MAX_BYTES, IMAGE_MAX_BYTES, MAX_PAGE_COUNT,
@@ -41,6 +41,11 @@ pub enum SiteProfile {
 
 /// NetTruyen chapter/thumb CDN domain (rotating imageN. subdomains).
 const NETTRUYEN_IMAGE_DOMAIN: &str = "kcgsbok.com";
+/// NetTruyen covers never ship from the site host — the theme loads every
+/// thumbnail from this sharded CDN, whose path is fully determined by the
+/// story slug (`/nettruyen/thumb/<slug>.jpg`). One fixed shard is used for
+/// fetching; it is a compile-time built-in constant, never site data.
+const NETTRUYEN_COVER_HOST: &str = "image1.kcgsbok.com";
 /// Dilib navigation/footer slugs that are never manga stories.
 const DILIB_RESERVED: &[&str] = &[
     "ban-quyen",
@@ -185,22 +190,31 @@ impl MadaraGeneric {
         base.set_fragment(None);
         let mut allowed_hosts = vec![host.clone()];
         allowed_hosts.extend(extras.iter().cloned());
+        // Hotlink-protected CDNs (the sharded image hosts these two sites
+        // serve chapters from) 403 any request without the site's own origin
+        // as Referer. Always our own base origin, never caller-supplied.
+        let referer = matches!(profile, SiteProfile::TruyenQQ | SiteProfile::Nettruyen)
+            .then(|| base.as_str().to_string());
         let http = Arc::new(GuardedHttp::new(match profile {
             SiteProfile::Madara => HttpPolicy {
                 allowed_hosts,
                 allowed_domains: Vec::new(),
+                referer,
             },
             SiteProfile::TruyenQQ => HttpPolicy {
                 allowed_hosts,
                 allowed_domains: vec![TRUYENQQ_IMAGE_DOMAIN.to_string()],
+                referer,
             },
             SiteProfile::Nettruyen => HttpPolicy {
                 allowed_hosts,
                 allowed_domains: vec![NETTRUYEN_IMAGE_DOMAIN.to_string()],
+                referer,
             },
             SiteProfile::Dilib => HttpPolicy {
                 allowed_hosts,
                 allowed_domains: Vec::new(),
+                referer,
             },
         }));
         Ok(MadaraGeneric {
@@ -231,6 +245,17 @@ impl MadaraGeneric {
         }
         let path = parsed.path();
         (!path.starts_with("//") && !path.is_empty() && path.len() <= 480).then(|| path.to_string())
+    }
+
+    /// NetTruyen ships every cover on its CDN at a slug-determined path, so
+    /// the key is minted from the manga id instead of scraped markup: the
+    /// renderer still only ever sees a path, and the fetch below re-derives
+    /// the exact same path from the manga id before requesting anything.
+    fn cover_key(&self, slug: &str) -> Option<String> {
+        if self.profile == SiteProfile::Nettruyen {
+            return valid_slug(slug).then(|| format!("/nettruyen/thumb/{slug}.jpg"));
+        }
+        None
     }
 
     /// Re-derive the cover URL from a stored key, re-checking that joining
@@ -487,11 +512,13 @@ impl MadaraGeneric {
             } else {
                 raw_title
             };
-            let cover_key = node.select(thumb).find_map(|image| {
-                ["src", "data-src", "data-lazy-src", "data-original"]
-                    .iter()
-                    .find_map(|attr| image.value().attr(attr))
-                    .and_then(|raw| self.cover_key_from_src(raw))
+            let cover_key = self.cover_key(&slug).or_else(|| {
+                node.select(thumb).find_map(|image| {
+                    ["src", "data-src", "data-lazy-src", "data-original"]
+                        .iter()
+                        .find_map(|attr| image.value().attr(attr))
+                        .and_then(|raw| self.cover_key_from_src(raw))
+                })
             });
             items.push(RemoteMangaSummary {
                 source_id: self.id.clone(),
@@ -832,6 +859,150 @@ impl SourceAdapter for MadaraGeneric {
         Ok(RemoteSearchPage { items, has_more })
     }
 
+    /// TruyenQQ's own front page carries all three Home rails in one HTML
+    /// document: the spotlight carousel, "TRUYỆN MỚI CẬP NHẬT" and the
+    /// "TOP TRUYỆN ĐỌC NHIỀU" widget. Each rail keeps its own de-duplication
+    /// set because the same story legitimately appears in several of them.
+    async fn home_feed(&self) -> Result<RemoteHomeFeed, SourceError> {
+        if self.profile != SiteProfile::TruyenQQ {
+            return Err(SourceError::UnsupportedOperation);
+        }
+        let html = self.http.get_text(self.base.as_str()).await?;
+        let document = Html::parse_document(&html);
+        // The spotlight carousel wraps the WHOLE card in one <a>, with the
+        // title as plain text in `caption h3` — so `collect_cards` (which
+        // reads the title from the link itself) cannot be used for it.
+        let mut featured: Vec<HomeFeedItem> = Vec::new();
+        let mut seen_featured: HashSet<String> = HashSet::new();
+        let slide = Selector::parse("#owl-slide .item").unwrap();
+        let link = Selector::parse("a[href]").unwrap();
+        let heading = Selector::parse("div.caption h3").unwrap();
+        let chapter_line = Selector::parse("div.caption p").unwrap();
+        let image = Selector::parse("img[src]").unwrap();
+        for node in document.select(&slide) {
+            let Some(href) = node
+                .select(&link)
+                .next()
+                .and_then(|a| a.value().attr("href"))
+            else {
+                continue;
+            };
+            let Some(slug) = self.slug_from_manga_url(href) else {
+                continue;
+            };
+            if !seen_featured.insert(slug.clone()) {
+                continue;
+            }
+            let text_of = |sel: &Selector| {
+                node.select(sel)
+                    .next()
+                    .map(|n| n.text().collect::<String>().trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            featured.push(HomeFeedItem {
+                summary: RemoteMangaSummary {
+                    source_id: self.id.clone(),
+                    source_manga_id: slug.clone(),
+                    source_display_name: self.display_name.clone(),
+                    title: text_of(&heading).unwrap_or_else(|| slug.clone()),
+                    author: None,
+                    cover_key: node
+                        .select(&image)
+                        .next()
+                        .and_then(|img| img.value().attr("src"))
+                        .and_then(|raw| self.cover_key_from_src(raw)),
+                    status: "unknown".to_string(),
+                },
+                latest_chapter: text_of(&chapter_line),
+            });
+            if featured.len() >= 8 {
+                break;
+            }
+        }
+        // "TRUYỆN MỚI CẬP NHẬT" lists up to two chapter links per card; the
+        // first one is the newest.
+        let mut newest: Vec<HomeFeedItem> = Vec::new();
+        let mut seen_newest: HashSet<String> = HashSet::new();
+        let story_item = Selector::parse("#contentstory .item").unwrap();
+        let story_title = Selector::parse("div.info h3.name a[href]").unwrap();
+        let story_cover = Selector::parse("div.cover img[src]").unwrap();
+        let story_chapter = Selector::parse("a.chapter-name[href]").unwrap();
+        for node in document.select(&story_item) {
+            let title_anchor = node.select(&story_title).next();
+            let Some(href) = title_anchor
+                .as_ref()
+                .and_then(|a| a.value().attr("href"))
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let raw_title = title_anchor
+                .map(|a| a.text().collect::<String>().trim().to_string())
+                .unwrap_or_default();
+            let Some(slug) = self.slug_from_manga_url(&href) else {
+                continue;
+            };
+            if !seen_newest.insert(slug.clone()) {
+                continue;
+            }
+            newest.push(HomeFeedItem {
+                summary: RemoteMangaSummary {
+                    source_id: self.id.clone(),
+                    source_manga_id: slug.clone(),
+                    source_display_name: self.display_name.clone(),
+                    title: if raw_title.is_empty() {
+                        slug
+                    } else {
+                        raw_title
+                    },
+                    author: None,
+                    cover_key: node
+                        .select(&story_cover)
+                        .next()
+                        .and_then(|img| img.value().attr("src"))
+                        .and_then(|raw| self.cover_key_from_src(raw)),
+                    status: "unknown".to_string(),
+                },
+                latest_chapter: node
+                    .select(&story_chapter)
+                    .next()
+                    .map(|a| a.text().collect::<String>().trim().to_string())
+                    .filter(|value| !value.is_empty()),
+            });
+            if newest.len() >= 12 {
+                break;
+            }
+        }
+        // The ranking widget is a text-only list: no cover, no chapter label.
+        let mut popular_seen = HashSet::new();
+        let mut popular_cards = Vec::new();
+        self.collect_cards(
+            &document,
+            &Selector::parse(".widget.suggest .item").unwrap(),
+            &Selector::parse("a[href]").unwrap(),
+            &Selector::parse("img[src]").unwrap(),
+            &mut popular_seen,
+            &mut popular_cards,
+        );
+        let popular: Vec<HomeFeedItem> = popular_cards
+            .into_iter()
+            .take(10)
+            .map(|summary| HomeFeedItem {
+                summary,
+                latest_chapter: None,
+            })
+            .collect();
+        let feed = RemoteHomeFeed {
+            featured,
+            newest,
+            popular,
+        };
+        if feed.featured.is_empty() && feed.newest.is_empty() && feed.popular.is_empty() {
+            return Err(SourceError::Parse);
+        }
+        Ok(feed)
+    }
+
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError> {
         let slug = match self.profile {
             SiteProfile::Madara => url.path_segments().and_then(|mut segments| {
@@ -976,9 +1147,22 @@ impl SourceAdapter for MadaraGeneric {
 
     async fn fetch_cover(
         &self,
-        _source_manga_id: &str,
+        source_manga_id: &str,
         cover_key: &str,
     ) -> Result<Vec<u8>, SourceError> {
+        // NetTruyen covers live on the vetted built-in CDN shard, and the key
+        // must still be EXACTLY the path this manga's slug determines — a
+        // stored key is never allowed to select an arbitrary CDN path.
+        if self.profile == SiteProfile::Nettruyen {
+            let expected = self
+                .cover_key(source_manga_id)
+                .ok_or(SourceError::MalformedUrl)?;
+            if cover_key != expected {
+                return Err(SourceError::MalformedUrl);
+            }
+            let url = format!("https://{NETTRUYEN_COVER_HOST}{cover_key}");
+            return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
+        }
         let url = self.cover_url_from_key(cover_key)?;
         self.http.get_bytes(&url, COVER_MAX_BYTES).await
     }
@@ -1025,11 +1209,13 @@ impl SourceAdapter for MadaraGeneric {
         let title = clean_title(&raw_title);
 
         let og_image = Selector::parse("meta[property=\"og:image\"]").unwrap();
-        let cover_key = document
-            .select(&og_image)
-            .next()
-            .and_then(|node| node.value().attr("content"))
-            .and_then(|content| self.cover_key_from_src(content));
+        let cover_key = self.cover_key(source_manga_id).or_else(|| {
+            document
+                .select(&og_image)
+                .next()
+                .and_then(|node| node.value().attr("content"))
+                .and_then(|content| self.cover_key_from_src(content))
+        });
 
         let tag = Selector::parse("a[rel=\"tag\"]").unwrap();
         let mut genres: Vec<String> = Vec::new();
@@ -1676,6 +1862,70 @@ mod tests {
         (provider, transport)
     }
 
+    fn nt(replies: Vec<Result<&'static str, &'static str>>) -> (MadaraGeneric, Arc<MockTransport>) {
+        let transport = Arc::new(MockTransport::with(replies));
+        let provider = MadaraGeneric::with_transport_profile(
+            "NetTruyen",
+            "https://nettruyen.gg/",
+            transport.clone(),
+            SiteProfile::Nettruyen,
+        )
+        .unwrap();
+        (provider, transport)
+    }
+
+    const NT_SEARCH: &str = r#"<html><body>
+        <div class="item">
+          <figure class="clearfix">
+            <div class="image">
+              <a title="Truyện tranh Batman - Ninja Rùa" href="https://nettruyen.gg/truyen-tranh/batman-ninja-rua">
+                <img src="/assets/images/thumb-default.jpg" data-original="https://image2.kcgsbok.com/nettruyen/thumb/batman-ninja-rua.jpg" class="lazy image-thumb">
+              </a>
+            </div>
+            <figcaption><h3><a href="https://nettruyen.gg/truyen-tranh/batman-ninja-rua">Batman - Ninja Rùa</a></h3></figcaption>
+          </figure>
+        </div>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn nt_cards_use_the_slug_determined_cdn_cover_key() {
+        let (provider, _) = nt(vec![Ok(NT_SEARCH)]);
+        let page = provider.search("ninja", 1).await.unwrap();
+        assert_eq!(page.items.len(), 1);
+        // The scraped `src` is a placeholder and the real URL is CDN-hosted;
+        // neither may become the key — it is minted from the slug instead.
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/nettruyen/thumb/batman-ninja-rua.jpg")
+        );
+    }
+
+    #[tokio::test]
+    async fn nt_fetch_cover_requests_the_vetted_shard_and_rejects_other_keys() {
+        let (provider, transport) = nt(vec![Ok("cover-bytes")]);
+        let key = "/nettruyen/thumb/batman-ninja-rua.jpg";
+        let bytes = provider.fetch_cover("batman-ninja-rua", key).await.unwrap();
+        assert_eq!(bytes, b"cover-bytes".to_vec());
+        assert_eq!(
+            transport.requested.lock().unwrap()[0],
+            (
+                "GET-BYTES".to_string(),
+                format!("https://{NETTRUYEN_COVER_HOST}{key}")
+            )
+        );
+        // A stored key may never retarget the CDN at another path.
+        for (manga, bad) in [
+            ("batman-ninja-rua", "/nettruyen/thumb/other.jpg"),
+            ("batman-ninja-rua", "//evil.com/x.jpg"),
+            ("../../etc", key),
+        ] {
+            assert!(
+                provider.fetch_cover(manga, bad).await.is_err(),
+                "{manga} + {bad} must not reach the network"
+            );
+        }
+    }
+
     const QQ_SEARCH: &str = r#"<html><body>
         <h1>TÌM KIẾM TRUYỆN: <span class="keyword">"ninja"</span></h1>
         <div class="listing"><div class="inner">
@@ -1767,6 +2017,119 @@ mod tests {
         assert!(manifest.pages[1].url.starts_with("https://s12.cc3t.net/"));
     }
 
+    const QQ_HOME: &str = r#"<html><body>
+      <div id="slide"><div id="owl-slide" class="owl-carousel">
+        <div class="item"><a href="/vo-luyen-dinh-phong" title="vo-luyen-dinh-phong"><img src="/media/book/vo-luyen.jpg"><div class="caption"><h3>Võ Luyện Đỉnh Phong</h3><p>Chapter 3824</p></div></a></div>
+      </div></div>
+      <div id="latest"><div id="contentstory"><div class="inner">
+        <div class="item">
+          <div class="cover"><a href="/doi-thu-dinh-menh"><img src="/media/book/doi-thu.jpg"></a></div>
+          <div class="info"><h3 class="name"><a href="/doi-thu-dinh-menh">Đối Thủ Định Mệnh</a></h3>
+            <div class="latest"><div class="chap"><a class="chapter-name" href="/doi-thu-dinh-menh/chapter-12">Chapter 12</a></div></div>
+          </div>
+        </div>
+      </div></div></div>
+      <div class="widget suggest"><h3 class="title"><span>TOP TRUYỆN ĐỌC NHIỀU</span></h3>
+        <div class="content"><div class="all">
+          <div class='item'><a href='/dai-quan-gia-la-ma-hoang'>Đại Quản Gia Là Ma Hoàng</a></div>
+        </div></div>
+      </div>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn qq_home_feed_splits_the_three_front_page_rails() {
+        let (provider, _) = qq(vec![Ok(QQ_HOME)]);
+        let feed = provider.home_feed().await.unwrap();
+        assert_eq!(feed.featured.len(), 1);
+        // Title comes from the caption heading, never from the wrapping link
+        // (whose text would concatenate the chapter number too).
+        assert_eq!(feed.featured[0].summary.title, "Võ Luyện Đỉnh Phong");
+        assert_eq!(
+            feed.featured[0].summary.source_manga_id,
+            "vo-luyen-dinh-phong"
+        );
+        assert_eq!(
+            feed.featured[0].latest_chapter.as_deref(),
+            Some("Chapter 3824")
+        );
+        assert_eq!(
+            feed.featured[0].summary.cover_key.as_deref(),
+            Some("/media/book/vo-luyen.jpg")
+        );
+        assert_eq!(feed.newest[0].summary.title, "Đối Thủ Định Mệnh");
+        assert_eq!(
+            feed.newest[0].latest_chapter.as_deref(),
+            Some("Chapter 12"),
+            "the first chapter link is the newest"
+        );
+        assert_eq!(feed.popular[0].summary.title, "Đại Quản Gia Là Ma Hoàng");
+        assert!(feed.popular[0].summary.cover_key.is_none());
+        assert!(feed.popular[0].latest_chapter.is_none());
+    }
+
+    #[tokio::test]
+    async fn home_feed_is_refused_for_non_truyenqq_profiles() {
+        let (provider, _) = adapter(vec![]);
+        assert!(matches!(
+            provider.home_feed().await,
+            Err(SourceError::UnsupportedOperation)
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "live network probe: built-in TruyenQQ home feed (featured/newest/popular)"]
+    async fn live_builtin_qq_home_probe() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqq.com.vn/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let feed = adapter.home_feed().await.expect("live home feed");
+        println!(
+            "LIVE HOME featured={} newest={} popular={}",
+            feed.featured.len(),
+            feed.newest.len(),
+            feed.popular.len()
+        );
+        for (label, rail) in [
+            ("featured", &feed.featured),
+            ("newest", &feed.newest),
+            ("popular", &feed.popular),
+        ] {
+            assert!(!rail.is_empty(), "{label} rail is empty");
+            let first = &rail[0];
+            println!(
+                "  {label}[0]: {} / {} / chap={:?} / cover={:?}",
+                first.summary.source_manga_id,
+                first.summary.title,
+                first.latest_chapter,
+                first.summary.cover_key
+            );
+            assert!(
+                !first.summary.title.is_empty(),
+                "{label} title must not be a slug"
+            );
+        }
+        // Covers must be mintable from the keys the rails published.
+        let with_cover = feed
+            .newest
+            .iter()
+            .find(|item| item.summary.cover_key.is_some())
+            .expect("newest rail should carry cover keys");
+        let bytes = adapter
+            .fetch_cover(
+                &with_cover.summary.source_manga_id,
+                with_cover.summary.cover_key.as_deref().unwrap(),
+            )
+            .await
+            .expect("live home cover bytes");
+        println!("LIVE HOME cover bytes: {}", bytes.len());
+        assert!(bytes.len() > 1000);
+    }
+
     #[tokio::test]
     #[ignore = "live network probe: built-in TruyenQQ search -> detail -> pages over the app transport (wreq + ECH)"]
     async fn live_builtin_qq_probe() {
@@ -1835,6 +2198,24 @@ mod tests {
             .expect("live pages");
         println!("LIVE NT pages: {}", manifest.pages.len());
         assert!(manifest.pages.len() >= 5);
+        // The real proof for both fixes: cover bytes and page bytes come from
+        // the hotlink-protected CDN, which 403s without the site Referer.
+        let cover_key = first
+            .cover_key
+            .clone()
+            .expect("search card must carry a cover key");
+        let cover = adapter
+            .fetch_cover(&first.source_manga_id, &cover_key)
+            .await
+            .expect("live cover bytes");
+        println!("LIVE NT cover: {} bytes (key {cover_key})", cover.len());
+        assert!(cover.len() > 1000, "cover should be a real image");
+        let page_bytes = adapter
+            .fetch_image(&manifest.pages[0].url)
+            .await
+            .expect("live page bytes");
+        println!("LIVE NT page bytes: {}", page_bytes.len());
+        assert!(page_bytes.len() > 1000);
     }
 
     #[tokio::test]
