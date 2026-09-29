@@ -265,7 +265,8 @@ button {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .topbar {
@@ -966,19 +967,20 @@ button {
   align-items: start;
 }
 
-/* Content plus the quick-actions rail. Flex-wrap rather than a fixed grid on
-   purpose: at narrow widths the rail drops below the content instead of being
-   clipped by the shell's overflow:hidden. */
+/* Grid, never flex-wrap: the rail must stay beside the content at every
+   window width, and minmax(0,1fr) is what makes that mathematically possible
+   — the main column absorbs all shrinking instead of pushing the rail off. */
 .home-layout {
   align-items: start;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: var(--space-6);
-  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .home-aside {
-  flex: 0 0 15rem;
+  min-width: 0;
   position: sticky;
   top: 0;
 }
@@ -992,7 +994,6 @@ button {
 }
 
 .home-main {
-  flex: 1 1 40rem;
   min-width: 0;
 }
 
