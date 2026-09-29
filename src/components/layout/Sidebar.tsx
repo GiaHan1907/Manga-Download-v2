@@ -45,7 +45,6 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
   return (
     <aside className="sidebar" aria-label="Điều hướng chính">
       <div className="sidebar__header">
-        <span className="sidebar__eyebrow">Navigation</span>
         <Button variant="ghost" iconOnly aria-label={collapsed ? "Mở rộng sidebar" : "Thu gọn sidebar"} onClick={onToggleCollapsed}>
           <Menu size={18} aria-hidden="true" />
         </Button>

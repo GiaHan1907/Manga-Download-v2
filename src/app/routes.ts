@@ -22,7 +22,7 @@ export const appRoutes = [
   { id: "home", path: "/", label: "Trang chủ", description: "Tổng quan: đọc tiếp, hoạt động, thống kê từ SQLite.", sidebar: true },
   { id: "discover", path: "/discover", label: "Khám phá", description: "Tìm kiếm + import URL qua Rust source engine; demo sandbox chỉ ở bản build dev.", sidebar: true },
   { id: "library", path: "/library", label: "Thư viện", description: "Truyện đã lưu, trạng thái offline, reconcile.", sidebar: true },
-  { id: "downloads", path: "/downloads", label: "Tải truyện", description: "Hàng đợi qua download engine Rust với pause/cancel/retry.", sidebar: true },
+  { id: "downloads", path: "/downloads", label: "Tải xuống", description: "Hàng đợi qua download engine Rust với pause/cancel/retry.", sidebar: true },
   { id: "favorites", path: "/favorites", label: "Yêu thích", description: "Danh sách yêu thích lưu trong SQLite.", sidebar: true },
   { id: "settings", path: "/settings", label: "Cài đặt", description: "Cài đặt, validate Rust-side và lưu blob app_settings.", sidebar: true },
   { id: "sources", path: "/settings/sources", label: "Nguồn", description: "Registry nguồn (bật/tắt, Madara tùy biến); sandbox demo dev-only.", sidebar: false },
