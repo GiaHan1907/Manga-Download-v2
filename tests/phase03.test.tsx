@@ -171,7 +171,7 @@ describe("T03-01/T03-02 Home journey (real data since Phase 08)", () => {
     expect(within(updated).getByText("Đối Thủ Định Mệnh")).toBeDefined();
     expect(within(updated).getByText("37 phút trước")).toBeDefined();
 
-    const ranking = await screen.findByLabelText("Xem nhiều");
+    const ranking = await screen.findByLabelText("Bảng xếp hạng");
     expect(within(ranking).getByText("Đại Quản Gia Là Ma Hoàng")).toBeDefined();
 
     expect(screen.queryByText(/dữ liệu mẫu/)).toBeNull();

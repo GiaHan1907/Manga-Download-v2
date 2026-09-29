@@ -101,8 +101,8 @@ describe("App shell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("heading", { name: "Tải truyện" })).toBeDefined();
-    expect(screen.getByRole("link", { name: "Tải truyện" }).className).toContain("sidebar__link--active");
+    expect(screen.getByRole("heading", { name: "Tải xuống" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Tải xuống" }).className).toContain("sidebar__link--active");
     await waitFor(() => {
       expect(screen.getByText(/Hàng đợi tải —/)).toBeDefined();
     });

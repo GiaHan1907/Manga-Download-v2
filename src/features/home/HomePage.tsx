@@ -1,15 +1,4 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Download,
-  FolderOpen,
-  Flame,
-  Library,
-  Link2,
-  Search,
-  Star,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Crown, Flame, Library } from "lucide-react";
 import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
@@ -226,57 +215,6 @@ function UpdatedRow({ item }: { item: HomeFeedItemDto }) {
   );
 }
 
-const QUICK_ACTIONS = [
-  {
-    to: "/discover",
-    label: "Tìm kiếm truyện",
-    hint: "Khám phá toàn bộ thư viện nguồn",
-    Icon: Search,
-  },
-  {
-    to: "/discover?tab=url",
-    label: "Thêm bằng URL",
-    hint: "Nhập link từ các trang được hỗ trợ",
-    Icon: Link2,
-  },
-  {
-    to: "/downloads",
-    label: "Xem tiến trình tải",
-    hint: "Hàng đợi và tác vụ đang chạy",
-    Icon: Download,
-  },
-  {
-    to: "/library",
-    label: "Mở thư viện",
-    hint: "Quản lý truyện đã tải",
-    Icon: FolderOpen,
-  },
-];
-
-function QuickActions() {
-  return (
-    <nav className="panel home-quick" aria-label="Thao tác nhanh">
-      <h2 className="panel__title">Thao tác nhanh</h2>
-      <ul className="home-quick__list">
-        {QUICK_ACTIONS.map(({ to, label, hint, Icon }) => (
-          <li key={to}>
-            <a className="home-quick__item" href={`#${to}`}>
-              <span className="home-quick__icon">
-                <Icon size={16} aria-hidden="true" />
-              </span>
-              <span className="home-quick__text">
-                <span className="home-quick__label">{label}</span>
-                <span className="muted home-quick__hint">{hint}</span>
-              </span>
-              <ChevronRight size={16} aria-hidden="true" className="home-quick__go" />
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}
-
 export default function HomePage() {
   const homeVersion = useDomainVersion("home");
   const [retryNonce, setRetryNonce] = useState(0);
@@ -321,8 +259,7 @@ export default function HomePage() {
       <div className="home-main page-stack">
         <Hero items={featured} />
         <HotRail items={featured} />
-        <div className="home-split">
-          <section aria-label="Cập nhật gần đây">
+        <section className="home-updated-block" aria-label="Cập nhật gần đây">
             <div className="section-header">
               <h2>
                 <Clock size={16} aria-hidden="true" /> Cập nhật gần đây
@@ -337,24 +274,35 @@ export default function HomePage() {
               ))}
             </ul>
           </section>
-          <LocalContinueReading />
-        </div>
       </div>
 
       <aside className="home-aside">
-        <QuickActions />
-        <section className="panel home-ranking" aria-label="Xem nhiều">
+        <section className="panel home-ranking" aria-label="Bảng xếp hạng">
           <h2 className="panel__title">
-            <Star size={16} aria-hidden="true" /> Xem nhiều
+            <Crown size={16} aria-hidden="true" /> Bảng xếp hạng
           </h2>
           <ol className="home-ranking__list">
-            {popular.map((item) => (
-              <li key={item.sourceMangaId}>
-                <a href={`#${remotePath(item)}`}>{item.title}</a>
+            {popular.map((item, rank) => (
+              <li key={item.sourceMangaId} className="home-ranking__row">
+                <span className={`home-ranking__pos${rank < 3 ? " home-ranking__pos--medal" : ""}`}>
+                  {rank < 3 ? <Crown size={14} aria-hidden="true" /> : rank + 1}
+                </span>
+                {item.coverKey && (
+                  <span className="home-updated__art">
+                    <CoverImage item={item} label={item.title} />
+                  </span>
+                )}
+                <a className="home-ranking__text" href={`#${remotePath(item)}`}>
+                  <span className="home-card__title">{item.title}</span>
+                  {item.latestChapter && (
+                    <span className="muted home-updated__chapter">{item.latestChapter}</span>
+                  )}
+                </a>
               </li>
             ))}
           </ol>
         </section>
+        <LocalContinueReading />
       </aside>
     </div>
   );
