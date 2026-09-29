@@ -1,38 +1,44 @@
-/* Dark Purple — single app theme (restored 2026-09-29 by user decision,
-   replacing Paper & Ink). Palette values are the Phase 02 design system. */
+/* Dark Purple — single app theme. Palette sampled pixel-for-pixel from the
+   owner's 2026-09-29 mockup: indigo-black grounds, vivid violet accents,
+   lavender-grey secondary text. */
 @import "./fonts.css";
 
 :root {
   color-scheme: dark;
 
-  --background: #101016;
-  --sidebar: #171720;
-  --surface: #20202c;
-  --elevated: #292938;
-  --primary: #a78bfa;
-  --primary-hover: #8b5cf6;
-  --text-primary: #f5f3ff;
-  --text-muted: #a1a1b5;
-  --success: #34d399;
+  --background: #0c0e21;
+  --sidebar: #0f1125;
+  --surface: #151834;
+  --elevated: #1e2242;
+  --primary: #823df8;
+  --primary-hover: #9a63ff;
+  --text-primary: #f4f2ff;
+  --text-muted: #a9a2c2;
+  --success: #168c67;
   --warning: #fbbf24;
   --error: #f87171;
 
   --foreground: var(--text-primary);
   --muted-foreground: var(--text-muted);
   --surface-foreground: var(--text-primary);
-  --primary-foreground: #181225;
-  --border: rgba(245, 243, 255, 0.1);
-  --border-strong: rgba(245, 243, 255, 0.18);
-  --border-subtle: rgba(245, 243, 255, 0.06);
-  --focus-ring: rgba(167, 139, 250, 0.58);
-  --overlay: rgba(6, 6, 12, 0.72);
-  --selection: rgba(167, 139, 250, 0.35);
+  --primary-foreground: #ffffff;
+  --border: rgba(244, 242, 255, 0.09);
+  --border-strong: rgba(244, 242, 255, 0.18);
+  --border-subtle: rgba(244, 242, 255, 0.05);
+  --focus-ring: rgba(130, 61, 248, 0.55);
+  --overlay: rgba(4, 5, 16, 0.74);
+  --selection: rgba(130, 61, 248, 0.35);
 
   /* purple-era extras (same names the Paper & Ink pass introduced) */
-  --accent-soft: rgba(167, 139, 250, 0.16);
-  --accent-text: #c4b5fd;
-  --accent-deepest: #181225; /* cover placeholder / feature art ground */
-  --hero-gradient: linear-gradient(135deg, #2a1d4d 0%, #1a1230 55%, #101016 100%);
+  --accent-soft: rgba(130, 61, 248, 0.18);
+  --accent-text: #b79cff;
+  --accent-deepest: #0a0c1c; /* cover placeholder / feature art ground */
+  --hero-gradient: linear-gradient(90deg, #05060f 0%, #0b0d20 42%, rgba(11, 13, 32, 0.2) 70%, transparent 100%);
+  /* quick-action tiles each carry their own hue, like the mockup */
+  --qa-purple: #7c3aed;
+  --qa-pink: #ad34ab;
+  --qa-green: #168c67;
+  --qa-blue: #4f7ce8;
 
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-size-xs: 0.75rem;

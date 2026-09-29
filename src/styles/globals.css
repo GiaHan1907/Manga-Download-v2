@@ -721,34 +721,66 @@ button {
 /* Home: spotlight hero fed by the source's own front page. */
 .home-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
-  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   align-items: center;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  background: var(--accent-deepest);
+  min-height: 21rem;
+  padding: var(--space-8);
+}
+
+/* The artwork bleeds to the card edge and the gradient sits on top of it,
+   exactly like the mockup; the text column stays above both. */
+.home-hero__art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.home-hero__art .home-card__cover {
+  height: 100%;
+  width: 62%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.home-hero__art .home-card__placeholder {
+  height: 100%;
+  width: 62%;
+  font-size: 6rem;
+}
+
+.home-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: var(--hero-gradient);
-  min-height: 19rem;
-  padding: var(--space-8) var(--space-8) var(--space-8);
 }
 
 .home-hero__body {
   display: grid;
   gap: var(--space-3);
   justify-items: start;
-  z-index: 1;
 }
 
 .home-hero__title {
-  font-size: 2.4rem;
+  font-size: 2.6rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  text-shadow: 0 2px 18px rgba(4, 5, 16, 0.8);
 }
 
 .home-hero__meta {
   font-size: var(--font-size-sm);
+  text-shadow: 0 1px 10px rgba(4, 5, 16, 0.9);
 }
 
 .home-hero__actions {
@@ -761,26 +793,6 @@ button {
 .home-hero__note {
   color: var(--success);
   font-size: var(--font-size-sm);
-}
-
-.home-hero__art {
-  align-self: stretch;
-  display: flex;
-  justify-content: flex-end;
-  mask-image: linear-gradient(90deg, transparent, #000 22%);
-}
-
-.home-hero__art .home-card__cover {
-  border-radius: var(--radius-md);
-  height: 100%;
-  max-height: 22rem;
-  object-fit: cover;
-  width: min(15rem, 100%);
-}
-
-.home-hero__art .home-card__placeholder {
-  font-size: 5rem;
-  width: min(15rem, 100%);
 }
 
 .home-hero__arrow {
@@ -837,7 +849,7 @@ button {
 .home-hot {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -857,7 +869,15 @@ button {
   display: grid;
   gap: var(--space-3);
   grid-template-columns: 2.75rem minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-3);
   text-decoration: none;
+}
+
+.home-updated__link:hover {
+  border-color: var(--primary);
 }
 
 .home-updated__art {
@@ -1021,13 +1041,29 @@ button {
 
 .home-quick__icon {
   align-items: center;
-  background: var(--accent-soft);
   border-radius: var(--radius-sm);
-  color: var(--accent-text);
+  color: #ffffff;
   display: flex;
   height: 2rem;
   justify-content: center;
   width: 2rem;
+}
+
+.home-quick__item:nth-child(1) .home-quick__icon,
+.home-quick__list li:nth-child(1) .home-quick__icon {
+  background: var(--qa-purple);
+}
+
+.home-quick__list li:nth-child(2) .home-quick__icon {
+  background: var(--qa-pink);
+}
+
+.home-quick__list li:nth-child(3) .home-quick__icon {
+  background: var(--qa-green);
+}
+
+.home-quick__list li:nth-child(4) .home-quick__icon {
+  background: var(--qa-blue);
 }
 
 .home-quick__text {
