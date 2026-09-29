@@ -66,8 +66,12 @@ const TRUYENQQ_IMAGE_DOMAIN: &str = "truyenvua.com";
 /// this second CDN. File names carry an upload timestamp, so unlike NetTruyen
 /// the key must keep the source's own path — it is validated as a bare
 /// `/ebook/…` path and always re-fetched against this fixed host.
-const TRUYENQQ_COVER_DOMAIN: &str = "hinhhinh.com";
-const TRUYENQQ_COVER_HOST: &str = "i.hinhhinh.com";
+/// TruyenQQ covers are sharded across two CDN families, and a file only
+/// exists on the shard that served it, so the shard has to survive in the
+/// key. The key stays a PATH (never a host): it records a short shard label
+/// plus a two-value token, and fetch_cover rebuilds the host from the
+/// compile-time domain for that token — an arbitrary host cannot be expressed.
+const TRUYENQQ_COVER_DOMAINS: &[(&str, &str)] = &[("hh", "hinhhinh.com"), ("tv", "truyenvua.com")];
 /// Site sections whose root-level paths are never manga slugs.
 const TRUYENQQ_RESERVED: &[&str] = &[
     "doc-truyen",
@@ -222,10 +226,10 @@ impl MadaraGeneric {
             },
             SiteProfile::TruyenQQ => HttpPolicy {
                 allowed_hosts,
-                allowed_domains: vec![
-                    TRUYENQQ_IMAGE_DOMAIN.to_string(),
-                    TRUYENQQ_COVER_DOMAIN.to_string(),
-                ],
+                allowed_domains: TRUYENQQ_COVER_DOMAINS
+                    .iter()
+                    .map(|(_, domain)| domain.to_string())
+                    .collect(),
                 referer,
             },
             SiteProfile::Nettruyen => HttpPolicy {
@@ -270,16 +274,29 @@ impl MadaraGeneric {
         // upload timestamp, so the path cannot be re-derived from the slug the
         // way NetTruyen's can. Only `/ebook/…` paths on the vetted cover domain
         // are accepted, and they are always re-fetched against one fixed host.
-        let qq_cover = self.profile == SiteProfile::TruyenQQ
-            && (host == TRUYENQQ_COVER_HOST
-                || host.ends_with(&format!(".{TRUYENQQ_COVER_DOMAIN}")));
-        if !qq_cover && host != self.host.as_str() {
+        if self.profile == SiteProfile::TruyenQQ {
+            if let Some(token) = TRUYENQQ_COVER_DOMAINS
+                .iter()
+                .find(|(_, domain)| host == *domain || host.ends_with(&format!(".{domain}")))
+                .map(|(token, _)| *token)
+            {
+                // shard.<domain> -> label "shard" (bare domain uses "i").
+                let label = host.split_once('.').map_or("i", |(l, _)| l);
+                let path = parsed.path();
+                let key = format!("/cdn/{label}.{token}{path}");
+                let safe = label.len() <= 16
+                    && label
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                    && path.starts_with("/ebook/")
+                    && key.len() <= 480;
+                return safe.then_some(key);
+            }
+        }
+        if host != self.host.as_str() {
             return None;
         }
         let path = parsed.path();
-        if qq_cover && !path.starts_with("/ebook/") {
-            return None;
-        }
         (!path.starts_with("//") && !path.is_empty() && path.len() <= 480).then(|| path.to_string())
     }
 
@@ -1214,15 +1231,28 @@ impl SourceAdapter for MadaraGeneric {
         // embeds an upload timestamp), but the host is always this fixed,
         // compile-time vetted one — never anything the page supplied.
         if self.profile == SiteProfile::TruyenQQ {
-            let safe = cover_key.starts_with("/ebook/")
-                && !cover_key.contains("//")
-                && !cover_key
-                    .split('/')
-                    .any(|segment| segment == ".." || segment == ".");
+            let rest = cover_key
+                .strip_prefix("/cdn/")
+                .ok_or(SourceError::MalformedUrl)?;
+            let (shard, path) = rest.split_once('/').ok_or(SourceError::MalformedUrl)?;
+            let (label, token) = shard.split_once('.').ok_or(SourceError::MalformedUrl)?;
+            let domain = TRUYENQQ_COVER_DOMAINS
+                .iter()
+                .find(|(t, _)| *t == token)
+                .map(|(_, d)| *d)
+                .ok_or(SourceError::MalformedUrl)?;
+            let safe = !label.is_empty()
+                && label.len() <= 16
+                && label
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                && path.starts_with("ebook/")
+                && !path.contains("//")
+                && !path.split('/').any(|seg| seg == ".." || seg == ".");
             if !safe {
                 return Err(SourceError::MalformedUrl);
             }
-            let url = format!("https://{TRUYENQQ_COVER_HOST}{cover_key}");
+            let url = format!("https://{label}.{domain}/{path}");
             return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
         }
         let url = self.cover_url_from_key(cover_key)?;
@@ -2018,7 +2048,7 @@ mod tests {
         // The key is the CDN path only — no host, no query string.
         assert_eq!(
             page.items[0].cover_key.as_deref(),
-            Some("/ebook/80x105/the-yagyu-ninja-scroll_1443539433.jpg")
+            Some("/cdn/i.hh/ebook/80x105/the-yagyu-ninja-scroll_1443539433.jpg")
         );
         assert!(!page.has_more, "the suggest fragment has no pagination");
         let requested = transport.requested.lock().unwrap();
@@ -2052,7 +2082,7 @@ mod tests {
         assert_eq!(detail.summary.title, "Dai Quan Gia La Ma Hoang");
         assert_eq!(
             detail.summary.cover_key.as_deref(),
-            Some("/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg")
+            Some("/cdn/i.hh/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg")
         );
         let ids: Vec<&str> = detail
             .chapters
@@ -2104,7 +2134,7 @@ mod tests {
         let bytes = provider
             .fetch_cover(
                 "dai-quan-gia-la-ma-hoang-7015",
-                "/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg",
+                "/cdn/i.hh/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg",
             )
             .await
             .unwrap();
@@ -2208,7 +2238,7 @@ mod tests {
         assert_eq!(feed.featured[0].summary.title, "Dai Quan Gia La Ma Hoang");
         assert_eq!(
             feed.featured[0].summary.cover_key.as_deref(),
-            Some("/ebook/190x247/dai-quan-gia-la-ma-hoang-7015.jpg")
+            Some("/cdn/i.hh/ebook/190x247/dai-quan-gia-la-ma-hoang-7015.jpg")
         );
         assert_eq!(
             feed.featured[0].latest_chapter.as_deref(),
