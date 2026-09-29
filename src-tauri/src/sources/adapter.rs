@@ -81,6 +81,14 @@ pub trait SourceAdapter: Send + Sync {
     async fn home_feed(&self) -> Result<RemoteHomeFeed, SourceError> {
         Err(SourceError::UnsupportedOperation)
     }
+    /// One ranking rail of the source, by period ("day" | "week" | "month").
+    /// Default: unsupported — only sources with a real ranking page can serve it.
+    async fn ranking(
+        &self,
+        _period: &str,
+    ) -> Result<Vec<crate::sources::dto::HomeFeedItem>, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
     /// Extracts the stable manga id from a URL this adapter already owns.
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError>;
     /// Recognizes a CHAPTER link of this source and returns

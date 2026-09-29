@@ -27,6 +27,8 @@ import type {
 import { DOWNLOAD_EVENT } from "../../types/downloads";
 import type {
   HomeFeedDto,
+  HomeFeedItemDto,
+  RankingPeriod,
   RemoteChapterDto,
   RemoteMangaDetailDto,
   SaveResultDto,
@@ -162,6 +164,13 @@ export async function searchManga(args: {
 /// The Home screen's rails, read from one vetted source's own front page.
 export async function getHomeFeed(sourceId: string): Promise<HomeFeedDto> {
   return invoke<HomeFeedDto>("get_home_feed", { sourceId });
+}
+
+export async function getHomeRanking(
+  sourceId: string,
+  period: RankingPeriod,
+): Promise<HomeFeedItemDto[]> {
+  return invoke<HomeFeedItemDto[]>("get_home_ranking", { sourceId, period });
 }
 
 export async function resolveMangaUrl(url: string): Promise<RemoteMangaDetailDto> {

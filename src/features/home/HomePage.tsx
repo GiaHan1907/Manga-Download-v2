@@ -8,7 +8,7 @@ import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
-import type { HomeFeedDto, HomeFeedItemDto } from "../../types/source";
+import type { HomeFeedDto, HomeFeedItemDto, RankingPeriod } from "../../types/source";
 import LocalContinueReading from "./components/LocalContinueReading";
 
 /// The Home screen is fed by one vetted source's own front page. TruyenQQ is
@@ -17,6 +17,81 @@ const HOME_SOURCE_ID = "truyenqq";
 /// Covers per page in the "đang hot" rail. Six keeps the row narrow enough
 /// that the quick-actions rail still fits beside it at the default window width.
 const HOT_PAGE_SIZE = 6;
+
+const RANKING_TABS: { id: RankingPeriod; label: string }[] = [
+  { id: "day", label: "Theo ngày" },
+  { id: "month", label: "Theo tháng" },
+  { id: "week", label: "Theo tuần" },
+];
+
+function Ranking({ seed }: { seed: HomeFeedItemDto[] }) {
+  const [period, setPeriod] = useState<RankingPeriod>("day");
+  const [rows, setRows] = useState<HomeFeedItemDto[]>(seed);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function pick(next: RankingPeriod) {
+    setPeriod(next);
+    setBusy(true);
+    setError(null);
+    try {
+      setRows(await localServices.source.ranking({ sourceId: HOME_SOURCE_ID, period: next }));
+    } catch (caught: unknown) {
+      setError(normalizeIpcError(caught).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel home-ranking" aria-label="Bảng xếp hạng">
+      <h2 className="panel__title">
+        <Crown size={16} aria-hidden="true" /> Bảng xếp hạng
+      </h2>
+      <div className="home-tabs" role="tablist" aria-label="Kỳ xếp hạng">
+        {RANKING_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={period === tab.id}
+            className={`home-tabs__tab${period === tab.id ? " home-tabs__tab--on" : ""}`}
+            onClick={() => void pick(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {error && (
+        <p className="queue-error" role="alert">
+          {error}
+        </p>
+      )}
+      <ol className="home-ranking__list" aria-busy={busy}>
+        {rows.map((item, rank) => (
+          <li key={`${period}-${item.sourceMangaId}`} className="home-ranking__row">
+            <span
+              className={`home-ranking__pos${rank < 3 ? " home-ranking__pos--medal" : ""}`}
+            >
+              {rank < 3 ? <Crown size={14} aria-hidden="true" /> : rank + 1}
+            </span>
+            {item.coverKey && (
+              <span className="home-updated__art">
+                <CoverImage item={item} label={item.title} />
+              </span>
+            )}
+            <a className="home-ranking__text" href={`#${remotePath(item)}`}>
+              <span className="home-card__title">{item.title}</span>
+              {item.latestChapter && (
+                <span className="muted home-updated__chapter">{item.latestChapter}</span>
+              )}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 function remotePath(item: HomeFeedItemDto) {
   return `/remote/${item.sourceId}/${item.sourceMangaId}`;
@@ -277,31 +352,7 @@ export default function HomePage() {
       </div>
 
       <aside className="home-aside">
-        <section className="panel home-ranking" aria-label="Bảng xếp hạng">
-          <h2 className="panel__title">
-            <Crown size={16} aria-hidden="true" /> Bảng xếp hạng
-          </h2>
-          <ol className="home-ranking__list">
-            {popular.map((item, rank) => (
-              <li key={item.sourceMangaId} className="home-ranking__row">
-                <span className={`home-ranking__pos${rank < 3 ? " home-ranking__pos--medal" : ""}`}>
-                  {rank < 3 ? <Crown size={14} aria-hidden="true" /> : rank + 1}
-                </span>
-                {item.coverKey && (
-                  <span className="home-updated__art">
-                    <CoverImage item={item} label={item.title} />
-                  </span>
-                )}
-                <a className="home-ranking__text" href={`#${remotePath(item)}`}>
-                  <span className="home-card__title">{item.title}</span>
-                  {item.latestChapter && (
-                    <span className="muted home-updated__chapter">{item.latestChapter}</span>
-                  )}
-                </a>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <Ranking seed={popular} />
         <LocalContinueReading />
       </aside>
     </div>

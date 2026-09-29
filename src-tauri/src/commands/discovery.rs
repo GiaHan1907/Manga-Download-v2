@@ -123,6 +123,17 @@ pub async fn get_home_feed(
 }
 
 #[tauri::command]
+pub async fn get_home_ranking(
+    source_id: String,
+    period: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::sources::dto::HomeFeedItem>, AppError> {
+    validate_id(&source_id, "sourceId")?;
+    let registry = snapshot(&state)?;
+    discovery_service::home_ranking(&registry, &state.db, &source_id, &period).await
+}
+
+#[tauri::command]
 pub async fn resolve_manga_url(
     url: String,
     state: State<'_, AppState>,

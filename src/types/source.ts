@@ -68,6 +68,8 @@ export interface HomeFeedItemDto extends RemoteMangaSummaryDto {
   latestTime: string | null;
 }
 
+export type RankingPeriod = "day" | "week" | "month";
+
 export interface HomeFeedDto {
   featured: HomeFeedItemDto[];
   newest: HomeFeedItemDto[];

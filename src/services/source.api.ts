@@ -1,6 +1,8 @@
 import * as desktop from "../shared/api/desktop";
 import type {
   HomeFeedDto,
+  HomeFeedItemDto,
+  RankingPeriod,
   RemoteChapterDto,
   RemoteMangaDetailDto,
   SaveResultDto,
@@ -29,6 +31,10 @@ export interface SourceService {
     page?: number;
   }): Promise<SearchResultDto>;
   homeFeed(sourceId: string): Promise<HomeFeedDto>;
+  ranking(args: {
+    sourceId: string;
+    period: RankingPeriod;
+  }): Promise<HomeFeedItemDto[]>;
   resolveUrl(url: string): Promise<RemoteMangaDetailDto>;
   remoteDetail(args: {
     sourceId: string;
@@ -52,6 +58,7 @@ export const sourceApi: SourceService = {
   setSourceEnabled: (args) => desktop.setSourceEnabled(args),
   search: (args) => desktop.searchManga(args),
   homeFeed: (sourceId) => desktop.getHomeFeed(sourceId),
+  ranking: (args) => desktop.getHomeRanking(args.sourceId, args.period),
   resolveUrl: (url) => desktop.resolveMangaUrl(url),
   remoteDetail: (args) => desktop.getRemoteMangaDetails(args),
   remoteChapters: (args) => desktop.getRemoteChapters(args),

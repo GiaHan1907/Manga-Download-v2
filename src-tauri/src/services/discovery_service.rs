@@ -506,6 +506,24 @@ pub async fn home_feed(
     adapter.home_feed().await.map_err(AppError::Source)
 }
 
+/// One ranking rail by period, for the Home screen's tab switch.
+pub async fn home_ranking(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+    period: &str,
+) -> Result<Vec<crate::sources::dto::HomeFeedItem>, AppError> {
+    validate_id(source_id, "sourceId")?;
+    if !matches!(period, "day" | "week" | "month") {
+        return Err(AppError::validation(
+            "Kỳ xếp hạng phải là day, week hoặc month.",
+        ));
+    }
+    let rows = source_repo::list_sources(pool).await?;
+    let adapter = require_enabled(registry, &rows, source_id)?;
+    adapter.ranking(period).await.map_err(AppError::Source)
+}
+
 pub async fn remote_detail(
     registry: &SourceRegistry,
     pool: &SqlitePool,

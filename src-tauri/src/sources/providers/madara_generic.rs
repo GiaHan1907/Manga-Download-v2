@@ -612,6 +612,23 @@ impl MadaraGeneric {
     /// identity and title come from the heading link, the cover from the
     /// avatar, and the chapter/age labels are the source's own wording;
     /// repeats and foreign links are dropped.
+    /// The source's own ranking pages are separate routes per period; an
+    /// unknown period is a client error, never a silent fallback to "day".
+    async fn ranking_rail(&self, period: &str) -> Result<Vec<HomeFeedItem>, SourceError> {
+        let route = match period {
+            "day" => "top-ngay",
+            "week" => "top-tuan",
+            "month" => "top-thang",
+            _ => return Err(SourceError::MalformedUrl),
+        };
+        let html = self
+            .http
+            .get_text(&format!("{}{}", self.base, route))
+            .await?;
+        let document = Html::parse_document(&html);
+        Ok(self.home_rail(&document, "ul.list_grid li", 10))
+    }
+
     /// Collect one catalog grid into a rail, dropping repeats and foreign links.
     fn home_rail(&self, document: &Html, grid: &str, cap: usize) -> Vec<HomeFeedItem> {
         let rows = Selector::parse(grid).unwrap();
@@ -1042,16 +1059,15 @@ impl SourceAdapter for MadaraGeneric {
             .http
             .get_text(&format!("{}doc-truyen", self.base))
             .await?;
-        let ranking_html = self
-            .http
-            .get_text(&format!("{}top-ngay", self.base))
-            .await?;
-        let catalog_doc = Html::parse_document(&catalog_html);
-        let featured = self.home_rail(&catalog_doc, "#list_suggest li", 8);
-        let newest = self.home_rail(&catalog_doc, "#list_new li", 12);
-        drop(catalog_doc);
-        let ranking_doc = Html::parse_document(&ranking_html);
-        let popular = self.home_rail(&ranking_doc, "ul.list_grid li", 10);
+        // Scoped so the !Send document is dead before the ranking await.
+        let (featured, newest) = {
+            let catalog_doc = Html::parse_document(&catalog_html);
+            (
+                self.home_rail(&catalog_doc, "#list_suggest li", 8),
+                self.home_rail(&catalog_doc, "#list_new li", 12),
+            )
+        };
+        let popular = self.ranking_rail("day").await.unwrap_or_default();
         let feed = RemoteHomeFeed {
             featured,
             newest,
@@ -1061,6 +1077,13 @@ impl SourceAdapter for MadaraGeneric {
             return Err(SourceError::Parse);
         }
         Ok(feed)
+    }
+
+    async fn ranking(&self, period: &str) -> Result<Vec<HomeFeedItem>, SourceError> {
+        if self.profile != SiteProfile::TruyenQQ {
+            return Err(SourceError::UnsupportedOperation);
+        }
+        self.ranking_rail(period).await
     }
 
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError> {
