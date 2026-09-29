@@ -25,9 +25,9 @@ import LocalContinueReading from "./components/LocalContinueReading";
 /// The Home screen is fed by one vetted source's own front page. TruyenQQ is
 /// a fixed product decision, not a user-selectable setting.
 const HOME_SOURCE_ID = "truyenqq";
-/// One full row per page in the "đang hot" rail — the mockup shows eight
-/// covers across and pages instead of free-scrolling.
-const HOT_PAGE_SIZE = 8;
+/// Covers per page in the "đang hot" rail. Six keeps the row narrow enough
+/// that the quick-actions rail still fits beside it at the default window width.
+const HOT_PAGE_SIZE = 6;
 
 function remotePath(item: HomeFeedItemDto) {
   return `/remote/${item.sourceId}/${item.sourceMangaId}`;
