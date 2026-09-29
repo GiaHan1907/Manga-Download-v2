@@ -835,24 +835,18 @@ button {
 
 /* "Truyện đang hot" is a single scrollable rail, like the source's own row. */
 .home-hot {
-  display: flex;
+  display: grid;
   gap: var(--space-4);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   list-style: none;
   margin: 0;
-  overflow-x: auto;
-  padding: 0 0 var(--space-2);
-  scroll-snap-type: x proximity;
-}
-
-.home-hot > .home-card {
-  flex: 0 0 10.5rem;
-  scroll-snap-align: start;
+  padding: 0;
 }
 
 .home-updated-grid {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -947,9 +941,115 @@ button {
 
 .home-split {
   display: grid;
-  gap: var(--space-4);
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 18rem);
   align-items: start;
+}
+
+/* Content plus the fixed quick-actions rail, like the mockup. */
+.home-layout {
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  align-items: start;
+}
+
+.home-main {
+  min-width: 0;
+}
+
+.home-aside {
+  display: grid;
+  gap: var(--space-4);
+  position: sticky;
+  top: 0;
+}
+
+.home-pager {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.home-pager__btn {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: grid;
+  height: 1.6rem;
+  place-items: center;
+  width: 1.6rem;
+}
+
+.home-pager__btn:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.home-pager__count {
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-quick__list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+
+.home-quick__item {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  padding: var(--space-3);
+  text-decoration: none;
+}
+
+.home-quick__item:hover {
+  border-color: var(--primary);
+  background: var(--elevated);
+}
+
+.home-quick__icon {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  color: var(--accent-text);
+  display: flex;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.home-quick__text {
+  display: grid;
+  min-width: 0;
+}
+
+.home-quick__label {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.home-quick__hint {
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-quick__go {
+  color: var(--muted-foreground);
 }
 
 .home-ranking__list {

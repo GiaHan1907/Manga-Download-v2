@@ -1,4 +1,15 @@
-import { ChevronLeft, ChevronRight, Clock, Flame, Library, Star } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Download,
+  FolderOpen,
+  Flame,
+  Library,
+  Link2,
+  Search,
+  Star,
+} from "lucide-react";
 import { useState } from "react";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
@@ -14,6 +25,9 @@ import LocalContinueReading from "./components/LocalContinueReading";
 /// The Home screen is fed by one vetted source's own front page. TruyenQQ is
 /// a fixed product decision, not a user-selectable setting.
 const HOME_SOURCE_ID = "truyenqq";
+/// Cards per page in the "đang hot" rail — the rail pages instead of
+/// free-scrolling, so a full row always fits the content width.
+const HOT_PAGE_SIZE = 6;
 
 function remotePath(item: HomeFeedItemDto) {
   return `/remote/${item.sourceId}/${item.sourceMangaId}`;
@@ -136,19 +150,60 @@ function Hero({ items }: { items: HomeFeedItemDto[] }) {
   );
 }
 
-function HotCard({ item }: { item: HomeFeedItemDto }) {
+function HotRail({ items }: { items: HomeFeedItemDto[] }) {
+  const [page, setPage] = useState(0);
+  const pages = Math.max(1, Math.ceil(items.length / HOT_PAGE_SIZE));
+  const current = Math.min(page, pages - 1);
+  const visible = items.slice(current * HOT_PAGE_SIZE, current * HOT_PAGE_SIZE + HOT_PAGE_SIZE);
   return (
-    <li className="home-card">
-      <a className="home-card__link" href={`#${remotePath(item)}`}>
-        <span className="home-card__art">
-          <CoverImage item={item} label={item.title} />
-        </span>
-        <span className="home-card__title">{item.title}</span>
-        {item.latestChapter && (
-          <span className="muted home-card__chapter">{item.latestChapter}</span>
-        )}
-      </a>
-    </li>
+    <section aria-label="Truyện đang hot">
+      <div className="section-header">
+        <h2>
+          <Flame size={16} aria-hidden="true" /> Truyện đang hot
+        </h2>
+        <div className="home-pager">
+          <Button to="/discover" variant="ghost">
+            Xem tất cả
+          </Button>
+          <button
+            type="button"
+            className="home-pager__btn"
+            onClick={() => setPage(current - 1)}
+            disabled={current === 0}
+            aria-label="Trang trước"
+          >
+            <ChevronLeft size={16} aria-hidden="true" />
+          </button>
+          <span className="muted home-pager__count">
+            {current + 1}/{pages}
+          </span>
+          <button
+            type="button"
+            className="home-pager__btn"
+            onClick={() => setPage(current + 1)}
+            disabled={current >= pages - 1}
+            aria-label="Trang kế tiếp"
+          >
+            <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <ul className="home-hot" aria-label="Danh sách truyện đang hot">
+        {visible.map((item) => (
+          <li key={item.sourceMangaId} className="home-card">
+            <a className="home-card__link" href={`#${remotePath(item)}`}>
+              <span className="home-card__art">
+                <CoverImage item={item} label={item.title} />
+              </span>
+              <span className="home-card__title">{item.title}</span>
+              {item.latestChapter && (
+                <span className="muted home-card__chapter">{item.latestChapter}</span>
+              )}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -168,6 +223,57 @@ function UpdatedRow({ item }: { item: HomeFeedItemDto }) {
         </span>
       </a>
     </li>
+  );
+}
+
+const QUICK_ACTIONS = [
+  {
+    to: "/discover",
+    label: "Tìm kiếm truyện",
+    hint: "Khám phá toàn bộ thư viện nguồn",
+    Icon: Search,
+  },
+  {
+    to: "/discover?tab=url",
+    label: "Thêm bằng URL",
+    hint: "Nhập link từ các trang được hỗ trợ",
+    Icon: Link2,
+  },
+  {
+    to: "/downloads",
+    label: "Xem tiến trình tải",
+    hint: "Hàng đợi và tác vụ đang chạy",
+    Icon: Download,
+  },
+  {
+    to: "/library",
+    label: "Mở thư viện",
+    hint: "Quản lý truyện đã tải",
+    Icon: FolderOpen,
+  },
+];
+
+function QuickActions() {
+  return (
+    <nav className="panel home-quick" aria-label="Thao tác nhanh">
+      <h2 className="panel__title">Thao tác nhanh</h2>
+      <ul className="home-quick__list">
+        {QUICK_ACTIONS.map(({ to, label, hint, Icon }) => (
+          <li key={to}>
+            <a className="home-quick__item" href={`#${to}`}>
+              <span className="home-quick__icon">
+                <Icon size={16} aria-hidden="true" />
+              </span>
+              <span className="home-quick__text">
+                <span className="home-quick__label">{label}</span>
+                <span className="muted home-quick__hint">{hint}</span>
+              </span>
+              <ChevronRight size={16} aria-hidden="true" className="home-quick__go" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 
@@ -211,58 +317,45 @@ export default function HomePage() {
 
   const { featured, newest, popular } = feed.data;
   return (
-    <div className="page-stack">
-      <Hero items={featured} />
-
-      <section aria-label="Truyện đang hot">
-        <div className="section-header">
-          <h2>
-            <Flame size={16} aria-hidden="true" /> Truyện đang hot
-          </h2>
-          <Button to="/discover" variant="ghost">
-            Xem tất cả
-          </Button>
-        </div>
-        <ul className="home-hot" aria-label="Danh sách truyện đang hot">
-          {featured.map((item) => (
-            <HotCard key={item.sourceMangaId} item={item} />
-          ))}
-        </ul>
-      </section>
-
-      <div className="home-split">
-        <section aria-label="Cập nhật gần đây">
-          <div className="section-header">
-            <h2>
-              <Clock size={16} aria-hidden="true" /> Cập nhật gần đây
-            </h2>
-            <Button to="/discover" variant="ghost">
-              Xem tất cả
-            </Button>
-          </div>
-          <ul className="home-updated-grid" aria-label="Truyện mới cập nhật">
-            {newest.map((item) => (
-              <UpdatedRow key={item.sourceMangaId} item={item} />
-            ))}
-          </ul>
-        </section>
-
-        <div className="home-side">
-          <LocalContinueReading />
-          <section className="panel home-ranking" aria-label="Xem nhiều">
-            <h2 className="panel__title">
-              <Star size={16} aria-hidden="true" /> Xem nhiều
-            </h2>
-            <ol className="home-ranking__list">
-              {popular.map((item) => (
-                <li key={item.sourceMangaId}>
-                  <a href={`#${remotePath(item)}`}>{item.title}</a>
-                </li>
+    <div className="home-layout">
+      <div className="home-main page-stack">
+        <Hero items={featured} />
+        <HotRail items={featured} />
+        <div className="home-split">
+          <section aria-label="Cập nhật gần đây">
+            <div className="section-header">
+              <h2>
+                <Clock size={16} aria-hidden="true" /> Cập nhật gần đây
+              </h2>
+              <Button to="/discover" variant="ghost">
+                Xem tất cả
+              </Button>
+            </div>
+            <ul className="home-updated-grid" aria-label="Truyện mới cập nhật">
+              {newest.map((item) => (
+                <UpdatedRow key={item.sourceMangaId} item={item} />
               ))}
-            </ol>
+            </ul>
           </section>
+          <LocalContinueReading />
         </div>
       </div>
+
+      <aside className="home-aside">
+        <QuickActions />
+        <section className="panel home-ranking" aria-label="Xem nhiều">
+          <h2 className="panel__title">
+            <Star size={16} aria-hidden="true" /> Xem nhiều
+          </h2>
+          <ol className="home-ranking__list">
+            {popular.map((item) => (
+              <li key={item.sourceMangaId}>
+                <a href={`#${remotePath(item)}`}>{item.title}</a>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </aside>
     </div>
   );
 }

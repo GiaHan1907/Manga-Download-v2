@@ -61,11 +61,31 @@ const DILIB_RESERVED: &[&str] = &[
 /// TruyenQQ serves chapter images from rotating shards of this CDN domain.
 /// A domain (not exact-host) allowlist is only ever set by built-in code —
 /// user-registered sources keep the exact-host fail-closed policy.
-const TRUYENQQ_IMAGE_DOMAIN: &str = "cc3t.net";
+const TRUYENQQ_IMAGE_DOMAIN: &str = "truyenvua.com";
+/// TruyenQQ covers are not hosted by the site itself either; they ship from
+/// this second CDN. File names carry an upload timestamp, so unlike NetTruyen
+/// the key must keep the source's own path — it is validated as a bare
+/// `/ebook/…` path and always re-fetched against this fixed host.
+const TRUYENQQ_COVER_DOMAIN: &str = "hinhhinh.com";
+const TRUYENQQ_COVER_HOST: &str = "i.hinhhinh.com";
 /// Site sections whose root-level paths are never manga slugs.
 const TRUYENQQ_RESERVED: &[&str] = &[
+    "doc-truyen",
+    "truyen-tranh",
     "tim-kiem",
-    "truyen-hot",
+    "tim-kiem-nang-cao",
+    "frontend",
+    "top-ngay",
+    "top-tuan",
+    "top-thang",
+    "truyen-moi-cap-nhat",
+    "truyen-tranh-moi",
+    "truyen-hoan-thanh",
+    "truyen-yeu-thich",
+    "truyen-dang-theo-doi",
+    "truyen-ngau-nhien",
+    "truyen-dich-qq",
+    "lich-su",
     "the-loai",
     "tac-gia",
     "dang-nhap",
@@ -74,8 +94,7 @@ const TRUYENQQ_RESERVED: &[&str] = &[
     "gioi-thieu",
     "lien-he",
     "bao-tai",
-    "lich-su",
-    "trang-thai",
+    "rss",
     "contact",
 ];
 
@@ -203,7 +222,10 @@ impl MadaraGeneric {
             },
             SiteProfile::TruyenQQ => HttpPolicy {
                 allowed_hosts,
-                allowed_domains: vec![TRUYENQQ_IMAGE_DOMAIN.to_string()],
+                allowed_domains: vec![
+                    TRUYENQQ_IMAGE_DOMAIN.to_string(),
+                    TRUYENQQ_COVER_DOMAIN.to_string(),
+                ],
                 referer,
             },
             SiteProfile::Nettruyen => HttpPolicy {
@@ -235,15 +257,29 @@ impl MadaraGeneric {
         allowed
     }
 
-    /// Mint a cover key (path-only, base host only — theme thumbnails ship
-    /// with the site; CDN allowlist hosts serve chapter pages). A key never
-    /// carries scheme or host, so nothing fetchable leaks to the renderer.
+    /// Mint a cover key (path-only — theme thumbnails ship with the site;
+    /// built-in CDNs may also ship their own, see below). A key never carries
+    /// scheme or host, so nothing fetchable leaks to the renderer.
     fn cover_key_from_src(&self, raw: &str) -> Option<String> {
         let parsed = self.base.join(raw.trim()).ok()?;
-        if parsed.scheme() != "https" || parsed.host_str() != Some(self.host.as_str()) {
+        if parsed.scheme() != "https" {
+            return None;
+        }
+        let host = parsed.host_str()?;
+        // TruyenQQ's covers live on a second CDN whose file names carry an
+        // upload timestamp, so the path cannot be re-derived from the slug the
+        // way NetTruyen's can. Only `/ebook/…` paths on the vetted cover domain
+        // are accepted, and they are always re-fetched against one fixed host.
+        let qq_cover = self.profile == SiteProfile::TruyenQQ
+            && (host == TRUYENQQ_COVER_HOST
+                || host.ends_with(&format!(".{TRUYENQQ_COVER_DOMAIN}")));
+        if !qq_cover && host != self.host.as_str() {
             return None;
         }
         let path = parsed.path();
+        if qq_cover && !path.starts_with("/ebook/") {
+            return None;
+        }
         (!path.starts_with("//") && !path.is_empty() && path.len() <= 480).then(|| path.to_string())
     }
 
@@ -345,7 +381,7 @@ impl MadaraGeneric {
     fn manga_url(&self, slug: &str) -> String {
         match self.profile {
             SiteProfile::Madara => format!("{}manga/{slug}/", self.base),
-            SiteProfile::TruyenQQ => format!("{}{slug}", self.base),
+            SiteProfile::TruyenQQ => format!("{}truyen-tranh/{slug}", self.base),
             SiteProfile::Nettruyen => format!("{}truyen-tranh/{slug}", self.base),
             SiteProfile::Dilib => format!("{}{slug}.html", self.base),
         }
@@ -354,7 +390,10 @@ impl MadaraGeneric {
     fn chapter_url(&self, manga_slug: &str, chapter_slug: &str) -> String {
         match self.profile {
             SiteProfile::Madara => format!("{}manga/{}/{}/", self.base, manga_slug, chapter_slug),
-            SiteProfile::TruyenQQ => format!("{}{}/{}", self.base, manga_slug, chapter_slug),
+            // TruyenQQ chapters are siblings of the story, not children:
+            // /truyen-tranh/<story>-chap-<n>. The stored chapter id is the
+            // whole stem, so `manga_slug` is already contained in it.
+            SiteProfile::TruyenQQ => format!("{}truyen-tranh/{chapter_slug}", self.base),
             SiteProfile::Nettruyen => {
                 format!("{}truyen-tranh/{}/{}", self.base, manga_slug, chapter_slug)
             }
@@ -364,15 +403,14 @@ impl MadaraGeneric {
         }
     }
 
-    /// Detail-page fetch URL. TruyenQQ ships ~70 latest chapters inline;
-    /// ANY `?page-chap=` request renders the FULL list (live-verified
-    /// 2026-09-28), so the built-in always asks for page 1.
+    /// Detail-page fetch URL. TruyenQQ renders its whole chapter list inline
+    /// on the story page (950 links verified live), so no extra page param.
     fn detail_chapter_list_url(&self, slug: &str) -> String {
         match self.profile {
             SiteProfile::Madara | SiteProfile::Nettruyen | SiteProfile::Dilib => {
                 self.manga_url(slug)
             }
-            SiteProfile::TruyenQQ => format!("{}{slug}?page-chap=1", self.base),
+            SiteProfile::TruyenQQ => self.manga_url(slug),
         }
     }
 
@@ -401,11 +439,17 @@ impl MadaraGeneric {
                 segments.next()?
             }
             SiteProfile::TruyenQQ => {
-                let slug = segments.next()?;
-                if TRUYENQQ_RESERVED.contains(&slug) {
+                // Stories and chapters are SIBLINGS here: /truyen-tranh/<slug>
+                // and /truyen-tranh/<slug>-chap-<n>. The "-chap-" marker is the
+                // only thing separating an identity from a chapter link.
+                if segments.next()? != "truyen-tranh" {
                     return None;
                 }
-                slug
+                let stem = segments.next()?;
+                if TRUYENQQ_RESERVED.contains(&stem) || stem.contains("-chap-") {
+                    return None;
+                }
+                stem
             }
             SiteProfile::Nettruyen => {
                 if segments.next()? != "truyen-tranh" {
@@ -447,9 +491,21 @@ impl MadaraGeneric {
                 }
             }
             SiteProfile::TruyenQQ => {
-                if segments.next()? != manga_slug {
+                // /truyen-tranh/<manga>-chap-<n> — like Dilib, the stored
+                // chapter id is the whole stem; chapter_url rebuilds from it.
+                if segments.next()? != "truyen-tranh" {
                     return None;
                 }
+                let stem = segments.next()?;
+                if segments.next().is_some()
+                    || !stem
+                        .strip_prefix(&format!("{manga_slug}-"))
+                        .is_some_and(|rest| rest.starts_with("chap-"))
+                    || !valid_slug(stem)
+                {
+                    return None;
+                }
+                return Some(stem.to_string());
             }
             SiteProfile::Nettruyen => {
                 if segments.next()? != "truyen-tranh" || segments.next()? != manga_slug {
@@ -535,6 +591,62 @@ impl MadaraGeneric {
         }
     }
 
+    /// Collect one `ul.list_grid` catalog grid into a rail. Each card's story
+    /// identity and title come from the heading link, the cover from the
+    /// avatar, and the chapter/age labels are the source's own wording;
+    /// repeats and foreign links are dropped.
+    /// Collect one catalog grid into a rail, dropping repeats and foreign links.
+    fn home_rail(&self, document: &Html, grid: &str, cap: usize) -> Vec<HomeFeedItem> {
+        let rows = Selector::parse(grid).unwrap();
+        let title = Selector::parse("div.book_info h3 a[href]").unwrap();
+        let avatar = Selector::parse("div.book_avatar img[src]").unwrap();
+        let chapter = Selector::parse("div.last_chapter a[href]").unwrap();
+        let time = Selector::parse("span.time-ago").unwrap();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut items: Vec<HomeFeedItem> = Vec::new();
+        for node in document.select(&rows) {
+            let Some(anchor) = node.select(&title).next() else {
+                continue;
+            };
+            let Some(href) = anchor.value().attr("href") else {
+                continue;
+            };
+            let Some(slug) = self.slug_from_manga_url(href) else {
+                continue;
+            };
+            if !seen.insert(slug.clone()) {
+                continue;
+            }
+            let text_of = |sel: &Selector| {
+                node.select(sel)
+                    .next()
+                    .map(|n| n.text().collect::<String>().trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            items.push(HomeFeedItem {
+                summary: RemoteMangaSummary {
+                    source_id: self.id.clone(),
+                    source_manga_id: slug.clone(),
+                    source_display_name: self.display_name.clone(),
+                    title: text_of(&title).unwrap_or_else(|| slug.clone()),
+                    author: None,
+                    cover_key: node
+                        .select(&avatar)
+                        .next()
+                        .and_then(|img| img.value().attr("src"))
+                        .and_then(|raw| self.cover_key_from_src(raw)),
+                    status: "unknown".to_string(),
+                },
+                latest_chapter: text_of(&chapter),
+                latest_time: text_of(&time),
+            });
+            if items.len() >= cap {
+                break;
+            }
+        }
+        items
+    }
+
     /// Extract chapter links from any fragment (page or AJAX markup). Only
     /// same-manga, same-host slugs survive — sidebar/related links for other
     /// series are filtered out by `chapter_slug_from_url`.
@@ -544,7 +656,7 @@ impl MadaraGeneric {
                 "ul.main.version-chap a[href], li.wp-manga-chapter a[href], div.chapter-item a[href]"
             }
             SiteProfile::TruyenQQ => {
-                "#chapter-list a.chapter-name[href], .reading-list .item-name a[href]"
+                ".works-chapter-list a[href], .list_chapter a[href], ul.list-chapter a[href]"
             }
             SiteProfile::Nettruyen => {
                 ".list-chapter a.chapter[href], .nav-chapters a[href], #chapter_list a[href], ul.list-chapter a[href]"
@@ -659,23 +771,18 @@ impl SourceAdapter for MadaraGeneric {
         match self.profile {
             SiteProfile::Madara => url.path().starts_with("/manga/"),
             SiteProfile::TruyenQQ => {
-                // Root-level single or double segment paths are manga/chapter
-                // links; reserved site sections never are.
-                let mut segments = url
+                // /truyen-tranh/<story> and /truyen-tranh/<story>-chap-<n>
+                // are the only two shapes this source owns.
+                let mut it = url
                     .path_segments()
                     .into_iter()
                     .flatten()
                     .filter(|s| !s.is_empty());
-                let Some(first) = segments.next() else {
-                    return false;
-                };
-                if TRUYENQQ_RESERVED.contains(&first) || !valid_slug(first) {
-                    return false;
-                }
-                match segments.next() {
-                    None => true,
-                    Some(chapter) => segments.next().is_none() && valid_slug(chapter),
-                }
+                it.next() == Some("truyen-tranh")
+                    && it
+                        .next()
+                        .is_some_and(|stem| !TRUYENQQ_RESERVED.contains(&stem) && valid_slug(stem))
+                    && it.next().is_none()
             }
             SiteProfile::Nettruyen => {
                 let mut it = url
@@ -718,7 +825,16 @@ impl SourceAdapter for MadaraGeneric {
                 }
                 segments.next()?
             }
-            SiteProfile::TruyenQQ => segments.next()?,
+            SiteProfile::TruyenQQ => {
+                // /truyen-tranh/<story>-chap-<n>: the stem carries both halves.
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                let stem = segments.next()?;
+                let (manga, rest) = stem.split_once("-chap-")?;
+                let _ = rest;
+                return Some((manga.to_string(), stem.to_string()));
+            }
             SiteProfile::Nettruyen => {
                 if segments.next()? != "truyen-tranh" {
                     return None;
@@ -762,12 +878,10 @@ impl SourceAdapter for MadaraGeneric {
                 }
             }
             SiteProfile::TruyenQQ => {
-                // The site's own search form: GET /tim-kiem with `s=`.
-                if page == 1 {
-                    format!("{}tim-kiem?s={}", self.base, encoded)
-                } else {
-                    format!("{}tim-kiem?s={}&page={}", self.base, encoded, page)
-                }
+                // The site's own suggest endpoint (its search box posts here;
+                // the GET /tim-kiem?q= route renders an empty shell). The
+                // fragment carries no pagination, so page > 1 repeats page 1.
+                format!("{}frontend/search/search", self.base)
             }
             SiteProfile::Nettruyen => {
                 // The site's own search route; `page` is their pagination param.
@@ -779,7 +893,13 @@ impl SourceAdapter for MadaraGeneric {
             }
             SiteProfile::Dilib => return Err(SourceError::UnsupportedOperation),
         };
-        let html = self.http.get_text(&search_url).await?;
+        let html = if self.profile == SiteProfile::TruyenQQ {
+            self.http
+                .post_form_text(&search_url, &[("search", query), ("type", "0")])
+                .await?
+        } else {
+            self.http.get_text(&search_url).await?
+        };
         let document = Html::parse_document(&html);
         let mut items: Vec<RemoteMangaSummary> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
@@ -812,16 +932,51 @@ impl SourceAdapter for MadaraGeneric {
                 }
             }
             SiteProfile::TruyenQQ => {
-                // Results are `.item` cards inside `.listing` only — the
-                // homepage-style popular/genres blocks outside it never count.
-                self.collect_cards(
-                    &document,
-                    &Selector::parse(".listing .item").unwrap(),
-                    &Selector::parse("div.info h3 a[href]").unwrap(),
-                    &Selector::parse("div.cover img").unwrap(),
-                    &mut seen,
-                    &mut items,
-                );
+                // The suggest fragment wraps the whole card in one <a> and
+                // keeps the title in `p.name` (link text would concatenate the
+                // alternate title and chapter too), so it needs its own walk.
+                let rows = Selector::parse("li").unwrap();
+                let row_link = Selector::parse("a[href]").unwrap();
+                let row_name = Selector::parse("p.name").unwrap();
+                let row_img = Selector::parse("div.search_avatar img[src]").unwrap();
+                for node in document.select(&rows) {
+                    let Some(href) = node
+                        .select(&row_link)
+                        .next()
+                        .and_then(|a| a.value().attr("href"))
+                    else {
+                        continue;
+                    };
+                    let Some(slug) = self.slug_from_manga_url(href) else {
+                        continue;
+                    };
+                    if !seen.insert(slug.clone()) {
+                        continue;
+                    }
+                    let title = node
+                        .select(&row_name)
+                        .next()
+                        .map(|p| p.text().collect::<String>().trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| slug.clone());
+                    let cover_key = node
+                        .select(&row_img)
+                        .next()
+                        .and_then(|img| img.value().attr("src"))
+                        .and_then(|raw| self.cover_key_from_src(raw));
+                    items.push(RemoteMangaSummary {
+                        source_id: self.id.clone(),
+                        source_manga_id: slug,
+                        source_display_name: self.display_name.clone(),
+                        title,
+                        author: None,
+                        cover_key,
+                        status: "unknown".to_string(),
+                    });
+                    if items.len() >= 50 {
+                        break;
+                    }
+                }
             }
             SiteProfile::Nettruyen => {
                 // Search cards are `.item` blocks whose title sits in
@@ -846,10 +1001,7 @@ impl SourceAdapter for MadaraGeneric {
                 )
                 .next()
                 .is_some(),
-            SiteProfile::TruyenQQ => document
-                .select(&Selector::parse(".pagination a[href*='page']").unwrap())
-                .next()
-                .is_some(),
+            SiteProfile::TruyenQQ => false,
             SiteProfile::Nettruyen => document
                 .select(&Selector::parse(".pagination a[href*='page']").unwrap())
                 .next()
@@ -859,147 +1011,30 @@ impl SourceAdapter for MadaraGeneric {
         Ok(RemoteSearchPage { items, has_more })
     }
 
-    /// TruyenQQ's own front page carries all three Home rails in one HTML
-    /// document: the spotlight carousel, "TRUYỆN MỚI CẬP NHẬT" and the
-    /// "TOP TRUYỆN ĐỌC NHIỀU" widget. Each rail keeps its own de-duplication
-    /// set because the same story legitimately appears in several of them.
+    /// TruyenQQ's catalog (`/doc-truyen`) publishes the spotlight and the
+    /// newest grid in one document; the most-read rail is its own ranking
+    /// page. Every card keeps its own de-duplication set because one story
+    /// legitimately appears in several rails.
     async fn home_feed(&self) -> Result<RemoteHomeFeed, SourceError> {
         if self.profile != SiteProfile::TruyenQQ {
             return Err(SourceError::UnsupportedOperation);
         }
-        let html = self.http.get_text(self.base.as_str()).await?;
-        let document = Html::parse_document(&html);
-        // The spotlight carousel wraps the WHOLE card in one <a>, with the
-        // title as plain text in `caption h3` — so `collect_cards` (which
-        // reads the title from the link itself) cannot be used for it.
-        let mut featured: Vec<HomeFeedItem> = Vec::new();
-        let mut seen_featured: HashSet<String> = HashSet::new();
-        let slide = Selector::parse("#owl-slide .item").unwrap();
-        let link = Selector::parse("a[href]").unwrap();
-        let heading = Selector::parse("div.caption h3").unwrap();
-        let chapter_line = Selector::parse("div.caption p").unwrap();
-        let image = Selector::parse("img[src]").unwrap();
-        for node in document.select(&slide) {
-            let Some(href) = node
-                .select(&link)
-                .next()
-                .and_then(|a| a.value().attr("href"))
-            else {
-                continue;
-            };
-            let Some(slug) = self.slug_from_manga_url(href) else {
-                continue;
-            };
-            if !seen_featured.insert(slug.clone()) {
-                continue;
-            }
-            let text_of = |sel: &Selector| {
-                node.select(sel)
-                    .next()
-                    .map(|n| n.text().collect::<String>().trim().to_string())
-                    .filter(|value| !value.is_empty())
-            };
-            featured.push(HomeFeedItem {
-                summary: RemoteMangaSummary {
-                    source_id: self.id.clone(),
-                    source_manga_id: slug.clone(),
-                    source_display_name: self.display_name.clone(),
-                    title: text_of(&heading).unwrap_or_else(|| slug.clone()),
-                    author: None,
-                    cover_key: node
-                        .select(&image)
-                        .next()
-                        .and_then(|img| img.value().attr("src"))
-                        .and_then(|raw| self.cover_key_from_src(raw)),
-                    status: "unknown".to_string(),
-                },
-                latest_chapter: text_of(&chapter_line),
-                latest_time: None,
-            });
-            if featured.len() >= 8 {
-                break;
-            }
-        }
-        // "TRUYỆN MỚI CẬP NHẬT" lists up to two chapter links per card; the
-        // first one is the newest.
-        let mut newest: Vec<HomeFeedItem> = Vec::new();
-        let mut seen_newest: HashSet<String> = HashSet::new();
-        let story_item = Selector::parse("#contentstory .item").unwrap();
-        let story_title = Selector::parse("div.info h3.name a[href]").unwrap();
-        let story_cover = Selector::parse("div.cover img[src]").unwrap();
-        let story_chapter = Selector::parse("a.chapter-name[href]").unwrap();
-        let story_time = Selector::parse("div.chap span.time").unwrap();
-        for node in document.select(&story_item) {
-            let title_anchor = node.select(&story_title).next();
-            let Some(href) = title_anchor
-                .as_ref()
-                .and_then(|a| a.value().attr("href"))
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            let raw_title = title_anchor
-                .map(|a| a.text().collect::<String>().trim().to_string())
-                .unwrap_or_default();
-            let Some(slug) = self.slug_from_manga_url(&href) else {
-                continue;
-            };
-            if !seen_newest.insert(slug.clone()) {
-                continue;
-            }
-            newest.push(HomeFeedItem {
-                summary: RemoteMangaSummary {
-                    source_id: self.id.clone(),
-                    source_manga_id: slug.clone(),
-                    source_display_name: self.display_name.clone(),
-                    title: if raw_title.is_empty() {
-                        slug
-                    } else {
-                        raw_title
-                    },
-                    author: None,
-                    cover_key: node
-                        .select(&story_cover)
-                        .next()
-                        .and_then(|img| img.value().attr("src"))
-                        .and_then(|raw| self.cover_key_from_src(raw)),
-                    status: "unknown".to_string(),
-                },
-                latest_chapter: node
-                    .select(&story_chapter)
-                    .next()
-                    .map(|a| a.text().collect::<String>().trim().to_string())
-                    .filter(|value| !value.is_empty()),
-                latest_time: node
-                    .select(&story_time)
-                    .next()
-                    .map(|t| t.text().collect::<String>().trim().to_string())
-                    .filter(|value| !value.is_empty()),
-            });
-            if newest.len() >= 12 {
-                break;
-            }
-        }
-        // The ranking widget is a text-only list: no cover, no chapter label.
-        let mut popular_seen = HashSet::new();
-        let mut popular_cards = Vec::new();
-        self.collect_cards(
-            &document,
-            &Selector::parse(".widget.suggest .item").unwrap(),
-            &Selector::parse("a[href]").unwrap(),
-            &Selector::parse("img[src]").unwrap(),
-            &mut popular_seen,
-            &mut popular_cards,
-        );
-        let popular: Vec<HomeFeedItem> = popular_cards
-            .into_iter()
-            .take(10)
-            .map(|summary| HomeFeedItem {
-                summary,
-                latest_chapter: None,
-                latest_time: None,
-            })
-            .collect();
+        // Both documents are fetched before ANY Html value exists: scraper's
+        // Html is !Send and must never live across an await.
+        let catalog_html = self
+            .http
+            .get_text(&format!("{}doc-truyen", self.base))
+            .await?;
+        let ranking_html = self
+            .http
+            .get_text(&format!("{}top-ngay", self.base))
+            .await?;
+        let catalog_doc = Html::parse_document(&catalog_html);
+        let featured = self.home_rail(&catalog_doc, "#list_suggest li", 8);
+        let newest = self.home_rail(&catalog_doc, "#list_new li", 12);
+        drop(catalog_doc);
+        let ranking_doc = Html::parse_document(&ranking_html);
+        let popular = self.home_rail(&ranking_doc, "ul.list_grid li", 10);
         let feed = RemoteHomeFeed {
             featured,
             newest,
@@ -1017,13 +1052,12 @@ impl SourceAdapter for MadaraGeneric {
                 segments.next();
                 segments.next().map(str::to_string)
             }),
-            SiteProfile::TruyenQQ => url
-                .path_segments()
-                .and_then(|mut segments| segments.next().map(str::to_string)),
-            SiteProfile::Nettruyen => url.path_segments().and_then(|mut segments| {
-                segments.next();
-                segments.next().map(str::to_string)
-            }),
+            SiteProfile::TruyenQQ | SiteProfile::Nettruyen => {
+                url.path_segments().and_then(|mut segments| {
+                    segments.next();
+                    segments.next().map(str::to_string)
+                })
+            }
             SiteProfile::Dilib => url
                 .path_segments()
                 .and_then(|mut segments| segments.next())
@@ -1046,23 +1080,28 @@ impl SourceAdapter for MadaraGeneric {
         let html = self.http.get_text(&page_url).await?;
         let document = Html::parse_document(&html);
         let mut urls: Vec<String> = Vec::new();
-        // TruyenQQ and Nettruyen lazy-load real pages as img[data-src] on a
-        // sharded CDN domain; plain-`src` images are ads/placeholders and are
-        // never pages. Dilib (and Madara) serve pages from the base host.
+        // Real pages live on a sharded CDN domain for both lazy-loading sites.
+        // TruyenQQ prints them in plain `src`, NetTruyen in `data-src`, so both
+        // attributes are tried and the CDN host test is what rejects ads,
+        // avatars and placeholders. Dilib (and Madara) serve pages from base.
         let lazy_cdn = match self.profile {
             SiteProfile::TruyenQQ => Some(TRUYENQQ_IMAGE_DOMAIN),
             SiteProfile::Nettruyen => Some(NETTRUYEN_IMAGE_DOMAIN),
             SiteProfile::Madara | SiteProfile::Dilib => None,
         };
         if let Some(cdn) = lazy_cdn {
-            let lazy = Selector::parse("img[data-src]").unwrap();
+            // Scoped to the reader container: both sites print pages inside
+            // `.page-chapter`, while avatars also sit on the same CDN domain
+            // (av.truyenvua.com) and ads sit elsewhere.
+            let lazy =
+                Selector::parse(".page-chapter img[data-src], .page-chapter img[src]").unwrap();
             let mut seen: HashSet<Url> = HashSet::new();
             for node in document.select(&lazy) {
-                let Some(raw) = node
-                    .value()
-                    .attr("data-src")
+                let Some(raw) = ["data-src", "src"]
+                    .iter()
+                    .filter_map(|attr| node.value().attr(attr))
                     .map(str::trim)
-                    .filter(|v| !v.is_empty())
+                    .find(|v| !v.is_empty())
                 else {
                     continue;
                 };
@@ -1169,6 +1208,21 @@ impl SourceAdapter for MadaraGeneric {
                 return Err(SourceError::MalformedUrl);
             }
             let url = format!("https://{NETTRUYEN_COVER_HOST}{cover_key}");
+            return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
+        }
+        // TruyenQQ covers keep the source's own `/ebook/…` path (the file name
+        // embeds an upload timestamp), but the host is always this fixed,
+        // compile-time vetted one — never anything the page supplied.
+        if self.profile == SiteProfile::TruyenQQ {
+            let safe = cover_key.starts_with("/ebook/")
+                && !cover_key.contains("//")
+                && !cover_key
+                    .split('/')
+                    .any(|segment| segment == ".." || segment == ".");
+            if !safe {
+                return Err(SourceError::MalformedUrl);
+            }
+            let url = format!("https://{TRUYENQQ_COVER_HOST}{cover_key}");
             return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
         }
         let url = self.cover_url_from_key(cover_key)?;
@@ -1862,7 +1916,7 @@ mod tests {
         let transport = Arc::new(MockTransport::with(replies));
         let provider = MadaraGeneric::with_transport_profile(
             "TruyenQQ",
-            "https://truyenqq.com.vn/",
+            "https://truyenqqko.com/",
             transport.clone(),
             SiteProfile::TruyenQQ,
         )
@@ -1934,147 +1988,241 @@ mod tests {
         }
     }
 
+    // Fixtures mirror truyenqqko.com's real markup: the search endpoint is a
+    // POST returning a bare <li> fragment, stories and chapters are siblings
+    // under /truyen-tranh/, covers live on i.hinhhinh.com and pages on a
+    // truyenvua shard.
     const QQ_SEARCH: &str = r#"<html><body>
-        <h1>TÌM KIẾM TRUYỆN: <span class="keyword">"ninja"</span></h1>
-        <div class="listing"><div class="inner">
-            <div class="item">
-                <div class="cover"><a href="/ninja-to-koroshiya" class="cover"><img src="/media/book/ninja.jpg" alt="Ninja"></a></div>
-                <div class="info"><h3><a href="/ninja-to-koroshiya">Ninja To Koroshiya</a></h3></div>
-            </div>
-            <div class="item">
-                <div class="cover"><a href="/vo-luyen-dinh-phong"><img src="/media/book/vo.jpg"></a></div>
-                <div class="info"><h3><a href="/vo-luyen-dinh-phong">V&#245; Luyện Đỉnh Phong</a></h3></div>
-            </div>
-        </div></div>
-        <div class="pagination"><div class="page-total">16 kết quả</div></div>
-        </body></html>"#;
-
-    #[tokio::test]
-    async fn qq_search_hits_tim_kiem_and_maps_listing_cards() {
-        let (provider, transport) = qq(vec![Ok(QQ_SEARCH)]);
-        let page = provider.search("ninja", 1).await.unwrap();
-        assert_eq!(page.items.len(), 2);
-        assert_eq!(page.items[0].source_id, "truyenqq");
-        assert_eq!(page.items[0].source_manga_id, "ninja-to-koroshiya");
-        assert_eq!(page.items[0].title, "Ninja To Koroshiya");
-        assert_eq!(
-            page.items[1].title, "Võ Luyện Đỉnh Phong",
-            "entities decode"
-        );
-        assert_eq!(
-            page.items[0].cover_key.as_deref(),
-            Some("/media/book/ninja.jpg")
-        );
-        assert!(!page.has_more, "count text is not a next-page link");
-        let requested = transport.requested.lock().unwrap();
-        assert_eq!(requested[0].1, "https://truyenqq.com.vn/tim-kiem?s=ninja");
-    }
-
-    #[tokio::test]
-    async fn qq_search_ignores_popular_blocks_outside_listing() {
-        let (provider, _) = qq(vec![Ok(r#"<html><body>
-            <div class="slide"><div class="item"><a href="/hot-one"><img src="/media/book/h.jpg"></a></div></div>
-            <div class="listing"></div>
-        </body></html>"#)]);
-        let page = provider.search("x", 1).await.unwrap();
-        assert!(
-            page.items.is_empty(),
-            "carousel items outside .listing never count"
-        );
-    }
-
-    #[tokio::test]
-    async fn qq_detail_uses_full_list_param_and_parses_chapter_rows() {
-        let (provider, transport) = qq(vec![Ok(r#"<html><body>
-            <h1 itemprop="name">V&#245; Luyện Đỉnh Phong</h1>
-            <div id="chapter-list" class="chapter-list"><div class="inner"><div class="reading-list">
-                <div class="item"><div class="item-name"><a href="/vo-luyen/chapter-2" class="chapter-name d-block">Chapter 2</a></div></div>
-                <div class="item"><div class="item-name"><a href="/vo-luyen/chapter-1" class="chapter-name d-block">Chapter 1</a></div></div>
-            </div></div></div>
-        </body></html>"#)]);
-        let detail = provider.manga_detail("vo-luyen").await.unwrap();
-        assert_eq!(detail.summary.title, "Võ Luyện Đỉnh Phong");
-        assert_eq!(detail.chapters.len(), 2);
-        assert_eq!(
-            detail.chapters[0].source_chapter_id, "chapter-1",
-            "chronological"
-        );
-        assert_eq!(detail.chapters[0].number, Some(1.0));
-        assert_eq!(detail.chapters[1].number, Some(2.0));
-        assert!(!detail.available_offline);
-        let requested = transport.requested.lock().unwrap();
-        assert_eq!(
-            requested[0].1, "https://truyenqq.com.vn/vo-luyen?page-chap=1",
-            "full chapter list requested"
-        );
-    }
-
-    #[tokio::test]
-    async fn qq_pages_prefer_data_src_and_follow_cdn_shards() {
-        let (provider, _) = qq(vec![Ok(r#"<html><body>
-            <div class="image-box"><img class="lazy" data-src="https://s34.cc3t.net/chapters/b469/chapter-1/p0.PNG" src="/images/placeholder.jpg"></div>
-            <div class="image-box"><img class="lazy" data-src="https://s12.cc3t.net/chapters/b469/chapter-1/p1.jpg" src="/images/loading.svg"></div>
-            <div class="image-box"><img src="https://cdn.adnetwork.example/banner.gif"></div>
-        </body></html>"#)]);
-        let manifest = provider
-            .page_manifest("vo-luyen", "chapter-1")
-            .await
-            .unwrap();
-        assert_eq!(manifest.pages.len(), 2, "ads without data-src are skipped");
-        assert!(manifest.pages[0].url.starts_with("https://s34.cc3t.net/"));
-        assert!(manifest.pages[1].url.starts_with("https://s12.cc3t.net/"));
-    }
-
-    const QQ_HOME: &str = r#"<html><body>
-      <div id="slide"><div id="owl-slide" class="owl-carousel">
-        <div class="item"><a href="/vo-luyen-dinh-phong" title="vo-luyen-dinh-phong"><img src="/media/book/vo-luyen.jpg"><div class="caption"><h3>Võ Luyện Đỉnh Phong</h3><p>Chapter 3824</p></div></a></div>
-      </div></div>
-      <div id="latest"><div id="contentstory"><div class="inner">
-        <div class="item">
-          <div class="cover"><a href="/doi-thu-dinh-menh"><img src="/media/book/doi-thu.jpg"></a></div>
-          <div class="info"><h3 class="name"><a href="/doi-thu-dinh-menh">Đối Thủ Định Mệnh</a></h3>
-            <div class="latest"><div class="chap"><a class="chapter-name" href="/doi-thu-dinh-menh/chapter-12">Chapter 12</a><span class="time">37 phút trước</span></div></div>
-          </div>
-        </div>
-      </div></div></div>
-      <div class="widget suggest"><h3 class="title"><span>TOP TRUYỆN ĐỌC NHIỀU</span></h3>
-        <div class="content"><div class="all">
-          <div class='item'><a href='/dai-quan-gia-la-ma-hoang'>Đại Quản Gia Là Ma Hoàng</a></div>
-        </div></div>
-      </div>
+      <li>
+        <a href="https://truyenqqko.com/truyen-tranh/the-yagyu-ninja-scroll-896">
+          <div class="search_avatar"><img src="https://i.hinhhinh.com/ebook/80x105/the-yagyu-ninja-scroll_1443539433.jpg?gt=hdfgdfg&amp;mobile=2"></div>
+          <div class="search_info"><p class="name">The Yagyu Ninja Scroll</p><p class="name_other"></p><p>Chưng 49</p></div>
+        </a>
+      </li>
+      <li>
+        <a href="https://truyenqqko.com/truyen-tranh/under-ninja-5861">
+          <div class="search_avatar"><img src="https://i.hinhhinh.com/ebook/80x105/under-ninja_1541136998.jpg?gt=hdfgdfg&amp;mobile=2"></div>
+          <div class="search_info"><p class="name">Under Ninja</p><p class="name_other">An Ninja</p><p>Chưng 12</p></div>
+        </a>
+      </li>
+      <li><a href="https://truyenqqko.com/doc-truyen"><div class="search_info"><p class="name">Bang tin</p></div></a></li>
     </body></html>"#;
 
     #[tokio::test]
+    async fn qq_search_posts_to_the_suggest_endpoint_and_maps_cards() {
+        let (provider, transport) = qq(vec![Ok(QQ_SEARCH)]);
+        let page = provider.search("ninja", 1).await.unwrap();
+        assert_eq!(page.items.len(), 2, "non-story links are dropped");
+        assert_eq!(page.items[0].title, "The Yagyu Ninja Scroll");
+        assert_eq!(page.items[0].source_manga_id, "the-yagyu-ninja-scroll-896");
+        // The key is the CDN path only — no host, no query string.
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/ebook/80x105/the-yagyu-ninja-scroll_1443539433.jpg")
+        );
+        assert!(!page.has_more, "the suggest fragment has no pagination");
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(
+            requested[0],
+            (
+                "POST-TEXT".to_string(),
+                "https://truyenqqko.com/frontend/search/search".to_string()
+            )
+        );
+    }
+
+    const QQ_DETAIL: &str = r#"<html><head>
+        <meta property="og:image" content="https://i.hinhhinh.com/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg?gt=hdfgdfg&amp;mobile=2">
+      </head><body>
+      <h1>Dai Quan Gia La Ma Hoang</h1>
+      <ul class="works-chapter-list">
+        <li class="works-chapter-item"><a href="/truyen-tranh/dai-quan-gia-la-ma-hoang-7015-chap-2">Chơng 2</a></li>
+        <li class="works-chapter-item"><a href="/truyen-tranh/dai-quan-gia-la-ma-hoang-7015-chap-1">Chơng 1</a></li>
+        <li class="works-chapter-item"><a href="/truyen-tranh/dai-quan-gia-la-ma-hoang-7015-chap-0">Chơng 0</a></li>
+      </ul>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn qq_detail_reads_the_inline_chapter_list_and_cdn_cover() {
+        let (provider, transport) = qq(vec![Ok(QQ_DETAIL)]);
+        let detail = provider
+            .manga_detail("dai-quan-gia-la-ma-hoang-7015")
+            .await
+            .unwrap();
+        assert_eq!(detail.summary.title, "Dai Quan Gia La Ma Hoang");
+        assert_eq!(
+            detail.summary.cover_key.as_deref(),
+            Some("/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg")
+        );
+        let ids: Vec<&str> = detail
+            .chapters
+            .iter()
+            .map(|c| c.source_chapter_id.as_str())
+            .collect();
+        // The whole stem is the chapter identity, ordered oldest-first.
+        assert_eq!(
+            ids,
+            [
+                "dai-quan-gia-la-ma-hoang-7015-chap-0",
+                "dai-quan-gia-la-ma-hoang-7015-chap-1",
+                "dai-quan-gia-la-ma-hoang-7015-chap-2",
+            ]
+        );
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(
+            requested[0].1,
+            "https://truyenqqko.com/truyen-tranh/dai-quan-gia-la-ma-hoang-7015"
+        );
+    }
+
+    const QQ_PAGES: &str = r#"<html><body>
+      <div class="page-chapter"><img class="lazy-image" src="https://i178.truyenvua.com/7015/916/chap_7015-1.jpg?r=r8645456"></div>
+      <div class="page-chapter"><img class="lazy-image" src="https://i178.truyenvua.com/7015/916/chap_7015-2.jpg?r=r8645456"></div>
+      <img src="https://ads.example.invalid/banner.gif">
+      <img src="https://av.truyenvua.com/160x160/avatar_1733759465.jpg">
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn qq_pages_accept_plain_src_on_the_shard_and_drop_ads_and_avatars() {
+        let (provider, _) = qq(vec![Ok(QQ_PAGES)]);
+        let manifest = provider
+            .page_manifest(
+                "dai-quan-gia-la-ma-hoang-7015",
+                "dai-quan-gia-la-ma-hoang-7015-chap-916",
+            )
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2, "only the numbered shard pages");
+        assert!(manifest.pages[0]
+            .url
+            .starts_with("https://i178.truyenvua.com/"));
+    }
+
+    #[tokio::test]
+    async fn qq_covers_fetch_from_the_vetted_cover_host() {
+        let (provider, transport) = qq(vec![Ok("cover-bytes")]);
+        let bytes = provider
+            .fetch_cover(
+                "dai-quan-gia-la-ma-hoang-7015",
+                "/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg",
+            )
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"cover-bytes".to_vec());
+        assert_eq!(
+            transport.requested.lock().unwrap()[0].1,
+            "https://i.hinhhinh.com/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg"
+        );
+        for key in [
+            "/wp-content/x.jpg",
+            "//evil.com/a.jpg",
+            "/ebook/../secret.jpg",
+        ] {
+            assert!(
+                provider
+                    .fetch_cover("dai-quan-gia-la-ma-hoang-7015", key)
+                    .await
+                    .is_err(),
+                "{key} must never reach the CDN"
+            );
+        }
+    }
+
+    #[test]
+    fn qq_owns_truyen_tranh_stems_but_not_sections_or_chapters() {
+        let (provider, _) = qq(vec![]);
+        let manga: Url = "https://truyenqqko.com/truyen-tranh/dai-quan-gia-la-ma-hoang-7015"
+            .parse()
+            .unwrap();
+        assert!(provider.owns_url(&manga));
+        let chapter: Url =
+            "https://truyenqqko.com/truyen-tranh/dai-quan-gia-la-ma-hoang-7015-chap-916"
+                .parse()
+                .unwrap();
+        assert!(provider.owns_url(&chapter));
+        assert_eq!(
+            provider.chapter_from_url(&chapter),
+            Some((
+                "dai-quan-gia-la-ma-hoang-7015".to_string(),
+                "dai-quan-gia-la-ma-hoang-7015-chap-916".to_string()
+            ))
+        );
+        for reserved in ["doc-truyen", "top-ngay", "tim-kiem-nang-cao", "frontend"] {
+            let url: Url = format!("https://truyenqqko.com/{reserved}")
+                .parse()
+                .unwrap();
+            assert!(!provider.owns_url(&url), "{reserved} is a site section");
+        }
+        let foreign: Url = "https://other.example/truyen-tranh/x-1".parse().unwrap();
+        assert!(!provider.owns_url(&foreign));
+    }
+
+    fn qq_card(stem: &str, title: &str, chapter: &str, age: &str) -> String {
+        format!(
+            r#"<li>
+              <div class="book_avatar">
+                <a href="https://truyenqqko.com/truyen-tranh/{stem}"><img src="https://i.hinhhinh.com/ebook/190x247/{stem}.jpg?gt=x&amp;mobile=2"></a>
+                <div class="top-notice"><span class="time-ago">{age}</span><span class="type-label hot">Hot</span></div>
+              </div>
+              <div class="book_info"><div class="book_name"><h3><a href="https://truyenqqko.com/truyen-tranh/{stem}">{title}</a></h3></div>
+                <div class="last_chapter"><a href="https://truyenqqko.com/truyen-tranh/{stem}-chap-9">{chapter}</a></div>
+              </div>
+            </li>"#
+        )
+    }
+
+    #[tokio::test]
     async fn qq_home_feed_splits_the_three_front_page_rails() {
-        let (provider, _) = qq(vec![Ok(QQ_HOME)]);
+        let catalog = format!(
+            r#"<html><body>
+              <ul class="list_grid grid" id="list_suggest">{}</ul>
+              <ul class="list_grid grid" id="list_new">{}</ul>
+            </body></html>"#,
+            qq_card(
+                "dai-quan-gia-la-ma-hoang-7015",
+                "Dai Quan Gia La Ma Hoang",
+                "Chuong 916",
+                "10 Gio Truoc",
+            ),
+            qq_card(
+                "vo-luyen-dinh-phong-14728",
+                "Vo Luyen Dinh Phong",
+                "Chuong 3824",
+                "21 phut truoc",
+            ),
+        );
+        let ranking = format!(
+            r#"<html><body><ul class="list_grid grid">{}</ul></body></html>"#,
+            qq_card(
+                "under-ninja-5861",
+                "Under Ninja",
+                "Chuong 12",
+                "2 gio truoc"
+            ),
+        );
+        let catalog_ref: &'static str = Box::leak(catalog.into_boxed_str());
+        let ranking_ref: &'static str = Box::leak(ranking.into_boxed_str());
+        let (provider, transport) = qq(vec![Ok(catalog_ref), Ok(ranking_ref)]);
         let feed = provider.home_feed().await.unwrap();
         assert_eq!(feed.featured.len(), 1);
-        // Title comes from the caption heading, never from the wrapping link
-        // (whose text would concatenate the chapter number too).
-        assert_eq!(feed.featured[0].summary.title, "Võ Luyện Đỉnh Phong");
+        assert_eq!(feed.featured[0].summary.title, "Dai Quan Gia La Ma Hoang");
         assert_eq!(
-            feed.featured[0].summary.source_manga_id,
-            "vo-luyen-dinh-phong"
+            feed.featured[0].summary.cover_key.as_deref(),
+            Some("/ebook/190x247/dai-quan-gia-la-ma-hoang-7015.jpg")
         );
         assert_eq!(
             feed.featured[0].latest_chapter.as_deref(),
-            Some("Chapter 3824")
+            Some("Chuong 916")
         );
         assert_eq!(
-            feed.featured[0].summary.cover_key.as_deref(),
-            Some("/media/book/vo-luyen.jpg")
+            feed.featured[0].latest_time.as_deref(),
+            Some("10 Gio Truoc")
         );
-        assert_eq!(feed.newest[0].summary.title, "Đối Thủ Định Mệnh");
-        assert_eq!(
-            feed.newest[0].latest_chapter.as_deref(),
-            Some("Chapter 12"),
-            "the first chapter link is the newest"
-        );
-        assert_eq!(feed.popular[0].summary.title, "Đại Quản Gia Là Ma Hoàng");
-        assert_eq!(feed.newest[0].latest_time.as_deref(), Some("37 phút trước"));
-        assert_eq!(feed.featured[0].latest_time, None);
-        assert!(feed.popular[0].summary.cover_key.is_none());
-        assert!(feed.popular[0].latest_chapter.is_none());
+        assert_eq!(feed.newest[0].summary.title, "Vo Luyen Dinh Phong");
+        assert_eq!(feed.popular[0].summary.title, "Under Ninja");
+        let requested = transport.requested.lock().unwrap();
+        assert_eq!(requested[0].1, "https://truyenqqko.com/doc-truyen");
+        assert_eq!(requested[1].1, "https://truyenqqko.com/top-ngay");
     }
 
     #[tokio::test]
@@ -2092,7 +2240,7 @@ mod tests {
         let adapter = MadaraGeneric::built_in(
             "truyenqq",
             "TruyenQQ",
-            "https://truyenqq.com.vn/",
+            "https://truyenqqko.com/",
             &[],
             SiteProfile::TruyenQQ,
         )
@@ -2131,20 +2279,25 @@ mod tests {
                 .any(|item| item.latest_time.as_deref().is_some_and(|t| !t.is_empty())),
             "newest rail must carry the source's own relative timestamps"
         );
-        let with_cover = feed
-            .newest
-            .iter()
-            .find(|item| item.summary.cover_key.is_some())
-            .expect("newest rail should carry cover keys");
-        let bytes = adapter
-            .fetch_cover(
-                &with_cover.summary.source_manga_id,
-                with_cover.summary.cover_key.as_deref().unwrap(),
-            )
-            .await
-            .expect("live home cover bytes");
-        println!("LIVE HOME cover bytes: {}", bytes.len());
-        assert!(bytes.len() > 1000);
+        // Some cards point at files the CDN itself no longer serves (404), so
+        // the rails are tried in order and the UI's placeholder fallback covers
+        // the rest; at least one real cover must be fetchable.
+        let mut fetched = None;
+        for item in feed.newest.iter().chain(feed.featured.iter()) {
+            let Some(key) = item.summary.cover_key.as_deref() else {
+                continue;
+            };
+            if let Ok(bytes) = adapter
+                .fetch_cover(&item.summary.source_manga_id, key)
+                .await
+            {
+                fetched = Some((key.to_string(), bytes.len()));
+                break;
+            }
+        }
+        let (key, len) = fetched.expect("at least one rail cover must fetch");
+        println!("LIVE HOME cover bytes: {len} ({key})");
+        assert!(len > 1000);
     }
 
     #[tokio::test]
@@ -2153,7 +2306,7 @@ mod tests {
         let adapter = MadaraGeneric::built_in(
             "truyenqq",
             "TruyenQQ",
-            "https://truyenqq.com.vn/",
+            "https://truyenqqko.com/",
             &[],
             SiteProfile::TruyenQQ,
         )
@@ -2265,30 +2418,5 @@ mod tests {
             .expect("live pages");
         println!("LIVE DL pages: {}", manifest.pages.len());
         assert!(manifest.pages.len() >= 3);
-    }
-
-    #[test]
-    fn qq_owns_root_slugs_but_not_reserved_sections() {
-        let (provider, _) = qq(vec![]);
-        let manga: Url = "https://truyenqq.com.vn/vo-luyen-dinh-phong"
-            .parse()
-            .unwrap();
-        assert!(provider.owns_url(&manga));
-        let chapter: Url = "https://truyenqq.com.vn/vo-luyen-dinh-phong/chapter-12"
-            .parse()
-            .unwrap();
-        assert!(provider.owns_url(&chapter));
-        assert_eq!(
-            provider.chapter_from_url(&chapter),
-            Some(("vo-luyen-dinh-phong".to_string(), "chapter-12".to_string()))
-        );
-        for reserved in ["tim-kiem", "the-loai", "truyen-hot", "contact"] {
-            let url: Url = format!("https://truyenqq.com.vn/{reserved}")
-                .parse()
-                .unwrap();
-            assert!(!provider.owns_url(&url), "{reserved} is a site section");
-        }
-        let foreign: Url = "https://other.example/vo-luyen".parse().unwrap();
-        assert!(!provider.owns_url(&foreign));
     }
 }
