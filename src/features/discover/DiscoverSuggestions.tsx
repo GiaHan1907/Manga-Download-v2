@@ -6,15 +6,10 @@ import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
 import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
-import { useAsyncData } from "../../shared/hooks/useAsyncData";
-import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
+import type { AsyncData } from "../../shared/hooks/useAsyncData";
+import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
-import type { HomeFeedItemDto } from "../../types/source";
-
-/// The Home source's own spotlight rail, reused as Discover's starting point.
-/// Labelled "Nổi bật trên TruyenQQ" on purpose: there is no preference model
-/// behind it, so it must not be presented as personal recommendation.
-const SOURCE_ID = "truyenqq";
+import type { HomeFeedDto, HomeFeedItemDto } from "../../types/source";
 
 function SuggestionCard({ item }: { item: HomeFeedItemDto }) {
   const url = useCoverUrl(item.sourceId, item.sourceMangaId, item.coverKey);
@@ -78,10 +73,7 @@ function SuggestionCard({ item }: { item: HomeFeedItemDto }) {
   );
 }
 
-export default function DiscoverSuggestions() {
-  const homeVersion = useDomainVersion("home");
-  const feed = useAsyncData(() => localServices.source.homeFeed(SOURCE_ID), [homeVersion]);
-
+export default function DiscoverSuggestions({ feed }: { feed: AsyncData<HomeFeedDto> }) {
   if (feed.state === "loading") {
     return (
       <div className="card-grid" aria-busy="true">
@@ -102,8 +94,8 @@ export default function DiscoverSuggestions() {
     return <p className="muted">Nguồn chưa có truyện nổi bật để gợi ý.</p>;
   }
   return (
-    <ul className="card-grid discover-suggestions" aria-label="Truyện nổi bật trên TruyenQQ">
-      {feed.data.featured.slice(0, 8).map((item) => (
+    <ul className="discover-suggestions" aria-label="Truyện nổi bật trên TruyenQQ">
+      {feed.data.featured.slice(0, 6).map((item) => (
         <SuggestionCard key={item.sourceMangaId} item={item} />
       ))}
     </ul>

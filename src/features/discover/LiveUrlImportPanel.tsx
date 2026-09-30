@@ -33,20 +33,24 @@ export default function LiveUrlImportPanel() {
   }
 
   return (
-    <div className="page-stack">
+    <form
+      className="discover-url"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
       <Input
-        label="Import URL manga"
+        label="Dán URL truyện"
         type="url"
         placeholder="https://<domain>/manga/<slug> — thuộc nguồn đã đăng ký"
         value={url}
         onChange={(event) => setUrl(event.target.value)}
       />
-      <div className="settings-actions">
-        <Button variant="primary" onClick={() => void submit()} disabled={busy || url.trim() === ""}>
-          {busy ? "Đang phân tích..." : "Phân tích URL"}
-        </Button>
-      </div>
+      <Button variant="primary" type="submit" disabled={busy || url.trim() === ""}>
+        {busy ? "Đang phân tích..." : "Phân tích"}
+      </Button>
       {failure && <ErrorState title="Không nhận dạng được URL" description={failure} />}
-    </div>
+    </form>
   );
 }

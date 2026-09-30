@@ -40,13 +40,9 @@ function SourceRow({ source, onToggled }: { source: SourceViewDto; onToggled: ()
   return (
     <li className="discover-source">
       <label className="discover-source__row">
-        <input
-          type="checkbox"
-          checked={source.enabled}
-          disabled={busy}
-          onChange={(event) => void toggle(event.target.checked)}
-          aria-label={`Kích hoạt ${source.displayName}`}
-        />
+        <span className="discover-source__logo" aria-hidden="true">
+          {source.displayName.trim().charAt(0).toUpperCase()}
+        </span>
         <span className="discover-source__text">
           <span className="discover-source__name">{source.displayName}</span>
           <span className="muted discover-source__caps">
@@ -55,6 +51,14 @@ function SourceRow({ source, onToggled }: { source: SourceViewDto; onToggled: ()
               : "không có khả năng nào"}
           </span>
         </span>
+        <input
+          type="checkbox"
+          className="discover-source__toggle"
+          checked={source.enabled}
+          disabled={busy}
+          onChange={(event) => void toggle(event.target.checked)}
+          aria-label={`Kích hoạt ${source.displayName}`}
+        />
       </label>
       {error && (
         <span className="queue-error" role="alert">

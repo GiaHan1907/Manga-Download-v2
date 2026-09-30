@@ -2280,14 +2280,19 @@ button {
 
 /* ---------- Discover (Phase 1) ---------- */
 .discover-hero {
-  align-items: center;
   background: var(--hero-gradient);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.discover-hero__top {
+  align-items: center;
   display: flex;
   gap: var(--space-6);
   justify-content: space-between;
-  padding: var(--space-6);
 }
 
 .discover-hero__title {
@@ -2302,16 +2307,77 @@ button {
   color: var(--primary);
 }
 
-.discover-hero__mark {
+.discover-hero__mark,
+.discover-hero__art {
   align-items: center;
   background: var(--accent-soft);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   color: var(--accent-text);
   display: grid;
   flex: 0 0 auto;
-  height: 3rem;
+  height: 5.5rem;
+  overflow: hidden;
   place-items: center;
-  width: 3rem;
+  width: 5.5rem;
+}
+
+.discover-hero__art img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+/* Mockup's search bar: icon, field and submit inside one pill. */
+.discover-search {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  display: flex;
+  gap: var(--space-3);
+  padding: 0.35rem 0.35rem 0.35rem var(--space-4);
+}
+
+.discover-search__input {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  flex: 1;
+  font-size: var(--font-size-md);
+  min-width: 0;
+  padding: var(--space-2) 0;
+}
+
+.discover-search__input:focus {
+  outline: none;
+}
+
+.discover-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.filter-pill {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  padding: 0.3rem var(--space-3);
+}
+
+.filter-pill select {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
 }
 
 .discover-layout {
@@ -2340,11 +2406,20 @@ button {
   top: 0;
 }
 
-/* Cards reuse `.card-grid` (four across, same as search results). */
+/* Six across on a 1440 window (five at 1280, four at 1024); minmax(0,…) keeps
+   a long Vietnamese title from widening a column past the rail. */
 .discover-suggestions {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(7.75rem, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.discover-suggestions__head p {
+  font-size: var(--font-size-sm);
+  margin: 0;
 }
 
 .discover-suggestion {
@@ -2356,7 +2431,7 @@ button {
 
 .discover-suggestion__add {
   border-radius: 999px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
   height: 2rem;
   min-height: 2rem;
   padding: 0;
@@ -2376,10 +2451,29 @@ button {
   font-size: var(--font-size-xs);
 }
 
-.discover-suggestions__caption,
 .discover-url__hint {
   font-size: var(--font-size-sm);
   margin: 0 0 var(--space-3);
+}
+
+/* Mockup's import row: field and action share one line. */
+.discover-url {
+  align-items: end;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.discover-url .input-field__label {
+  font-size: var(--font-size-sm);
+}
+
+.discover-url > .input-field {
+  grid-column: 1 / 2;
+}
+
+.discover-url > .error-state {
+  grid-column: 1 / -1;
 }
 
 .discover-sources__list {
@@ -2396,13 +2490,26 @@ button {
   border-radius: var(--radius-md);
   cursor: pointer;
   display: grid;
-  gap: var(--space-2);
-  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   padding: var(--space-2) var(--space-3);
 }
 
 .discover-source__row:hover {
   border-color: var(--primary);
+}
+
+.discover-source__logo {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  color: var(--accent-text);
+  display: grid;
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  height: 2rem;
+  place-items: center;
+  width: 2rem;
 }
 
 .discover-source__text {
@@ -2420,6 +2527,10 @@ button {
 
 .discover-source__caps {
   font-size: var(--font-size-xs);
+}
+
+.discover-source__toggle {
+  flex: 0 0 auto;
 }
 
 .discover-sources__manage {

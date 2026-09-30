@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Search, SlidersHorizontal } from "lucide-react";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
-import Input from "../../components/ui/Input";
 import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
 import StatusBadge from "../../components/ui/StatusBadge";
@@ -81,18 +81,21 @@ function readStoredSearch(): { query: string; selected: string[] } | null {
 export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: string }) {
   const [stored] = useState(() => (initialQuery ? null : readStoredSearch()));
   const [query, setQuery] = useState(initialQuery || stored?.query || "");
-  const [selected, setSelected] = useState<string[]>(stored?.selected ?? []);
+  const [sourceFilter, setSourceFilter] = useState<string>(stored?.selected[0] ?? "all");
   const [reload, setReload] = useState(0);
   const sourcesVersion = useDomainVersion("sources");
   const debounced = useDebouncedValue(query.trim(), 300);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(RESTORE_KEY, JSON.stringify({ query: debounced, selected }));
+      sessionStorage.setItem(
+        RESTORE_KEY,
+        JSON.stringify({ query: debounced, selected: sourceFilter === "all" ? [] : [sourceFilter] }),
+      );
     } catch {
       /* private-mode quota — memory aid, not function-critical */
     }
-  }, [debounced, selected]);
+  }, [debounced, sourceFilter]);
 
   const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [
     reload,
@@ -103,8 +106,12 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
     sources.state === "success"
       ? sources.data.filter((source) => source.enabled && source.capabilities.includes("search"))
       : [];
+  // A source that got disabled or removed mid-session falls back to "all"
+  // rather than silently searching nothing.
   const effectiveIds =
-    selected.length > 0 ? selected.filter((id) => searchable.some((s) => s.id === id)) : undefined;
+    sourceFilter !== "all" && searchable.some((source) => source.id === sourceFilter)
+      ? [sourceFilter]
+      : undefined;
 
   // One search identity: query + source filter + manual reload. Page 1 is
   // always refetched on change; extra pages are dropped render-side (the
@@ -122,7 +129,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
         : localServices.source.search({ query: debounced, sourceIds: effectiveIds, page: 1 }),
     // effectiveIds key: disabling/removing a source must invalidate rendered
     // results that were gathered from sources which are no longer searchable.
-    [debounced, selected.join(","), effectiveIds?.join(",") ?? "all", reload],
+    [debounced, sourceFilter, effectiveIds?.join(",") ?? "all", reload],
   );
 
   // Everything below is derived during render — accumulating in an effect
@@ -162,12 +169,6 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
     }
   }
 
-  function toggleSource(sourceId: string) {
-    setSelected((current) =>
-      current.includes(sourceId) ? current.filter((id) => id !== sourceId) : [...current, sourceId],
-    );
-  }
-
   if (sources.state === "loading") {
     return <Skeleton height="10rem" label="Đang tải danh sách nguồn" />;
   }
@@ -186,30 +187,47 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
 
   return (
     <div className="page-stack">
-      <div className="discover-controls">
-        <Input
-          label="Tìm kiếm"
+      <form
+        className="discover-search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setReload((count) => count + 1);
+        }}
+      >
+        <Search size={16} aria-hidden="true" />
+        <input
+          className="discover-search__input"
+          aria-label="Tìm kiếm truyện"
           type="search"
-          placeholder="Nhập tên truyện (tối thiểu 2 ký tự)..."
+          placeholder="Nhập tên truyện, tác giả, hoặc từ khóa (tối thiểu 2 ký tự)..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <fieldset className="source-filter" aria-label="Lọc theo nguồn">
-          <legend>Nguồn</legend>
-          {searchable.length === 0 && (
-            <p className="muted">Chưa có nguồn nào bật hỗ trợ tìm kiếm. Đăng ký trong Cài đặt → Nguồn.</p>
-          )}
-          {searchable.map((source) => (
-            <label key={source.id} className="source-filter__option">
-              <input
-                type="checkbox"
-                checked={selected.includes(source.id)}
-                onChange={() => toggleSource(source.id)}
-              />
-              {source.displayName}
-            </label>
-          ))}
-        </fieldset>
+        <Button variant="primary" type="submit" disabled={debounced.length < 2}>
+          Tìm kiếm
+        </Button>
+      </form>
+
+      <div className="discover-filters">
+        <label className="filter-pill">
+          <SlidersHorizontal size={13} aria-hidden="true" />
+          <span>Nguồn:</span>
+          <select
+            value={sourceFilter}
+            disabled={searchable.length === 0}
+            onChange={(event) => setSourceFilter(event.target.value)}
+          >
+            <option value="all">Tất cả</option>
+            {searchable.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+        {searchable.length === 0 && (
+          <p className="muted">Chưa có nguồn nào bật hỗ trợ tìm kiếm. Đăng ký trong Cài đặt → Nguồn.</p>
+        )}
       </div>
 
       {failedSources.length > 0 && (
@@ -236,12 +254,6 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           title="Tìm kiếm thất bại"
           description={normalizeIpcError(results.error).message}
           action={<Button onClick={() => setReload((n) => n + 1)}>Thử lại</Button>}
-        />
-      )}
-      {results.state === "success" && results.data === null && (
-        <EmptyState
-          title="Chưa có truy vấn"
-          description="Nhập ít nhất 2 ký tự để tìm."
         />
       )}
       {results.state === "success" &&

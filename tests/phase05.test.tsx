@@ -144,7 +144,7 @@ function renderAt(path: string) {
 describe("T05 live search", () => {
   it("shows attributed results alongside per-source errors instead of a fake empty state", async () => {
     renderAt("/discover");
-    const input = await screen.findByPlaceholderText(/tối thiểu 2 ký tự/);
+    const input = await screen.findByPlaceholderText(/Nhập tên truyện/);
     fireEvent.change(input, { target: { value: "net" } });
 
     expect(await screen.findByText("Ninja Loạn Thị")).toBeDefined();
@@ -157,7 +157,7 @@ describe("T05 live search", () => {
 
   it("links a result to the remote preview route", async () => {
     renderAt("/discover");
-    const input = await screen.findByPlaceholderText(/tối thiểu 2 ký tự/);
+    const input = await screen.findByPlaceholderText(/Nhập tên truyện/);
     fireEvent.change(input, { target: { value: "ninja" } });
     const link = await screen.findByRole("link", { name: "Mở xem trước Ninja Loạn Thị" });
     expect(link.getAttribute("href")).toContain(
@@ -183,7 +183,7 @@ describe("T05 live search", () => {
       return Promise.resolve([]);
     });
     renderAt("/discover");
-    const input = await screen.findByPlaceholderText(/tối thiểu 2 ký tự/);
+    const input = await screen.findByPlaceholderText(/Nhập tên truyện/);
     fireEvent.change(input, { target: { value: "doc" } });
     expect(await screen.findByText("<img src=x onerror=alert(1)>")).toBeDefined();
     expect(document.querySelector("img[src='x']")).toBeNull();
@@ -215,7 +215,7 @@ describe("T05 live search", () => {
       return Promise.resolve([]);
     });
     renderAt("/discover");
-    const input = await screen.findByPlaceholderText(/tối thiểu 2 ký tự/);
+    const input = await screen.findByPlaceholderText(/Nhập tên truyện/);
     fireEvent.change(input, { target: { value: "ninja" } });
 
     expect(await screen.findByText("Truyện 1")).toBeDefined();
@@ -237,7 +237,7 @@ describe("T05 URL import", () => {
     renderAt("/discover");
     const input = await screen.findByPlaceholderText(/thuộc nguồn đã đăng ký/);
     fireEvent.change(input, { target: { value: "https://not-registered.test/manga/x/" } });
-    fireEvent.click(screen.getByRole("button", { name: "Phân tích URL" }));
+    fireEvent.click(screen.getByRole("button", { name: "Phân tích" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("URL không thuộc nguồn nào được hỗ trợ.");
     expect(alert.textContent).toContain("UNSUPPORTED_SOURCE");
@@ -374,7 +374,7 @@ describe("T05 Discover Phase 1 panels", () => {
     renderAt("/discover");
     expect(await screen.findByText("Võ Luyện Đỉnh Phong")).toBeDefined();
     // The rail is labelled for what it actually is, not as a taste model.
-    expect(screen.getByText(/chưa có gợi ý theo sở thích cá nhân/)).toBeDefined();
+    expect(screen.getByText(/chưa có gợi ý theo sở thích/)).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Thêm Võ Luyện Đỉnh Phong vào thư viện" }));
     expect(await screen.findByText("Đã lưu 2 chương")).toBeDefined();

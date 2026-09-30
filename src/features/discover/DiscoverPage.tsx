@@ -1,17 +1,41 @@
-import { Compass, Link2, Sparkles } from "lucide-react";
+import { Compass, Flame, Link2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import Tabs from "../../components/ui/Tabs";
-import { services } from "../../services/provider";
+import { localServices, services } from "../../services/provider";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
+import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
+import { useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { useServicesVersion } from "../../shared/hooks/useServices";
+import type { HomeFeedDto, HomeFeedItemDto } from "../../types/source";
 import DiscoverSourcesPanel from "./DiscoverSourcesPanel";
 import DiscoverSuggestions from "./DiscoverSuggestions";
 import LiveSearchPanel from "./LiveSearchPanel";
 import LiveUrlImportPanel from "./LiveUrlImportPanel";
 import UrlImportPanel from "./components/UrlImportPanel";
 import SearchPanel from "./components/SearchPanel";
+
+/// The screen's spotlight source — the same vetted rail Home reads.
+const SOURCE_ID = "truyenqq";
+
+/// The mockup's hero carries artwork. A real cover from the spotlight rail is
+/// the only honest image available, so the first featured story stands in.
+function HeroArt({ item }: { item: HomeFeedItemDto | undefined }) {
+  const cover = useCoverUrl(item?.sourceId ?? "", item?.sourceMangaId ?? "", item?.coverKey ?? null);
+  if (!item) {
+    return (
+      <span className="discover-hero__mark" aria-hidden="true">
+        <Compass size={26} />
+      </span>
+    );
+  }
+  return (
+    <span className="discover-hero__art" aria-hidden="true">
+      {cover ? <img src={cover} alt="" /> : <Compass size={26} />}
+    </span>
+  );
+}
 
 /// Dev-only fixture sandbox, kept reachable on its old routes so existing
 /// tests and bookmarks keep working while the live screen is the default.
@@ -45,8 +69,15 @@ export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
   const requested = searchParams.get("tab") ?? "search";
   const onlineQuery = searchParams.get("q") ?? "";
-  const showDemo =
-    import.meta.env.DEV && (requested === "demo" || requested === "demo-url");
+  const homeVersion = useDomainVersion("home");
+  // Fetched once for the whole screen: the hero art and the suggestion rail
+  // read the same payload, and the source is paced per session.
+  const feed = useAsyncData<HomeFeedDto>(
+    () => localServices.source.homeFeed(SOURCE_ID),
+    [homeVersion],
+  );
+
+  const showDemo = import.meta.env.DEV && (requested === "demo" || requested === "demo-url");
 
   // Rendered as its own screen rather than a section of the live page: two
   // import boxes on one screen made the same control name ambiguous.
@@ -64,33 +95,25 @@ export default function DiscoverPage() {
     );
   }
 
+  const spotlight = feed.state === "success" ? feed.data.featured[0] : undefined;
+
   return (
     <div className="page-stack">
       <section className="discover-hero" aria-label="Giới thiệu Khám phá">
-        <div className="discover-hero__text">
-          <h1 className="discover-hero__title">
-            Khám phá <span className="discover-hero__accent">truyện</span>
-          </h1>
-          <p className="muted">
-            Tìm truyện theo tên hoặc tác giả, nhập URL từ nguồn được hỗ trợ, hoặc lưu nhanh một bộ đang nổi bật.
-          </p>
+        <div className="discover-hero__top">
+          <div className="discover-hero__text">
+            <h1 className="discover-hero__title">
+              Khám phá <span className="discover-hero__accent">truyện</span>
+            </h1>
+            <p className="muted">Tìm truyện theo tên, tác giả hoặc nhập URL từ nguồn được hỗ trợ.</p>
+          </div>
+          <HeroArt item={spotlight} />
         </div>
-        <span className="discover-hero__mark" aria-hidden="true">
-          <Compass size={26} />
-        </span>
+        <LiveSearchPanel initialQuery={onlineQuery} />
       </section>
 
       <div className="discover-layout">
         <div className="discover-main page-stack">
-          <section aria-label="Tìm kiếm truyện">
-            <div className="section-header">
-              <h2>
-                <Sparkles size={16} aria-hidden="true" /> Tìm kiếm truyện
-              </h2>
-            </div>
-            <LiveSearchPanel initialQuery={onlineQuery} />
-          </section>
-
           <section className="panel" aria-label="Thêm bằng URL">
             <div className="section-header">
               <h2 className="panel__title">
@@ -98,21 +121,19 @@ export default function DiscoverPage() {
               </h2>
             </div>
             <p className="muted discover-url__hint">
-              Dán liên kết một truyện thuộc nguồn đã đăng ký để phân tích và thêm vào thư viện.
+              Dán link từ các trang truyện được hỗ trợ để phân tích và thêm vào thư viện.
             </p>
             <LiveUrlImportPanel />
           </section>
 
           <section aria-label="Truyện nổi bật trên nguồn">
-            <div className="section-header">
+            <div className="section-header discover-suggestions__head">
               <h2>
-                <Sparkles size={16} aria-hidden="true" /> Đề xuất cho bạn
+                <Flame size={16} aria-hidden="true" /> Đề xuất cho bạn
               </h2>
+              <p className="muted">Những bộ đang nổi bật trên TruyenQQ — chưa có gợi ý theo sở thích.</p>
             </div>
-            <p className="muted discover-suggestions__caption">
-              Những bộ đang nổi bật trên TruyenQQ — chưa có gợi ý theo sở thích cá nhân.
-            </p>
-            <DiscoverSuggestions />
+            <DiscoverSuggestions feed={feed} />
           </section>
         </div>
 
