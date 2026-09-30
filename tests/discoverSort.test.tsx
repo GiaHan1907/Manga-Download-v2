@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppRoutes } from "../src/app/router";
 
@@ -78,7 +78,7 @@ beforeEach(() => {
         return Promise.resolve({
           items: [card("row-1", catalogTitle(args))],
           sourceErrors: [],
-          hasMore: false,
+          hasMore: true,
         });
       case "get_home_ranking":
         return Promise.resolve([card("rank-1", "Đứng đầu")]);
@@ -182,6 +182,17 @@ describe("Discover catalog sorting", () => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(backend.calls.some(([cmd]) => cmd === "browse_manga")).toBe(false);
     expect((screen.getByLabelText("Tìm kiếm truyện") as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("carries the sort into every page it loads after the first", async () => {
+    renderAt("/discover?genre=action-26&sort=views-desc");
+    expect(await screen.findByText("Danh mục action-26/-/views-desc")).toBeDefined();
+    // Dropping the sort here would append page 2 of the DEFAULT order under a
+    // heading that still claims the list is by views.
+    fireEvent.click(screen.getByRole("button", { name: "Xem thêm" }));
+    await waitFor(() => {
+      expect(lastBrowse()).toMatchObject({ page: 2, genre: "action-26", sort: "views-desc" });
+    });
   });
 });
 

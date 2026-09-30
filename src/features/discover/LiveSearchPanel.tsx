@@ -276,6 +276,7 @@ export default function LiveSearchPanel({
             sourceId: CATALOG_SOURCE_ID,
             genre: genre || undefined,
             status: status || undefined,
+            sort: sort || undefined,
             page: nextPage,
           })
         : await localServices.source.search({
