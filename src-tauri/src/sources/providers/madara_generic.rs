@@ -1360,16 +1360,18 @@ impl SourceAdapter for MadaraGeneric {
             // manifest — it is never widened silently.
             let allowed = self.allowed_image_hosts();
             let strict = Selector::parse(".reading-content img.wp-manga-chapter-img").unwrap();
-            collect_page_urls(&document, &strict, &self.base, &allowed, &mut urls)?;
+            collect_page_urls(&document, &strict, &self.base, &allowed, true, &mut urls)?;
             if urls.is_empty() {
                 let boxed =
                     Selector::parse(".reading-content .page-box img, .page-box img.page-image")
                         .unwrap();
-                collect_page_urls(&document, &boxed, &self.base, &allowed, &mut urls)?;
+                collect_page_urls(&document, &boxed, &self.base, &allowed, true, &mut urls)?;
             }
             if urls.is_empty() {
+                // No theme marker on this page, so every image in the reader
+                // container is a candidate — including the ads that live there.
                 let loose = Selector::parse(".reading-content img").unwrap();
-                collect_page_urls(&document, &loose, &self.base, &allowed, &mut urls)?;
+                collect_page_urls(&document, &loose, &self.base, &allowed, false, &mut urls)?;
             }
         }
         if urls.is_empty() || urls.len() > MAX_PAGE_COUNT {
@@ -1564,11 +1566,23 @@ impl SourceAdapter for MadaraGeneric {
     }
 }
 
+/// Collect reader images into `out`, resolving them against `base`.
+///
+/// `reject_foreign` decides what an image on a host outside the source's
+/// allowlist MEANS. Where the theme marks its pages (class/box selectors) an
+/// unexpected host is the whole signal that the CDN moved, so the manifest
+/// fails rather than half-downloading. The unmarked fallback selects every
+/// image in the reader container, which on a live site also catches rotating
+/// ad creatives — there, one ad must not sink a 230-page chapter, so foreign
+/// hosts are skipped instead. Skipping never widens what we request: a foreign
+/// image is simply not downloaded, and if nothing allowed remains the caller
+/// still fails with `Parse`.
 fn collect_page_urls(
     document: &Html,
     selector: &Selector,
     base: &Url,
     allowed_hosts: &[String],
+    reject_foreign: bool,
     out: &mut Vec<String>,
 ) -> Result<(), SourceError> {
     let mut seen: HashSet<Url> = HashSet::new();
@@ -1585,7 +1599,10 @@ fn collect_page_urls(
                 .host_str()
                 .is_some_and(|host| allowed_hosts.iter().any(|allowed| allowed == host))
         {
-            return Err(SourceError::Parse);
+            if reject_foreign {
+                return Err(SourceError::Parse);
+            }
+            continue;
         }
         if seen.insert(joined.clone()) {
             out.push(joined.to_string());
@@ -2068,6 +2085,130 @@ mod tests {
         }
     }
 
+    /// TTT chapter downloads started failing with SOURCE_PARSE_ERROR on
+    /// 2026-09-30 although the SAME source delivered 188–234-page chapters on
+    /// 2026-09-25. Print what the live reader page actually is now, so the fix
+    /// follows the source instead of a guess.
+    #[tokio::test]
+    #[ignore = "live network probe: why TTT chapter pages no longer parse"]
+    async fn live_builtin_ttt_chapter_diagnostic() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &[crate::sources::registry::TTT_IMAGE_HOSTS.to_string()],
+        )
+        .unwrap();
+        for chapter in ["tap-9", "tap-10"] {
+            match adapter.page_manifest("ninja-loan-thi", chapter).await {
+                Ok(manifest) => println!("DIAG {chapter} ok pages={}", manifest.pages.len()),
+                Err(error) => println!("DIAG {chapter} err={}", error.code()),
+            }
+        }
+        let url = adapter.chapter_url("ninja-loan-thi", "tap-9");
+        let html = adapter
+            .http
+            .get_text(&url)
+            .await
+            .expect("chapter page fetch");
+        {
+            let document = Html::parse_document(&html);
+            let title = Selector::parse("title").unwrap();
+            println!(
+                "DIAG url={url} bytes={} title={:?}",
+                html.len(),
+                document.select(&title).next().map(|n| n
+                    .text()
+                    .collect::<String>()
+                    .trim()
+                    .to_string())
+            );
+            for sel in [
+                ".reading-content",
+                "img.wp-manga-chapter-img",
+                ".page-break",
+                ".container-chapter-reader",
+                "img",
+            ] {
+                let count = document.select(&Selector::parse(sel).unwrap()).count();
+                println!("DIAG sel {sel} = {count}");
+            }
+            let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+            let imgs = Selector::parse("img").unwrap();
+            for node in document.select(&imgs) {
+                let Some(raw) = ["src", "data-src", "data-lazy-src", "data-original"]
+                    .iter()
+                    .filter_map(|attr| node.value().attr(attr))
+                    .map(str::trim)
+                    .find(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                if let Ok(joined) = adapter.base.join(raw) {
+                    *hosts
+                        .entry(joined.host_str().unwrap_or("-").to_string())
+                        .or_default() += 1;
+                }
+            }
+            println!("DIAG img hosts {hosts:?}");
+            println!("DIAG allowed={:?}", adapter.allowed_image_hosts());
+            if let Some(node) = document
+                .select(&Selector::parse(".reading-content").unwrap())
+                .next()
+            {
+                let snippet: String = node.html().chars().take(1200).collect();
+                println!("DIAG reading-content = {snippet}");
+            }
+        }
+    }
+
+    /// The app downloads chapters with TWO concurrent workers; this probe runs
+    /// the same shape against five real chapters, several rounds, to see
+    /// whether a manifest that parses fine on its own fails under load — the
+    /// failure mode the user hit on 2026-09-30 (five SOURCE_PARSE_ERROR tasks
+    /// in ten seconds, while a sequential probe returned 234 pages).
+    #[tokio::test]
+    #[ignore = "live network probe: does TTT parsing fail under concurrent chapter fetches"]
+    async fn live_builtin_ttt_concurrency_diagnostic() {
+        let adapter = Arc::new(
+            MadaraGeneric::live(
+                "Truyen Tuoi Tho",
+                "https://truyentuoitho.com/",
+                &[crate::sources::registry::TTT_IMAGE_HOSTS.to_string()],
+            )
+            .unwrap(),
+        );
+        for round in 1..=3 {
+            let mut handles = Vec::new();
+            for chapter in ["tap-6", "tap-7", "tap-8", "tap-9", "tap-10"] {
+                let adapter = adapter.clone();
+                handles.push(tokio::spawn(async move {
+                    let started = std::time::Instant::now();
+                    let outcome = adapter.page_manifest("ninja-loan-thi", chapter).await;
+                    (chapter, started.elapsed().as_millis(), outcome)
+                }));
+            }
+            let mut ok = 0;
+            let mut failed: Vec<String> = Vec::new();
+            for handle in handles {
+                let (chapter, millis, outcome) = handle.await.unwrap();
+                match outcome {
+                    Ok(manifest) => {
+                        ok += 1;
+                        println!(
+                            "CONC r{round} {chapter} ok pages={} in {millis}ms",
+                            manifest.pages.len()
+                        );
+                    }
+                    Err(error) => {
+                        println!("CONC r{round} {chapter} ERR {} in {millis}ms", error.code());
+                        failed.push(chapter.to_string());
+                    }
+                }
+            }
+            println!("CONC r{round} summary ok={ok} failed={failed:?}");
+        }
+    }
+
     const CHAPTER_FIXTURE: &str = r#"<html><body>
       <div class="reading-content">
         <img class="wp-manga-chapter-img" src="  /uploads/p1.jpg  "/>
@@ -2101,6 +2242,41 @@ mod tests {
     async fn page_manifest_rejects_foreign_image_host() {
         let (provider, _) = adapter(vec![Ok(
             r#"<div class="reading-content"><img class="wp-manga-chapter-img" src="https://evil.test/x.jpg"/></div>"#,
+        )]);
+        assert!(matches!(
+            provider.page_manifest("m", "tap-1").await,
+            Err(SourceError::Parse)
+        ));
+    }
+
+    /// Live 2026-09-30: TTT stopped printing the `wp-manga-chapter-img` class,
+    /// so its pages are read by the unmarked fallback that takes every image in
+    /// the reader container — the same container rotating ad creatives live in.
+    /// One ad on an unregistered host used to fail a 234-page chapter.
+    #[tokio::test]
+    async fn loose_reader_pages_skip_an_ad_from_another_host_instead_of_failing() {
+        let (provider, _) = adapter(vec![Ok(r#"<div class="reading-content">
+                 <img src="/uploads/p1.jpg"/>
+                 <img src="https://ads.test/banner.gif"/>
+                 <img src="https://truyentuoitho.com/uploads/p2.jpg"/>
+               </div>"#)]);
+        let manifest = provider.page_manifest("m", "tap-1").await.unwrap();
+        assert_eq!(manifest.pages.len(), 2, "the ad is skipped, not fatal");
+        assert!(
+            manifest
+                .pages
+                .iter()
+                .all(|page| !page.url.contains("ads.test")),
+            "a host outside the allowlist is never queued for download"
+        );
+    }
+
+    /// Skipping foreign hosts must not turn a moved CDN into a silent
+    /// short chapter: with nothing allowed left, the manifest still fails.
+    #[tokio::test]
+    async fn loose_reader_pages_with_only_foreign_hosts_still_fail() {
+        let (provider, _) = adapter(vec![Ok(
+            r#"<div class="reading-content"><img src="https://cdn-moved.test/p1.jpg"/></div>"#,
         )]);
         assert!(matches!(
             provider.page_manifest("m", "tap-1").await,
