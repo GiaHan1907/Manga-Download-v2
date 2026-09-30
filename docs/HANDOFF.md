@@ -35,7 +35,12 @@
 
 **Loại có chủ đích vì mockup bịa số liệu (dự án cấm UI giả):** số truyện per-thể-loại / per-trạng-thái ("Hành động 12.4K"), ★ rating, lượt xem, hạn mức "500 GB", và ví dụ URL `mangakalot.com` (nguồn chưa đăng ký). Dòng "dựa trên xu hướng và sở thích của bạn" viết lại thành "Những bộ đang nổi bật trên TruyenQQ — chưa có gợi ý theo sở thích cá nhân" vì không có mô hình gợi ý nào.
 
-**Giai đoạn 2 (đã duyệt, chưa làm):** bộ lọc thể loại/trạng thái/sắp xếp trên `search_manga` (adapter hiện chỉ nhận `query + page`; TruyenQQ phải parse route `/the-loai`), bảng SQLite "Tìm kiếm gần đây" (migration mới — hiện chưa có gì lưu truy vấn), và 2 màn hình "Bảng xếp hạng" + "Lịch sử" cho sidebar (dữ liệu xếp hạng đã có qua `get_home_ranking`, chưa có route).
+**Giai đoạn 2 — ĐÃ LÀM một phần (2026-09-30):**
+- Màn **Bảng xếp hạng** (`/ranking`, mục sidebar mới) dùng `get_home_ranking` đã có — 3 tab Ngày/Tuần/Tháng, top 3 gắn vương miện, KHÔNG có lượt xem vì nguồn không công bố.
+- **Tìm kiếm gần đây**: migration `0010_recent_search.sql` (schema 9→10) + bảng `recent_searches` (CHỈ lưu đúng câu truy vấn + timestamp — không kết quả, không sourceId), UPSERT theo query nên tìm lại không nhân bản, mỗi lần ghi cắt còn 10 dòng mới nhất. 4 lệnh `search_history_record|list|remove|clear`. Chip hiện dưới ô tìm kiếm; chỉ ghi khi người dùng THỰC SỰ bấm Tìm kiếm/chọn chip (không ghi từng keystroke).
+- Màn **Lịch sử** (`/history`, mục sidebar mới) = tìm kiếm gần đây + chương đã đọc gần nhất (`app_list_read_history` đã có từ F4).
+- **Bộ lọc danh mục thật**: `list_source_genres` (46 thể loại đọc từ chính trang nguồn, kèm nhãn tiếng Việt) + `browse_manga{genre|xOR status|,page}`. Recon live (probe `#[ignore]`) xác nhận `the-loai/<slug>`, `truyen-dang-theo-doi`, `truyen-hoan-thanh`, `truyen-moi-cap-nhat` dùng chung lưới `ul.list_grid li` (42 thẻ/trang, phân trang `/trang-N`, trang 2 KHÔNG trùng trang 1). Pill "Thể loại" và "Trạng thái" nằm trong hàng filter của hero. **Vì sao là mode riêng:** nguồn không có route nào lọc kèm từ khóa, nên khi chọn bộ lọc thì ô tìm kiếm bị TẮT kèm ghi chú, thay vì giả vờ lọc trên ~20 kết quả đang hiển thị (đó sẽ là bộ lọc giả).
+- **Vẫn chưa làm:** pill "Sắp xếp" (chưa có route), bảng thể loại/trạng thái ở cột phải (mockup vẽ số liệu bịa), và các liên kết "Xem tất cả" chưa có màn đích.
 
 **Chưa xác nhận:** cả 3 kỳ bảng xếp hạng đang trả cùng một truyện ở ngôi đầu — mới chứng minh mỗi kỳ trả 10 dòng hợp lệ và kỳ lạ bị từ chối, chưa chứng minh 3 danh sách THỰC SỰ khác nhau.
 

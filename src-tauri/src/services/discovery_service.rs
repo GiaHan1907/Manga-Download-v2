@@ -524,6 +524,79 @@ pub async fn home_ranking(
     adapter.ranking(period).await.map_err(AppError::Source)
 }
 
+/// The source's own genre list, for Discover's genre filter. Adapters without
+/// a catalog page report `UNSUPPORTED_OPERATION`, which the UI reads as "hide
+/// the filter" rather than as an error to show the user.
+pub async fn genres(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+) -> Result<Vec<crate::sources::dto::GenreTag>, AppError> {
+    validate_id(source_id, "sourceId")?;
+    let rows = source_repo::list_sources(pool).await?;
+    let adapter = require_enabled(registry, &rows, source_id)?;
+    adapter.genres().await.map_err(AppError::Source)
+}
+
+/// One filtered catalog page. Status is a closed set (rejected, never silently
+/// defaulted) and the genre slug is validated before it reaches a URL path.
+pub async fn browse(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+    genre: Option<&str>,
+    status: Option<&str>,
+    page: u32,
+) -> Result<SearchResult, AppError> {
+    validate_id(source_id, "sourceId")?;
+    if let Some(value) = status {
+        if !matches!(value, "new" | "ongoing" | "completed") {
+            return Err(AppError::validation(
+                "Trạng thái phải là new, ongoing hoặc completed.",
+            ));
+        }
+    }
+    if let Some(slug) = genre {
+        if !valid_genre_slug(slug) {
+            return Err(AppError::validation("Thể loại không hợp lệ."));
+        }
+    }
+    if genre.is_some() && status.is_some() {
+        return Err(AppError::validation(
+            "Chỉ lọc theo một tiêu chí: thể loại hoặc trạng thái.",
+        ));
+    }
+    if genre.is_none() && status.is_none() {
+        return Err(AppError::validation("Cần chọn thể loại hoặc trạng thái."));
+    }
+    let rows = source_repo::list_sources(pool).await?;
+    let adapter = require_enabled(registry, &rows, source_id)?;
+    let result = adapter
+        .browse(genre, status, page.max(1))
+        .await
+        .map_err(AppError::Source)?;
+    // One source serves a browse, so a failure is the whole failure — there is
+    // no per-source error list to aggregate the way multi-source search has.
+    Ok(SearchResult {
+        items: result.items,
+        source_errors: Vec::new(),
+        has_more: result.has_more,
+    })
+}
+
+/// Genre slugs go into a URL path, so they are restricted to exactly what the
+/// source itself publishes: lowercase letters, digits and inner hyphens.
+fn valid_genre_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 80
+        && !slug.starts_with('-')
+        && !slug.ends_with('-')
+        && !slug.contains("--")
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 pub async fn remote_detail(
     registry: &SourceRegistry,
     pool: &SqlitePool,

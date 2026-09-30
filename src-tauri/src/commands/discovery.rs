@@ -134,6 +134,37 @@ pub async fn get_home_ranking(
 }
 
 #[tauri::command]
+pub async fn list_source_genres(
+    source_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::sources::dto::GenreTag>, AppError> {
+    validate_id(&source_id, "sourceId")?;
+    let registry = snapshot(&state)?;
+    discovery_service::genres(&registry, &state.db, &source_id).await
+}
+
+#[tauri::command]
+pub async fn browse_manga(
+    source_id: String,
+    genre: Option<String>,
+    status: Option<String>,
+    page: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<SearchResult, AppError> {
+    validate_id(&source_id, "sourceId")?;
+    let registry = snapshot(&state)?;
+    discovery_service::browse(
+        &registry,
+        &state.db,
+        &source_id,
+        genre.as_deref(),
+        status.as_deref(),
+        page.unwrap_or(1),
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn resolve_manga_url(
     url: String,
     state: State<'_, AppState>,

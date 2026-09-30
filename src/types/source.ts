@@ -75,3 +75,19 @@ export interface HomeFeedDto {
   newest: HomeFeedItemDto[];
   popular: HomeFeedItemDto[];
 }
+
+/// One genre the source itself publishes. `slug` is what the source's own
+/// catalog URL uses; the label is the source's wording, not ours.
+export interface GenreTagDto {
+  slug: string;
+  label: string;
+}
+
+/// Closed set: "new" is the source's newest-first catalog.
+export type BrowseStatus = "new" | "ongoing" | "completed";
+
+export const BROWSE_STATUS_LABEL: Record<BrowseStatus, string> = {
+  new: "Mới cập nhật",
+  ongoing: "Đang tiến hành",
+  completed: "Đã hoàn thành",
+};

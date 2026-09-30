@@ -748,6 +748,31 @@ fn valid_slug(slug: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// The engine's own catalog grid holds 42 cards per page.
+const QQ_BROWSE_CAP: usize = 42;
+
+/// Catalog route for one filtered page. Live recon (2026-09-30) found
+/// `the-loai/<slug>`, `truyen-dang-theo-doi`, `truyen-hoan-thanh` and
+/// `truyen-moi-cap-nhat`, all paginating as `/trang-N`.
+fn qq_browse_path(
+    genre: Option<&str>,
+    status: Option<&str>,
+    page: u32,
+) -> Result<String, SourceError> {
+    let base = match (genre, status) {
+        (Some(slug), _) => format!("the-loai/{slug}"),
+        (None, Some("ongoing")) => "truyen-dang-theo-doi".to_string(),
+        (None, Some("completed")) => "truyen-hoan-thanh".to_string(),
+        (None, Some("new") | None) => "truyen-moi-cap-nhat".to_string(),
+        (None, Some(_)) => return Err(SourceError::MalformedUrl),
+    };
+    Ok(if page > 1 {
+        format!("{base}/trang-{page}")
+    } else {
+        base
+    })
+}
+
 /// Dilib stories are `/<slug>-<numeric-id>.html`; the numeric tail separates
 /// real story slugs from section pages that happen to end in .html.
 fn dilib_story_slug(slug: &str) -> bool {
@@ -1084,6 +1109,90 @@ impl SourceAdapter for MadaraGeneric {
             return Err(SourceError::UnsupportedOperation);
         }
         self.ranking_rail(period).await
+    }
+
+    async fn genres(&self) -> Result<Vec<crate::sources::dto::GenreTag>, SourceError> {
+        if self.profile != SiteProfile::TruyenQQ {
+            return Err(SourceError::UnsupportedOperation);
+        }
+        let html = self
+            .http
+            .get_text(&format!("{}doc-truyen", self.base))
+            .await?;
+        let tags = {
+            let document = Html::parse_document(&html);
+            let selector =
+                Selector::parse("a[href*='/the-loai/']").map_err(|_| SourceError::Parse)?;
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut out: Vec<crate::sources::dto::GenreTag> = Vec::new();
+            for node in document.select(&selector) {
+                let Some(href) = node.value().attr("href") else {
+                    continue;
+                };
+                let Some(rest) = href.rsplit("/the-loai/").next() else {
+                    continue;
+                };
+                let slug = rest.trim_matches('/').to_string();
+                // Only the engine's own `<slug>-<id>` form is a genre route.
+                if !valid_slug(&slug) || !slug.contains('-') {
+                    continue;
+                }
+                let label = node.text().collect::<String>().trim().to_string();
+                if label.is_empty() || !seen.insert(slug.clone()) {
+                    continue;
+                }
+                out.push(crate::sources::dto::GenreTag { slug, label });
+            }
+            out
+        };
+        if tags.is_empty() {
+            return Err(SourceError::Parse);
+        }
+        Ok(tags)
+    }
+
+    async fn browse(
+        &self,
+        genre: Option<&str>,
+        status: Option<&str>,
+        page: u32,
+    ) -> Result<RemoteSearchPage, SourceError> {
+        if self.profile != SiteProfile::TruyenQQ {
+            return Err(SourceError::UnsupportedOperation);
+        }
+        let page = page.max(1);
+        let path = qq_browse_path(genre, status, page)?;
+        let html = self
+            .http
+            .get_text(&format!("{}{}", self.base, path))
+            .await?;
+        let (items, has_more) = {
+            let document = Html::parse_document(&html);
+            // A page without the catalog grid is not the layout we read: that
+            // is a parse failure, distinct from a grid that is genuinely empty.
+            if document
+                .select(&Selector::parse("ul.list_grid").unwrap())
+                .next()
+                .is_none()
+            {
+                return Err(SourceError::Parse);
+            }
+            let rail = self.home_rail(&document, "ul.list_grid li", QQ_BROWSE_CAP);
+            let next = format!("/trang-{}", page + 1);
+            let has_more = document
+                .select(&Selector::parse("a[href]").unwrap())
+                .any(|anchor| {
+                    anchor
+                        .value()
+                        .attr("href")
+                        .is_some_and(|href| href.contains(&next))
+                });
+            (
+                rail.into_iter().map(|item| item.summary).collect(),
+                has_more,
+            )
+        };
+        Ok(RemoteSearchPage { items, has_more })
     }
 
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError> {
@@ -2351,6 +2460,226 @@ mod tests {
         let (key, len) = fetched.expect("at least one rail cover must fetch");
         println!("LIVE HOME cover bytes: {len} ({key})");
         assert!(len > 1000);
+    }
+
+    /// Browse must reuse the catalog grid the ranking rails already parse —
+    /// but only if the genre/status pages really use it. Count the SAME
+    /// selectors there before writing any implementation.
+    #[tokio::test]
+    #[ignore = "live network probe: do TruyenQQ genre/status pages share the catalog grid?"]
+    async fn live_builtin_qq_browse_grid_recon() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        for path in [
+            "the-loai/action-26",
+            "the-loai/action-26/trang-2",
+            "truyen-hoan-thanh",
+            "truyen-dang-theo-doi",
+            "truyen-moi-cap-nhat",
+        ] {
+            let html = match adapter
+                .http
+                .get_text(&format!("{}{}", adapter.base, path))
+                .await
+            {
+                Ok(html) => html,
+                Err(error) => {
+                    println!("RECON {path} -> error {error:?}");
+                    continue;
+                }
+            };
+            let (grid, info, avatar, chapter, time, next) = {
+                let document = Html::parse_document(&html);
+                (
+                    document
+                        .select(&Selector::parse("ul.list_grid li").unwrap())
+                        .count(),
+                    document
+                        .select(
+                            &Selector::parse("ul.list_grid li div.book_info h3 a[href]").unwrap(),
+                        )
+                        .count(),
+                    document
+                        .select(
+                            &Selector::parse("ul.list_grid li div.book_avatar img[src]").unwrap(),
+                        )
+                        .count(),
+                    document
+                        .select(
+                            &Selector::parse("ul.list_grid li div.last_chapter a[href]").unwrap(),
+                        )
+                        .count(),
+                    document
+                        .select(&Selector::parse("ul.list_grid li span.time-ago").unwrap())
+                        .count(),
+                    document
+                        .select(&Selector::parse("a[href*='/trang-']").unwrap())
+                        .count(),
+                )
+            };
+            println!("RECON {path} -> grid={grid} info={info} avatar={avatar} chapter={chapter} time={time} pagelinks={next}");
+        }
+        // The genre vocabulary the catalog page itself links.
+        let catalog = adapter
+            .http
+            .get_text(&format!("{}doc-truyen", adapter.base))
+            .await
+            .expect("catalog");
+        let tags = {
+            let document = Html::parse_document(&catalog);
+            let selector =
+                Selector::parse("a[href^='/the-loai/'], a[href*='truyenqqko.com/the-loai/']")
+                    .unwrap();
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut out: Vec<(String, String)> = Vec::new();
+            for node in document.select(&selector) {
+                let Some(href) = node.value().attr("href") else {
+                    continue;
+                };
+                let Some(slug) = href.rsplit("/the-loai/").next() else {
+                    continue;
+                };
+                let slug = slug.trim_matches('/').to_string();
+                let label = node.text().collect::<String>().trim().to_string();
+                if !slug.is_empty() && !label.is_empty() && seen.insert(slug.clone()) {
+                    out.push((slug, label));
+                }
+            }
+            out
+        };
+        println!("RECON genres found: {}", tags.len());
+        for (slug, label) in tags.iter().take(8) {
+            println!("  {slug} = {label}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "live network probe: TruyenQQ genres() and browse() over the app transport"]
+    async fn live_builtin_qq_browse_probe() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let tags = adapter.genres().await.expect("live genres");
+        println!("LIVE GENRES {}", tags.len());
+        assert!(
+            tags.len() > 20,
+            "the catalog links far more genres than this"
+        );
+        assert!(
+            tags.iter().any(|tag| tag.slug == "action-26"),
+            "Action must be in the published list"
+        );
+        for tag in tags.iter().take(5) {
+            println!("  {} = {}", tag.slug, tag.label);
+        }
+        assert!(
+            tags.iter().all(|tag| tag.slug.len() <= 80
+                && tag
+                    .slug
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')),
+            "every published slug must survive the service's own validation"
+        );
+
+        let first = adapter
+            .browse(Some("action-26"), None, 1)
+            .await
+            .expect("browse p1");
+        println!(
+            "LIVE BROWSE genre p1={} has_more={} first={}",
+            first.items.len(),
+            first.has_more,
+            first
+                .items
+                .first()
+                .map(|item| item.title.as_str())
+                .unwrap_or("-")
+        );
+        assert!(first.items.len() >= 30, "the grid holds 42 cards");
+        assert!(first.has_more, "page 2 exists for this genre");
+        assert!(
+            first
+                .items
+                .iter()
+                .all(|item| item.title != item.source_manga_id),
+            "a card whose title is its slug means the parser grabbed the wrong node"
+        );
+        assert!(
+            first.items.iter().any(|item| item.cover_key.is_some()),
+            "catalog cards carry covers"
+        );
+
+        let second = adapter
+            .browse(Some("action-26"), None, 2)
+            .await
+            .expect("browse p2");
+        let overlap = second
+            .items
+            .iter()
+            .filter(|item| {
+                first
+                    .items
+                    .iter()
+                    .any(|prior| prior.source_manga_id == item.source_manga_id)
+            })
+            .count();
+        println!(
+            "LIVE BROWSE genre p2={} overlap_with_p1={}",
+            second.items.len(),
+            overlap
+        );
+        assert!(
+            overlap * 2 < first.items.len(),
+            "page 2 must be a different slice, not page 1 again"
+        );
+
+        let done = adapter
+            .browse(None, Some("completed"), 1)
+            .await
+            .expect("completed");
+        println!("LIVE BROWSE completed={}", done.items.len());
+        assert!(!done.items.is_empty());
+    }
+
+    #[test]
+    fn qq_browse_path_uses_the_routes_recon_found() {
+        assert_eq!(
+            qq_browse_path(Some("action-26"), None, 1).unwrap(),
+            "the-loai/action-26"
+        );
+        assert_eq!(
+            qq_browse_path(Some("action-26"), None, 3).unwrap(),
+            "the-loai/action-26/trang-3"
+        );
+        assert_eq!(
+            qq_browse_path(None, Some("ongoing"), 1).unwrap(),
+            "truyen-dang-theo-doi"
+        );
+        assert_eq!(
+            qq_browse_path(None, Some("completed"), 2).unwrap(),
+            "truyen-hoan-thanh/trang-2"
+        );
+        assert_eq!(
+            qq_browse_path(None, Some("new"), 1).unwrap(),
+            "truyen-moi-cap-nhat"
+        );
+        assert_eq!(
+            qq_browse_path(None, None, 1).unwrap(),
+            "truyen-moi-cap-nhat"
+        );
+        // An unknown status is rejected rather than silently defaulted.
+        assert!(qq_browse_path(None, Some("yesterday"), 1).is_err());
     }
 
     /// The advanced-search page builds its form in JS, so its endpoint has to

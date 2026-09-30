@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { History, Search, SlidersHorizontal, X } from "lucide-react";
+import { CircleDot, History, Search, SlidersHorizontal, Tags, X } from "lucide-react";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
@@ -13,11 +13,19 @@ import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import type { RecentSearchDto } from "../../types/backend";
 import type {
+  BrowseStatus,
+  GenreTagDto,
   RemoteMangaSummaryDto,
   SearchResultDto,
   SourceViewDto,
 } from "../../types/source";
+import { BROWSE_STATUS_LABEL } from "../../types/source";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
+
+/// Catalog source for genre/status browsing. Only adapters with a real
+/// catalog page implement `browse`, and `genres()` returning an error is how
+/// the others opt out — the pill then disappears rather than lying.
+const CATALOG_SOURCE_ID = "truyenqq";
 
 // Isolated so the cover hook runs per card (React rules of hooks forbid
 // calling it inline inside the results .map).
@@ -121,7 +129,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   /// reading `query` here would still see the pre-click value.
   function commit(raw?: string) {
     const value = (raw ?? query).trim();
-    if (value.length < 2) {
+    if (value.length < 2 || browsing) {
       return;
     }
     setTerm(value);
@@ -167,23 +175,50 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
       ? [sourceFilter]
       : undefined;
 
+  // Catalog browsing is a different mode from keyword search: the source's
+  // genre/status pages carry no keyword, so the two cannot be combined here.
+  const [genre, setGenre] = useState("");
+  const [status, setStatus] = useState<BrowseStatus | "">("");
+  const browsing = genre !== "" || status !== "";
+  const genres = useAsyncData<GenreTagDto[]>(
+    () => localServices.source.genres(CATALOG_SOURCE_ID),
+    [sourcesVersion],
+  );
+  // A source with no published genre vocabulary gets no genre pill.
+  const genreOptions = genres.state === "success" ? genres.data : [];
+
   // One search identity: query + source filter + manual reload. Page 1 is
   // always refetched on change; extra pages are dropped render-side (the
   // React derived-state pattern — no effect, no stale-frame flash).
-  const searchKey = ["q", term, effectiveIds?.join(",") ?? "all", "r", reload].join("|");
+  const searchKey = [
+    browsing ? "browse" : "q",
+    browsing ? `${genre}|${status}` : term,
+    effectiveIds?.join(",") ?? "all",
+    "r",
+    reload,
+  ].join("|");
   const [more, setMore] = useState<MoreState>(EMPTY_MORE);
   if (more.key !== searchKey) {
     setMore({ key: searchKey, pages: [], loading: false, error: null });
   }
 
   const results = useAsyncData<SearchResultDto | null>(
-    () =>
-      term.length < 2
+    () => {
+      if (browsing) {
+        return localServices.source.browse({
+          sourceId: CATALOG_SOURCE_ID,
+          genre: genre || undefined,
+          status: status || undefined,
+          page: 1,
+        });
+      }
+      return term.length < 2
         ? Promise.resolve(null)
-        : localServices.source.search({ query: term, sourceIds: effectiveIds, page: 1 }),
+        : localServices.source.search({ query: term, sourceIds: effectiveIds, page: 1 });
+    },
     // effectiveIds key: disabling/removing a source must invalidate rendered
     // results that were gathered from sources which are no longer searchable.
-    [term, sourceFilter, effectiveIds?.join(",") ?? "all", reload],
+    [term, sourceFilter, effectiveIds?.join(",") ?? "all", reload, browsing, genre, status],
   );
 
   // Everything below is derived during render — accumulating in an effect
@@ -198,18 +233,25 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   const hasMore = allPages.length > 0 ? allPages[allPages.length - 1].hasMore : false;
 
   async function loadMore() {
-    if (more.loading || term.length < 2) {
+    if (more.loading || (!browsing && term.length < 2)) {
       return;
     }
     const key = searchKey;
     const nextPage = more.pages.length + 2;
     setMore((current) => (current.key === key ? { ...current, loading: true, error: null } : current));
     try {
-      const page = await localServices.source.search({
-        query: term,
-        sourceIds: effectiveIds,
-        page: nextPage,
-      });
+      const page = browsing
+        ? await localServices.source.browse({
+            sourceId: CATALOG_SOURCE_ID,
+            genre: genre || undefined,
+            status: status || undefined,
+            page: nextPage,
+          })
+        : await localServices.source.search({
+            query: term,
+            sourceIds: effectiveIds,
+            page: nextPage,
+          });
       // A stale response (query changed mid-flight) must not leak in.
       setMore((current) =>
         current.key === key ? { ...current, pages: [...current.pages, page], loading: false } : current,
@@ -253,11 +295,12 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           className="discover-search__input"
           aria-label="Tìm kiếm truyện"
           type="search"
+          disabled={browsing}
           placeholder="Nhập tên truyện, tác giả, hoặc từ khóa (tối thiểu 2 ký tự)..."
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <Button variant="primary" type="submit" disabled={query.trim().length < 2}>
+        <Button variant="primary" type="submit" disabled={browsing || query.trim().length < 2}>
           Tìm kiếm
         </Button>
       </form>
@@ -268,7 +311,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           <span>Nguồn:</span>
           <select
             value={sourceFilter}
-            disabled={searchable.length === 0}
+            disabled={searchable.length === 0 || browsing}
             onChange={(event) => setSourceFilter(event.target.value)}
           >
             <option value="all">Tất cả</option>
@@ -279,8 +322,43 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
             ))}
           </select>
         </label>
-        {searchable.length === 0 && (
+        {genreOptions.length > 0 && (
+          <label className="filter-pill">
+            <Tags size={13} aria-hidden="true" />
+            <span>Thể loại:</span>
+            <select value={genre} onChange={(event) => setGenre(event.target.value)}>
+              <option value="">Tất cả</option>
+              {genreOptions.map((tag) => (
+                <option key={tag.slug} value={tag.slug}>
+                  {tag.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="filter-pill">
+          <CircleDot size={13} aria-hidden="true" />
+          <span>Trạng thái:</span>
+          <select
+            value={status}
+            disabled={genre !== ""}
+            onChange={(event) => setStatus(event.target.value as BrowseStatus | "")}
+          >
+            <option value="">Tất cả</option>
+            {(Object.keys(BROWSE_STATUS_LABEL) as BrowseStatus[]).map((value) => (
+              <option key={value} value={value}>
+                {BROWSE_STATUS_LABEL[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {searchable.length === 0 && !browsing && (
           <p className="muted">Chưa có nguồn nào bật hỗ trợ tìm kiếm. Đăng ký trong Cài đặt → Nguồn.</p>
+        )}
+        {browsing && (
+          <p className="muted discover-filters__note">
+            Đang xem danh mục theo bộ lọc — nguồn không lọc kèm từ khóa, nên ô tìm kiếm tạm ngưng.
+          </p>
         )}
       </div>
 
@@ -350,9 +428,26 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
         items.length === 0 &&
         failedSources.length === 0 && (
           <EmptyState
-            title="Không có kết quả"
-            description="Các nguồn đang bật đều trả về rỗng. Thử từ khóa khác hoặc bỏ bớt bộ lọc nguồn."
-            action={<Button onClick={() => setQuery("")}>Xóa từ khóa</Button>}
+            title={browsing ? "Danh mục này đang trống" : "Không có kết quả"}
+            description={
+              browsing
+                ? "Nguồn không có truyện nào ở bộ lọc đã chọn."
+                : "Các nguồn đang bật đều trả về rỗng. Thử từ khóa khác hoặc bỏ bớt bộ lọc nguồn."
+            }
+            action={
+              browsing ? (
+                <Button
+                  onClick={() => {
+                    setGenre("");
+                    setStatus("");
+                  }}
+                >
+                  Bỏ bộ lọc
+                </Button>
+              ) : (
+                <Button onClick={() => setQuery("")}>Xóa từ khóa</Button>
+              )
+            }
           />
         )}
       {items.length > 0 && (

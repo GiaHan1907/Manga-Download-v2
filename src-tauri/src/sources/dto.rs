@@ -80,6 +80,16 @@ pub struct RemoteSearchPage {
     pub has_more: bool,
 }
 
+/// One genre the source itself publishes. `slug` is the token the source uses
+/// in its own catalog URL and `label` is the source's wording — neither is
+/// invented or translated locally.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreTag {
+    pub slug: String,
+    pub label: String,
+}
+
 /// One Home card plus the chapter label the source itself printed next to it.
 /// Nothing else is invented: no rating, no synopsis, no view count.
 #[derive(Debug, Clone, Serialize)]

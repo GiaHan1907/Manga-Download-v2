@@ -89,6 +89,24 @@ pub trait SourceAdapter: Send + Sync {
     ) -> Result<Vec<crate::sources::dto::HomeFeedItem>, SourceError> {
         Err(SourceError::UnsupportedOperation)
     }
+    /// The source's own genre vocabulary, read from its catalog page.
+    /// Default: unsupported — the UI hides the genre filter rather than
+    /// offering a list it made up.
+    async fn genres(&self) -> Result<Vec<crate::sources::dto::GenreTag>, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
+    /// A filtered catalog page. `genre` is a slug this adapter's own `genres()`
+    /// published; `status` is one of "new" | "ongoing" | "completed". Sources
+    /// have no route that also carries a keyword, so browse is a separate mode
+    /// from `search` rather than an extra argument on it.
+    async fn browse(
+        &self,
+        _genre: Option<&str>,
+        _status: Option<&str>,
+        _page: u32,
+    ) -> Result<RemoteSearchPage, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
     /// Extracts the stable manga id from a URL this adapter already owns.
     async fn resolve_url(&self, url: &Url) -> Result<String, SourceError>;
     /// Recognizes a CHAPTER link of this source and returns

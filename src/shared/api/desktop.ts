@@ -27,6 +27,8 @@ import type {
 } from "../../types/library";
 import { DOWNLOAD_EVENT } from "../../types/downloads";
 import type {
+  BrowseStatus,
+  GenreTagDto,
   HomeFeedDto,
   HomeFeedItemDto,
   RankingPeriod,
@@ -194,6 +196,22 @@ export async function getHomeRanking(
 
 export async function resolveMangaUrl(url: string): Promise<RemoteMangaDetailDto> {
   return invoke<RemoteMangaDetailDto>("resolve_manga_url", { url });
+}
+
+/// Discover Phase 2: the source's own genre vocabulary (slug + its label).
+export async function listSourceGenres(sourceId: string): Promise<GenreTagDto[]> {
+  return invoke<GenreTagDto[]>("list_source_genres", { sourceId });
+}
+
+/// A filtered catalog page. The source cannot combine a keyword with these,
+/// so browse results and keyword search are mutually exclusive modes.
+export async function browseManga(args: {
+  sourceId: string;
+  genre?: string;
+  status?: BrowseStatus;
+  page?: number;
+}): Promise<SearchResultDto> {
+  return invoke<SearchResultDto>("browse_manga", args);
 }
 
 export async function getRemoteMangaDetails(args: {

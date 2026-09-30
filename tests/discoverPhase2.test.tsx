@@ -69,6 +69,27 @@ beforeEach(() => {
         return Promise.resolve({ featured: [], newest: [], popular: [] });
       case "search_manga":
         return Promise.resolve({ items: [], sourceErrors: [], hasMore: false });
+      case "list_source_genres":
+        return Promise.resolve([
+          { slug: "action-26", label: "Action" },
+          { slug: "huyen-huyen-468", label: "Huyền Huyễn" },
+        ]);
+      case "browse_manga":
+        return Promise.resolve({
+          items: [
+            {
+              sourceId: "truyenqq",
+              sourceMangaId: "dao-bich-canh-2800",
+              sourceDisplayName: "TruyenQQ",
+              title: "Đao Bích Cảnh",
+              author: null,
+              coverKey: null,
+              status: "ongoing",
+            },
+          ],
+          sourceErrors: [],
+          hasMore: false,
+        });
       case "get_home_ranking":
         return Promise.resolve(ranking(args?.period));
       case "search_history_list":
@@ -132,6 +153,39 @@ describe("Discover Phase 2 — ranking screen", () => {
     renderAt("/ranking");
     const list = await screen.findByRole("list");
     expect(within(list).queryByText(/lượt xem|views|★/i)).toBeNull();
+  });
+});
+
+describe("Discover Phase 2 — catalog filters", () => {
+  it("browses a genre through the source's own catalog instead of faking a keyword filter", async () => {
+    renderAt("/discover");
+    const genreSelect = await screen.findByLabelText(/Thể loại/);
+    fireEvent.change(genreSelect, { target: { value: "action-26" } });
+
+    expect(await screen.findByText("Đao Bích Cảnh")).toBeDefined();
+    const call = backend.calls.find(([cmd]) => cmd === "browse_manga");
+    expect(call?.[1]).toMatchObject({ sourceId: "truyenqq", genre: "action-26", page: 1 });
+    // The keyword box cannot combine with a catalog filter, so it is disabled
+    // rather than left there pretending to work.
+    expect((screen.getByLabelText("Tìm kiếm truyện") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("hides the genre filter entirely when the source publishes no list", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "list_source_genres") {
+        return Promise.reject({ code: "UNSUPPORTED_OPERATION", message: "Nguồn không hỗ trợ.", retryable: false });
+      }
+      if (cmd === "get_home_feed") {
+        return Promise.resolve({ featured: [], newest: [], popular: [] });
+      }
+      if (cmd === "list_supported_sources") {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve({ items: [], sourceErrors: [], hasMore: false });
+    });
+    renderAt("/discover");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(screen.queryAllByLabelText(/Thể loại/)).toHaveLength(0);
   });
 });
 

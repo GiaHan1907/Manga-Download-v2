@@ -122,6 +122,8 @@ pub fn run() {
             commands::discovery::search_manga,
             commands::discovery::get_home_feed,
             commands::discovery::get_home_ranking,
+            commands::discovery::list_source_genres,
+            commands::discovery::browse_manga,
             commands::discovery::resolve_manga_url,
             commands::discovery::get_remote_manga_details,
             commands::discovery::get_remote_chapters,
