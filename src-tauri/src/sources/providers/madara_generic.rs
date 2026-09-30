@@ -2353,6 +2353,288 @@ mod tests {
         assert!(len > 1000);
     }
 
+    /// The advanced-search page builds its form in JS, so its endpoint has to
+    /// come from the bundle. Print every `/frontend/...` path the scripts use.
+    #[tokio::test]
+    #[ignore = "live network probe: which /frontend endpoints the TruyenQQ bundle calls"]
+    async fn live_builtin_qq_frontend_endpoints_recon() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let html = adapter
+            .http
+            .get_text(&format!("{}tim-kiem-nang-cao", adapter.base))
+            .await
+            .expect("advanced search page");
+        let scripts = {
+            let document = Html::parse_document(&html);
+            let selector = Selector::parse("script[src]").unwrap();
+            document
+                .select(&selector)
+                .filter_map(|node| node.value().attr("src").map(str::to_string))
+                .collect::<Vec<String>>()
+        };
+        println!("RECON scripts {:?}", scripts.len());
+        for src in scripts {
+            let url = if src.starts_with("http") {
+                src.clone()
+            } else {
+                format!("{}{}", adapter.base, src.trim_start_matches('/'))
+            };
+            let Ok(body) = adapter.http.get_text(&url).await else {
+                println!("RECON script unreadable: {url}");
+                continue;
+            };
+            let mut found: HashSet<String> = HashSet::new();
+            let mut cursor = body.as_str();
+            while let Some(index) = cursor.find("/frontend/") {
+                let tail = &cursor[index..];
+                let end = tail
+                    .find(|c: char| {
+                        !(c.is_alphanumeric() || c == '/' || c == '-' || c == '_' || c == '.')
+                    })
+                    .unwrap_or(tail.len());
+                found.insert(tail[..end].to_string());
+                cursor = &tail[1..];
+            }
+            let mut found: Vec<String> = found.into_iter().collect();
+            found.sort();
+            if !found.is_empty() {
+                println!("RECON {url} -> {found:?}");
+            }
+            // The filter vocabulary the form posts.
+            for needle in ["more-story", "genre", "status", "sort", "keyword"] {
+                if let Some(index) = body.find(needle) {
+                    let start = index.saturating_sub(60);
+                    let slice = &body[start..(index + 90).min(body.len())];
+                    let flat: String = slice.chars().filter(|c| *c != '\n').collect();
+                    println!("RECON ctx {needle}: {flat}");
+                }
+            }
+        }
+    }
+
+    /// The advanced-search page is the only candidate that could combine a
+    /// keyword with genre/status/sort, so its form contract must be read from
+    /// the markup rather than guessed.
+    #[tokio::test]
+    #[ignore = "live network probe: TruyenQQ advanced-search form fields and genre listing markup"]
+    async fn live_builtin_qq_advanced_search_recon() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let html = adapter
+            .http
+            .get_text(&format!("{}tim-kiem-nang-cao", adapter.base))
+            .await
+            .expect("advanced search page");
+        {
+            let document = Html::parse_document(&html);
+            for form in document.select(&Selector::parse("form").unwrap()) {
+                let action = form.value().attr("action").unwrap_or("-");
+                let method = form.value().attr("method").unwrap_or("-");
+                println!("RECON FORM action={action} method={method}");
+                for field in form.select(&Selector::parse("input, select").unwrap()) {
+                    let name = field.value().attr("name").unwrap_or("-");
+                    match field.value().name() {
+                        "input" => println!(
+                            "  input name={name} type={}",
+                            field.value().attr("type").unwrap_or("-")
+                        ),
+                        "select" => {
+                            let options: Vec<String> = field
+                                .select(&Selector::parse("option").unwrap())
+                                .map(|o| {
+                                    format!(
+                                        "{}={}",
+                                        o.value().attr("value").unwrap_or("-"),
+                                        o.text().collect::<String>().trim()
+                                    )
+                                })
+                                .take(12)
+                                .collect();
+                            println!("  select name={name} options={:?}", options);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Genre listing markup: which grid does a /the-loai page actually use?
+        let genre_html = adapter
+            .http
+            .get_text(&format!("{}the-loai/action-26", adapter.base))
+            .await
+            .expect("genre page");
+        {
+            let document = Html::parse_document(&genre_html);
+            for probe in [
+                "li",
+                ".items .item",
+                ".list_truyen .item",
+                ".row",
+                ".page-item-detail",
+                ".card",
+            ] {
+                let Ok(selector) = Selector::parse(probe) else {
+                    continue;
+                };
+                let count = document.select(&selector).count();
+                println!("RECON GENRE selector {probe:?} -> {count} nodes");
+            }
+            let anchors = Selector::parse("a[href*='/truyen-tranh/']").unwrap();
+            let names = Selector::parse("h3, .name, a[title]").unwrap();
+            let mut shown = 0;
+            for node in document.select(&anchors) {
+                let title = node
+                    .value()
+                    .attr("title")
+                    .map(str::to_string)
+                    .or_else(|| {
+                        node.select(&names)
+                            .next()
+                            .map(|n| n.text().collect::<String>().trim().to_string())
+                    })
+                    .unwrap_or_default();
+                println!(
+                    "  card href={} title={}",
+                    node.value().attr("href").unwrap_or("-"),
+                    title
+                );
+                shown += 1;
+                if shown >= 3 {
+                    break;
+                }
+            }
+            let pagination = Selector::parse("a[href*='trang']").unwrap();
+            let pages: Vec<String> = document
+                .select(&pagination)
+                .filter_map(|a| a.value().attr("href").map(str::to_string))
+                .take(6)
+                .collect();
+            println!("RECON GENRE pagination {pages:?}");
+        }
+    }
+
+    /// Discovery for the Phase 2 filter pills: instead of guessing the engine's
+    /// routes, read the route names the catalog page itself links to.
+    #[tokio::test]
+    #[ignore = "live network probe: which genre/status/sort routes TruyenQQ publishes"]
+    async fn live_builtin_qq_filter_recon() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let catalog_html = adapter
+            .http
+            .get_text(&format!("{}doc-truyen", adapter.base))
+            .await
+            .expect("catalog page");
+        // Block scope: scraper::Html is !Send and must die before the next await.
+        let paths = {
+            let document = Html::parse_document(&catalog_html);
+            let links = Selector::parse("a[href]").unwrap();
+            let mut found: HashSet<String> = HashSet::new();
+            for anchor in document.select(&links) {
+                let Some(href) = anchor.value().attr("href") else {
+                    continue;
+                };
+                let Some(rest) = href
+                    .strip_prefix("https://truyenqqko.com")
+                    .or_else(|| href.strip_prefix("http://truyenqqko.com"))
+                    .or_else(|| href.strip_prefix('/'))
+                else {
+                    continue;
+                };
+                let path = format!("/{}", rest.trim_matches('/'));
+                let keep = path.len() > 1
+                    && !path.starts_with("/truyen-tranh")
+                    && !path.starts_with("/chapter")
+                    && !path.starts_with("/tac-gia")
+                    && !path.contains('.');
+                if keep {
+                    found.insert(path);
+                }
+            }
+            found
+        };
+        let mut paths: Vec<String> = paths.into_iter().collect();
+        paths.sort();
+        println!("RECON qq paths ({}):", paths.len());
+        for path in &paths {
+            println!("  {path}");
+        }
+        assert!(!paths.is_empty(), "catalog linked no filter routes at all");
+
+        // Probe one of each family so the card selector is known before any
+        // implementation is written.
+        for prefix in ["/the-loai", "/danh-sach", "/nhom"] {
+            let Some(sample) = paths.iter().find(|p| p.starts_with(prefix)).cloned() else {
+                println!("RECON no {prefix} route");
+                continue;
+            };
+            let html = match adapter
+                .http
+                .get_text(&format!("{}{}", adapter.base, &sample[1..]))
+                .await
+            {
+                Ok(html) => html,
+                Err(error) => {
+                    println!("RECON {sample} -> fetch error {error:?}");
+                    continue;
+                }
+            };
+            let (cards, titles) = {
+                let document = Html::parse_document(&html);
+                let rows = Selector::parse("li").unwrap();
+                let anchors = Selector::parse("a[href*='/truyen-tranh/']").unwrap();
+                let names = Selector::parse("p.name, h3, .caption a").unwrap();
+                let mut slugs: HashSet<String> = HashSet::new();
+                let mut sample_titles: Vec<String> = Vec::new();
+                for node in document.select(&rows) {
+                    let Some(href) = node
+                        .select(&anchors)
+                        .next()
+                        .and_then(|a| a.value().attr("href"))
+                    else {
+                        continue;
+                    };
+                    let Some(slug) = adapter.slug_from_manga_url(href) else {
+                        continue;
+                    };
+                    if slugs.insert(slug.clone()) && sample_titles.len() < 5 {
+                        let title = node
+                            .select(&names)
+                            .next()
+                            .map(|n| n.text().collect::<String>().trim().to_string())
+                            .unwrap_or_default();
+                        sample_titles.push(format!("{slug} | {title}"));
+                    }
+                }
+                (slugs.len(), sample_titles)
+            };
+            println!("RECON {sample} -> {cards} story cards");
+            for line in titles {
+                println!("    {line}");
+            }
+        }
+    }
+
     #[tokio::test]
     #[ignore = "live network probe: built-in TruyenQQ search -> detail -> pages over the app transport (wreq + ECH)"]
     async fn live_builtin_qq_probe() {

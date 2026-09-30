@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { History, Search, SlidersHorizontal, X } from "lucide-react";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
@@ -10,14 +10,14 @@ import StatusBadge from "../../components/ui/StatusBadge";
 import { localServices } from "../../services/provider";
 import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
-import { useDomainVersion } from "../../shared/hooks/useInvalidation";
+import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
+import type { RecentSearchDto } from "../../types/backend";
 import type {
   RemoteMangaSummaryDto,
   SearchResultDto,
   SourceViewDto,
 } from "../../types/source";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
-import { useDebouncedValue } from "./hooks/useDebouncedValue";
 
 // Isolated so the cover hook runs per card (React rules of hooks forbid
 // calling it inline inside the results .map).
@@ -84,23 +84,77 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   const [sourceFilter, setSourceFilter] = useState<string>(stored?.selected[0] ?? "all");
   const [reload, setReload] = useState(0);
   const sourcesVersion = useDomainVersion("sources");
-  const debounced = useDebouncedValue(query.trim(), 300);
+  // The term actually searched. Typing settles after 300ms; pressing
+  // "Tìm kiếm" flushes it immediately so the button can never no-op mid-debounce.
+  const [term, setTerm] = useState(() => query.trim());
+  useEffect(() => {
+    const timer = window.setTimeout(() => setTerm(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     try {
       sessionStorage.setItem(
         RESTORE_KEY,
-        JSON.stringify({ query: debounced, selected: sourceFilter === "all" ? [] : [sourceFilter] }),
+        JSON.stringify({ query: term, selected: sourceFilter === "all" ? [] : [sourceFilter] }),
       );
     } catch {
       /* private-mode quota — memory aid, not function-critical */
     }
-  }, [debounced, sourceFilter]);
+  }, [term, sourceFilter]);
 
   const sources = useAsyncData<SourceViewDto[]>(() => localServices.source.listSources(), [
     reload,
     sourcesVersion,
   ]);
+
+  // Recent queries are committed searches (submit / chip / Enter), not every
+  // keystroke, so the list stays what the user actually looked for.
+  const historyVersion = useDomainVersion("history");
+  const history = useAsyncData<RecentSearchDto[]>(
+    () => localServices.history.listSearches(),
+    [historyVersion],
+  );
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  /// `raw` lets a chip search its own text in the same tick it is clicked —
+  /// reading `query` here would still see the pre-click value.
+  function commit(raw?: string) {
+    const value = (raw ?? query).trim();
+    if (value.length < 2) {
+      return;
+    }
+    setTerm(value);
+    setQuery(value);
+    setReload((count) => count + 1);
+    void localServices.history
+      .recordSearch(value)
+      .then(() => {
+        setHistoryError(null);
+        bumpDomain("history");
+      })
+      .catch((error: unknown) => setHistoryError(normalizeIpcError(error).message));
+  }
+
+  async function dropSearch(entry: string) {
+    try {
+      await localServices.history.removeSearch(entry);
+      setHistoryError(null);
+      bumpDomain("history");
+    } catch (error: unknown) {
+      setHistoryError(normalizeIpcError(error).message);
+    }
+  }
+
+  async function clearSearches() {
+    try {
+      await localServices.history.clearSearches();
+      setHistoryError(null);
+      bumpDomain("history");
+    } catch (error: unknown) {
+      setHistoryError(normalizeIpcError(error).message);
+    }
+  }
 
   const searchable =
     sources.state === "success"
@@ -116,7 +170,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   // One search identity: query + source filter + manual reload. Page 1 is
   // always refetched on change; extra pages are dropped render-side (the
   // React derived-state pattern — no effect, no stale-frame flash).
-  const searchKey = ["q", debounced, effectiveIds?.join(",") ?? "all", "r", reload].join("|");
+  const searchKey = ["q", term, effectiveIds?.join(",") ?? "all", "r", reload].join("|");
   const [more, setMore] = useState<MoreState>(EMPTY_MORE);
   if (more.key !== searchKey) {
     setMore({ key: searchKey, pages: [], loading: false, error: null });
@@ -124,12 +178,12 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
 
   const results = useAsyncData<SearchResultDto | null>(
     () =>
-      debounced.length < 2
+      term.length < 2
         ? Promise.resolve(null)
-        : localServices.source.search({ query: debounced, sourceIds: effectiveIds, page: 1 }),
+        : localServices.source.search({ query: term, sourceIds: effectiveIds, page: 1 }),
     // effectiveIds key: disabling/removing a source must invalidate rendered
     // results that were gathered from sources which are no longer searchable.
-    [debounced, sourceFilter, effectiveIds?.join(",") ?? "all", reload],
+    [term, sourceFilter, effectiveIds?.join(",") ?? "all", reload],
   );
 
   // Everything below is derived during render — accumulating in an effect
@@ -144,7 +198,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   const hasMore = allPages.length > 0 ? allPages[allPages.length - 1].hasMore : false;
 
   async function loadMore() {
-    if (more.loading || debounced.length < 2) {
+    if (more.loading || term.length < 2) {
       return;
     }
     const key = searchKey;
@@ -152,7 +206,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
     setMore((current) => (current.key === key ? { ...current, loading: true, error: null } : current));
     try {
       const page = await localServices.source.search({
-        query: debounced,
+        query: term,
         sourceIds: effectiveIds,
         page: nextPage,
       });
@@ -191,7 +245,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
         className="discover-search"
         onSubmit={(event) => {
           event.preventDefault();
-          setReload((count) => count + 1);
+          commit();
         }}
       >
         <Search size={16} aria-hidden="true" />
@@ -203,7 +257,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <Button variant="primary" type="submit" disabled={debounced.length < 2}>
+        <Button variant="primary" type="submit" disabled={query.trim().length < 2}>
           Tìm kiếm
         </Button>
       </form>
@@ -229,6 +283,41 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           <p className="muted">Chưa có nguồn nào bật hỗ trợ tìm kiếm. Đăng ký trong Cài đặt → Nguồn.</p>
         )}
       </div>
+
+      {history.state === "success" && history.data.length > 0 && (
+        <div className="discover-recent" aria-label="Tìm kiếm gần đây">
+          <span className="muted discover-recent__label">
+            <History size={13} aria-hidden="true" /> Tìm kiếm gần đây
+          </span>
+          {history.data.map((entry) => (
+            <span key={entry.query} className="recent-chip">
+              <button
+                type="button"
+                className="recent-chip__text"
+                onClick={() => commit(entry.query)}
+              >
+                {entry.query}
+              </button>
+              <button
+                type="button"
+                className="recent-chip__remove"
+                aria-label={`Xóa ${entry.query} khỏi lịch sử`}
+                onClick={() => void dropSearch(entry.query)}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+          <button type="button" className="recent-chip__clear" onClick={() => void clearSearches()}>
+            Xóa tất cả
+          </button>
+        </div>
+      )}
+      {historyError && (
+        <p className="queue-error" role="alert">
+          Không lưu được lịch sử tìm kiếm ({historyError}).
+        </p>
+      )}
 
       {failedSources.length > 0 && (
         <ul className="source-errors" role="status" aria-label="Một số nguồn gặp lỗi">

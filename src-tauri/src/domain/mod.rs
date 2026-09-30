@@ -183,6 +183,15 @@ pub struct ClearHistoryDto {
     pub skipped_other: i64,
 }
 
+/// Discover Phase 2 — one recent search query the user typed. Nothing else is
+/// kept: no results, no source ids.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentSearchDto {
+    pub query: String,
+    pub searched_at: String,
+}
+
 /// Feature plan F4 — one per-chapter read record (metadata only).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

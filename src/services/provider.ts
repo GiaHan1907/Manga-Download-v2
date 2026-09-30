@@ -4,6 +4,7 @@ import type { LibraryService } from "./library.service";
 import type { ReaderService } from "./reader.service";
 import type { SettingsService } from "./settings.service";
 import { localLibraryApi } from "./local-library.api";
+import { historyApi } from "./history.api";
 import { settingsApi } from "./settings.api";
 import { sourceApi } from "./source.api";
 import { downloadsApi } from "./downloads.api";
@@ -43,6 +44,7 @@ export const localServices = {
   downloads: downloadsApi,
   libraryV2: libraryApi,
   reader: readerApi,
+  history: historyApi,
 };
 
 export const subscribeServices = subscribeMock;

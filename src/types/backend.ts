@@ -18,6 +18,13 @@ export type ReadHistoryDto = {
   readAt: string;
 };
 
+/// Discover Phase 2 — one recent search query (Rust serde camelCase). Only the
+/// text and its timestamp exist; results are never persisted.
+export type RecentSearchDto = {
+  query: string;
+  searchedAt: string;
+};
+
 export type LocalMangaDto = {
   id: string;
   sourceId: string;

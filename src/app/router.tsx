@@ -10,6 +10,8 @@ import FavoritesPage from "../features/library/FavoritesPage";
 import LibraryPage from "../features/library/LibraryPage";
 import LocalMangaPage from "../features/library/LocalMangaPage";
 import MangaDetailPage from "../features/manga-detail/MangaDetailPage";
+import RankingPage from "../features/ranking/RankingPage";
+import HistoryPage from "../features/history/HistoryPage";
 import ReadPage from "../features/read/ReadPage";
 import ReaderPage from "../features/reader/ReaderPage";
 import SettingsPage from "../features/settings/SettingsPage";
@@ -21,6 +23,8 @@ export function AppRoutes() {
       <Route element={<AppShell />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/discover" element={<DiscoverPage />} />
+        <Route path="/ranking" element={<RankingPage />} />
+        <Route path="/history" element={<HistoryPage />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route path="/library/:mangaId" element={<LocalMangaPage />} />
         <Route path="/favorites" element={<FavoritesPage />} />

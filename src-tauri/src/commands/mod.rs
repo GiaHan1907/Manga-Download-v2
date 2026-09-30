@@ -6,6 +6,7 @@ pub mod library;
 pub mod local_catalog;
 pub mod reader;
 pub mod reading_progress;
+pub mod search_history;
 pub mod settings;
 pub mod storage;
 pub mod system;

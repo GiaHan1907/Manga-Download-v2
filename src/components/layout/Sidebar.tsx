@@ -1,4 +1,4 @@
-import { BookMarked, Compass, Download, Globe, Heart, Home, Library, Menu, Server, Settings } from "lucide-react";
+import { BookMarked, Compass, Crown, Download, Globe, Heart, History, Home, Library, Menu, Server, Settings } from "lucide-react";
 import { useRef } from "react";
 import { NavLink } from "react-router-dom";
 import { sidebarRoutes, type AppRoute } from "../../app/routes";
@@ -8,6 +8,8 @@ import Tooltip from "../ui/Tooltip";
 const icons = {
   home: Home,
   discover: Compass,
+  ranking: Crown,
+  history: History,
   library: Library,
   downloads: Download,
   favorites: Heart,

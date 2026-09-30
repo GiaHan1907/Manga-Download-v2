@@ -2372,12 +2372,22 @@ button {
   padding: 0.3rem var(--space-3);
 }
 
+/* A transparent select makes Chromium draw its popup with the platform's
+   light list — light option text on white, unreadable. The control and its
+   options both need the app's own surface. */
 .filter-pill select {
-  background: transparent;
-  border: 0;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
+  padding: 0.1rem var(--space-2);
+}
+
+.filter-pill option {
+  background: var(--elevated);
+  color: var(--text-primary);
 }
 
 .discover-layout {
@@ -2536,4 +2546,183 @@ button {
 .discover-sources__manage {
   margin-top: var(--space-3);
   width: 100%;
+}
+
+/* ---------- Ranking screen ---------- */
+.ranking-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+
+.ranking-row {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 1.75rem 2.75rem minmax(0, 1fr);
+  padding: var(--space-2) var(--space-3);
+}
+
+.ranking-row:hover {
+  border-color: var(--primary);
+}
+
+.ranking-row__pos {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-align: center;
+}
+
+.ranking-row__pos--medal {
+  color: var(--primary);
+}
+
+.ranking-row__art {
+  border-radius: var(--radius-sm);
+  height: 3.5rem;
+  overflow: hidden;
+  width: 2.75rem;
+}
+
+.ranking-row__placeholder {
+  background: var(--elevated);
+  color: var(--accent-text);
+  display: grid;
+  height: 100%;
+  place-items: center;
+  width: 100%;
+}
+
+.ranking-row__cover {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.ranking-row__text {
+  color: inherit;
+  display: grid;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.ranking-row__title {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ranking-row__meta {
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Recent searches + history screen ---------- */
+.discover-recent {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.discover-recent__label {
+  align-items: center;
+  display: inline-flex;
+  font-size: var(--font-size-xs);
+  gap: 0.3rem;
+}
+
+.recent-chip {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+}
+
+.recent-chip__text {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  max-width: 14rem;
+  overflow: hidden;
+  padding: 0.25rem 0 var(--space-2);
+  padding-left: var(--space-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-chip__remove,
+.recent-chip__clear {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: var(--space-2);
+}
+
+.recent-chip__remove:hover,
+.recent-chip__clear:hover,
+.recent-chip__text:hover {
+  color: var(--primary);
+}
+
+.recent-chip__clear {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-pill);
+}
+
+.history-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+
+.history-row {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: var(--space-2) var(--space-3);
+}
+
+.history-row__text {
+  color: inherit;
+  display: grid;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.history-row__title {
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-row__meta {
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

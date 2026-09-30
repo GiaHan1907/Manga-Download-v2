@@ -1,6 +1,8 @@
 export type AppRouteId =
   | "home"
   | "discover"
+  | "ranking"
+  | "history"
   | "library"
   | "downloads"
   | "favorites"
@@ -21,9 +23,11 @@ export type AppRoute = {
 export const appRoutes = [
   { id: "home", path: "/", label: "Trang chủ", description: "Tổng quan: đọc tiếp, hoạt động, thống kê từ SQLite.", sidebar: true },
   { id: "discover", path: "/discover", label: "Khám phá", description: "Tìm kiếm + import URL qua Rust source engine; demo sandbox chỉ ở bản build dev.", sidebar: true },
+  { id: "ranking", path: "/ranking", label: "Bảng xếp hạng", description: "Xếp hạng theo ngày/tháng/tuần đọc từ chính nguồn.", sidebar: true },
   { id: "library", path: "/library", label: "Thư viện", description: "Truyện đã lưu, trạng thái offline, reconcile.", sidebar: true },
   { id: "downloads", path: "/downloads", label: "Tải xuống", description: "Hàng đợi qua download engine Rust với pause/cancel/retry.", sidebar: true },
   { id: "favorites", path: "/favorites", label: "Yêu thích", description: "Danh sách yêu thích lưu trong SQLite.", sidebar: true },
+  { id: "history", path: "/history", label: "Lịch sử", description: "Tìm kiếm gần đây và chương đã đọc gần nhất, lưu trong SQLite.", sidebar: true },
   { id: "settings", path: "/settings", label: "Cài đặt", description: "Cài đặt, validate Rust-side và lưu blob app_settings.", sidebar: true },
   { id: "sources", path: "/settings/sources", label: "Nguồn", description: "Registry nguồn (bật/tắt, Madara tùy biến); sandbox demo dev-only.", sidebar: false },
   { id: "manga-detail", path: "/manga/:mangaId", label: "Chi tiết truyện", description: "Chi tiết manga đã lưu + danh sách chương offline.", sidebar: false },

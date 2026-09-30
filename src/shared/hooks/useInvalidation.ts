@@ -12,7 +12,8 @@ export type InvalidationDomain =
   | "favorites"
   | "downloads"
   | "settings"
-  | "sources";
+  | "sources"
+  | "history";
 
 const versions = new Map<InvalidationDomain, number>();
 const listeners = new Set<() => void>();

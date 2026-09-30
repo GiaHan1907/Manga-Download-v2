@@ -12,6 +12,7 @@ import type {
   PagedResult,
   ReadHistoryDto,
   ReadingProgressDto,
+  RecentSearchDto,
   SettingsPatchDto,
   StorageStatusDto,
 } from "../../types/backend";
@@ -94,6 +95,24 @@ export async function listReadHistory(args: {
 
 export async function clearReadHistory(mangaId: string): Promise<number> {
   return invoke<number>("app_clear_read_history", { mangaId });
+}
+
+/// Discover Phase 2 — recent search queries. Record/remove return the fresh
+/// list so callers never rebuild it locally.
+export async function recordSearchHistory(query: string): Promise<RecentSearchDto[]> {
+  return invoke<RecentSearchDto[]>("search_history_record", { query });
+}
+
+export async function listSearchHistory(): Promise<RecentSearchDto[]> {
+  return invoke<RecentSearchDto[]>("search_history_list");
+}
+
+export async function removeSearchHistory(query: string): Promise<RecentSearchDto[]> {
+  return invoke<RecentSearchDto[]>("search_history_remove", { query });
+}
+
+export async function clearSearchHistory(): Promise<number> {
+  return invoke<number>("search_history_clear");
 }
 
 export async function saveReadingProgress(args: {

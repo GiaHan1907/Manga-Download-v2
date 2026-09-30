@@ -82,6 +82,10 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 | `app_list_read_history` | `{ mangaId?, limit (1..100), offset }` | `PagedResult<ReadHistoryDto { mangaId, mangaTitle, chapterId, chapterTitle, chapterNumber, readAt }>` | Feature plan F4 (schema 7 `read_history` — UPSERT trong cùng transaction save_progress khi đến 2 trang cuối). Xóa lịch sử theo manga = metadata-only, không động file/progress/favorites |
 | `app_clear_read_history` | `{ mangaId }` | `number` (số xóa) | idempotent |
+| `search_history_record` | `{ query }` | `RecentSearchDto[]` (danh sách mới, mới nhất trước) | Discover Phase 2 (schema 10 `recent_searches`). CHỈ lưu đúng những gì người dùng nhập: không kết quả, không sourceId, không bộ lọc. Trim + gộp khoảng trắng; rỗng hoặc > 80 ký tự → `VALIDATION_ERROR` (không ghi xuống bảng). UPSERT theo query nên tìm lại không nhân bản, và mỗi lần ghi cắt bảng còn `MAX_ENTRIES = 10` dòng mới nhất. Trả về danh sách đã lưu để renderer không tự suy |
+| `search_history_list` | — | `RecentSearchDto { query, searchedAt }[]` | đọc thuần |
+| `search_history_remove` | `{ query }` | `RecentSearchDto[]` | xoá đúng một truy vấn; trả danh sách mới |
+| `search_history_clear` | — | `number` (số xóa) | idempotent; chỉ động bảng `recent_searches` |
 
 `library_list` (mở rộng): DTO thêm `newAlerts` (số chương mới chưa ack), filter mới `"alerts"`. **Event mới** `library-alerts` payload `{ newChapters }` — Rust chỉ emit khi tick phát hiện chương mới (kèm 1 notification tổng); frontend bump domain `library`/`home`, dữ liệu luôn refetch qua snapshot. Watcher CHỈ gọi `manga_detail` qua adapter (đúng pacing/allowlist GuardedHttp), không tự HTTP, không download gì.
 
