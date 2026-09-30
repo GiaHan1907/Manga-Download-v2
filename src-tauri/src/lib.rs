@@ -168,6 +168,7 @@ pub fn run() {
             commands::watch::library_get_watch,
             commands::library::library_stats,
             commands::library::library_list,
+            commands::library::library_genres,
             commands::library::library_get_downloaded_chapters,
             commands::library::library_reconcile,
             commands::library::library_remove_chapter,

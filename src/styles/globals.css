@@ -2732,3 +2732,466 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Library (mockup redesign) ---------- */
+.library-hero {
+  background: var(--hero-gradient);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.library-hero__top {
+  align-items: center;
+  display: flex;
+  gap: var(--space-6);
+  justify-content: space-between;
+}
+
+.library-hero__title {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0 0 var(--space-2);
+}
+
+.library-hero__accent {
+  color: var(--primary);
+}
+
+.library-hero__art {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex: 0 0 auto;
+  height: 6rem;
+  overflow: hidden;
+  width: 6rem;
+}
+
+.lib-viewswitch {
+  background: var(--elevated);
+  border-radius: var(--radius-pill);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.15rem;
+  padding: 0.2rem;
+}
+
+.lib-viewswitch button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  gap: 0.3rem;
+  padding: 0.3rem var(--space-3);
+}
+
+.lib-viewswitch .lib-viewswitch__on {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.lib-count {
+  align-self: center;
+  font-size: var(--font-size-sm);
+  margin-left: auto;
+}
+
+.lib-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.lib-cover {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.lib-cover--empty {
+  align-items: center;
+  background: var(--elevated);
+  color: var(--accent-text);
+  display: grid;
+  place-items: center;
+}
+
+.lib-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.lib-chip {
+  background: var(--elevated);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+}
+
+.lib-badge {
+  border-radius: var(--radius-pill);
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  width: max-content;
+}
+
+.lib-badge--reading {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.lib-badge--ok {
+  background: rgba(22, 140, 103, 0.22);
+  color: #5fd6a8;
+}
+
+.lib-badge--warn {
+  background: rgba(240, 168, 75, 0.2);
+  color: #f0a84b;
+}
+
+.lib-badge--float {
+  left: 0.35rem;
+  position: absolute;
+  top: 0.35rem;
+}
+
+.lib-progress {
+  background: var(--elevated);
+  border-radius: var(--radius-pill);
+  display: block;
+  height: 0.3rem;
+  overflow: hidden;
+  width: 100%;
+}
+
+.lib-progress--thin {
+  height: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+
+.lib-progress__bar {
+  background: var(--primary);
+  display: block;
+  height: 100%;
+}
+
+.library-layout {
+  align-items: start;
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  min-width: 0;
+}
+
+.library-main,
+.library-aside {
+  min-width: 0;
+}
+
+.library-aside {
+  position: sticky;
+  top: 0;
+}
+
+.library-main h2 {
+  align-items: center;
+  display: flex;
+  gap: 0.45rem;
+}
+
+.lib-continue-row {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  margin-top: var(--space-3);
+}
+
+.lib-continue {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  padding: var(--space-3);
+}
+
+.lib-continue__art,
+.lib-feature__art {
+  border-radius: var(--radius-md);
+  display: block;
+  height: 8rem;
+  overflow: hidden;
+  width: 5.5rem;
+}
+
+.lib-continue__body,
+.lib-feature__body {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.lib-continue__title,
+.lib-feature__title {
+  color: var(--text-primary);
+  font-weight: 800;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-feature__title {
+  white-space: normal;
+}
+
+.lib-continue__chapter {
+  align-items: baseline;
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  justify-content: space-between;
+  margin: 0;
+}
+
+.lib-continue__chapter > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-continue__pct {
+  color: var(--accent-text);
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.lib-continue__meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: 0.4rem;
+  justify-content: space-between;
+  margin: 0;
+}
+
+.lib-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: 0.35rem;
+}
+
+.lib-tile-row {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  margin-top: var(--space-3);
+}
+
+.lib-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: grid;
+  min-width: 0;
+}
+
+.lib-tile__art {
+  color: inherit;
+  display: block;
+  height: 11rem;
+  overflow: hidden;
+  position: relative;
+}
+
+.lib-tile__body {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.lib-tile__title {
+  color: var(--text-primary);
+  display: -webkit-box;
+  font-weight: 800;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  min-height: 2lh;
+  overflow: hidden;
+  text-decoration: none;
+}
+
+.lib-tile__meta,
+.lib-tile__status {
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.lib-tile__missing {
+  align-items: center;
+  display: flex;
+  font-size: var(--font-size-xs);
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.lib-stats {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: var(--space-3);
+}
+
+.lib-stat {
+  background: var(--elevated);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 0.15rem;
+  padding: var(--space-2);
+}
+
+.lib-stat__icon {
+  color: var(--accent-text);
+}
+
+.lib-stat__text {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.lib-stat__value {
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-stat__label {
+  font-size: 0.65rem;
+}
+
+.lib-capacity {
+  display: block;
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.lib-capacity__text {
+  display: block;
+}
+
+.lib-quick {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lib-quick__tile {
+  align-items: center;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: var(--space-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: var(--space-2);
+  text-align: left;
+}
+
+.lib-quick__tile:hover,
+.lib-quick__tile--on {
+  border-color: var(--primary);
+}
+
+.lib-quick__icon {
+  color: var(--accent-text);
+}
+
+.lib-quick__text {
+  display: grid;
+  min-width: 0;
+}
+
+.lib-quick__label {
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-quick__value {
+  font-size: 0.65rem;
+}
+
+.lib-quick__note {
+  align-items: center;
+  display: flex;
+  font-size: var(--font-size-xs);
+  gap: 0.3rem;
+  margin: var(--space-2) 0 0;
+}
+
+.lib-feature {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.lib-feature__desc {
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.lib-activity {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lib-activity li {
+  align-items: center;
+  color: var(--text-muted);
+  display: grid;
+  font-size: var(--font-size-xs);
+  gap: 0.4rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.lib-activity__text {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-activity__age {
+  flex: 0 0 auto;
+}

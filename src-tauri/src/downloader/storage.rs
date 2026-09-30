@@ -24,6 +24,53 @@ pub fn library_root(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("library")
 }
 
+/// Total and free bytes of the volume that actually holds `path`.
+///
+/// Windows follows the NTFS junction the custom download root installs, so the
+/// numbers describe the user's chosen drive rather than the system drive.
+/// Returns `None` off Windows or on any failure: the caller must drop the
+/// capacity bar instead of substituting a made-up quota.
+pub fn volume_space(path: &Path) -> Option<(i64, i64)> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        // Hand-declared rather than pulling a windows-sys feature set: the
+        // symbol is a plain kernel32 export and nothing else is needed.
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetDiskFreeSpaceExW(
+                directory: *const u16,
+                free_available: *mut u64,
+                total: *mut u64,
+                total_free: *mut u64,
+            ) -> i32;
+        }
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        wide.push(0);
+        let mut free_available = 0_u64;
+        let mut total = 0_u64;
+        let mut total_free = 0_u64;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free_available,
+                &mut total,
+                &mut total_free,
+            )
+        };
+        if ok == 0 || total == 0 {
+            return None;
+        }
+        let to_i64 = |value: u64| i64::try_from(value).unwrap_or(i64::MAX);
+        Some((to_i64(total), to_i64(free_available)))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 /// Creates the engine-owned directories (idempotent).
 pub fn ensure_layout(app_data_dir: &Path) -> Result<(), AppError> {
     std::fs::create_dir_all(staging_root(app_data_dir))?;

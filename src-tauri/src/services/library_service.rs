@@ -9,8 +9,8 @@ use sqlx::Row;
 use sqlx::SqlitePool;
 
 use crate::domain::{
-    now_iso, LibraryMangaDto, LibraryProgressDto, LibraryStatsDto, ReconcileReportDto,
-    RemoveMangaFilesDto,
+    now_iso, LibraryGenreDto, LibraryMangaDto, LibraryProgressDto, LibraryStatsDto,
+    ReconcileReportDto, RemoveMangaFilesDto,
 };
 use crate::downloader::storage;
 use crate::error::{AppError, LibraryError};
@@ -18,12 +18,16 @@ use crate::reader::{cbz, image_folder};
 
 pub const MAX_LIBRARY_PAGE: i64 = 100;
 pub const RECONCILE_SCAN_LIMIT: i64 = 5000;
+/// Unit separator — cannot appear in a genre name coming off a manga page.
+/// The listing SQL spells the same byte as `char(31)`.
+const GENRE_SEPARATOR: char = '\u{1f}';
 
 pub async fn list_mangas(
     pool: &SqlitePool,
     query: Option<&str>,
     sort: Option<&str>,
     filter: Option<&str>,
+    genre: Option<&str>,
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<LibraryMangaDto>, i64), AppError> {
@@ -47,6 +51,14 @@ pub async fn list_mangas(
         "favorite" => "AND EXISTS (SELECT 1 FROM favorites f WHERE f.manga_id = m.id)",
         // Feature plan F1: manga with unacknowledged new-chapter alerts.
         "alerts" => "AND EXISTS (SELECT 1 FROM chapter_alerts ca WHERE ca.manga_id = m.id)",
+        // Library quick filters — each mirrors a published stat count exactly.
+        "reading" => "AND EXISTS (SELECT 1 FROM reading_progress rp WHERE rp.manga_id = m.id)",
+        "completed" => "AND m.status = 'completed'",
+        "missing" => {
+            "AND EXISTS (SELECT 1 FROM download_tasks dt JOIN chapters c ON c.id = dt.chapter_id \
+                      WHERE c.manga_id = m.id AND dt.status = 'completed' \
+                      AND dt.output_relpath IS NOT NULL AND c.local_path IS NULL)"
+        }
         other => {
             return Err(AppError::validation(format!(
                 "Bộ lọc không hợp lệ ({other})."
@@ -65,8 +77,16 @@ pub async fn list_mangas(
     } else {
         ""
     };
+    // An empty string means "no genre chosen", so the placeholder (and its
+    // bind) only exists when a genre is actually selected.
+    let genre_sql = if genre.is_some() {
+        "AND EXISTS (SELECT 1 FROM manga_genres mg WHERE mg.manga_id = m.id AND mg.genre = ?)"
+    } else {
+        ""
+    };
 
-    let base = "SELECT m.id, m.title, m.author, m.status, m.source_id, m.source_manga_id, m.cover_key, m.last_read_at, \
+    let base = "SELECT m.id, m.title, m.author, m.status, m.description, m.source_id, m.source_manga_id, m.cover_key, m.last_read_at, \
+         IFNULL((SELECT group_concat(mg.genre, char(31)) FROM manga_genres mg WHERE mg.manga_id = m.id), '') AS genres, \
          (SELECT COUNT(*) FROM favorites f WHERE f.manga_id = m.id) AS favorite, \
          (SELECT COUNT(*) FROM chapters c WHERE c.manga_id = m.id AND c.local_path IS NOT NULL) AS downloaded_chapters, \
          (SELECT COUNT(*) FROM chapters c WHERE c.manga_id = m.id) AS total_chapters, \
@@ -75,26 +95,33 @@ pub async fn list_mangas(
          (SELECT rp.chapter_id FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_chapter_id, \
          (SELECT rp.page_index FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_page_index, \
          (SELECT rp.page_total FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_page_total, \
+         (SELECT rpc.title FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_chapter_title, \
          (SELECT rp.updated_at FROM reading_progress rp JOIN chapters rpc ON rpc.id = rp.chapter_id WHERE rp.manga_id = m.id AND rpc.local_path IS NOT NULL) AS progress_updated_at, \
          EXISTS (SELECT 1 FROM download_tasks dt JOIN chapters c ON c.id = dt.chapter_id \
                  WHERE c.manga_id = m.id AND dt.status = 'completed' \
                  AND dt.output_relpath IS NOT NULL AND c.local_path IS NULL) AS has_missing, \
          (SELECT COUNT(*) FROM chapter_alerts ca WHERE ca.manga_id = m.id) AS new_alerts \
          FROM mangas m";
-    let where_sql = format!("WHERE 1=1 {search} {filter}");
+    let where_sql = format!("WHERE 1=1 {search} {genre_sql} {filter}");
     let total_sql = format!("SELECT COUNT(*) FROM ({base} {where_sql})");
     let mut total_query = sqlx::query_scalar::<_, i64>(&total_sql);
     if let Some(value) = &pattern {
         // Two anonymous `?` occurrences in the search clause.
         total_query = total_query.bind(value).bind(value);
     }
+    if let Some(value) = genre {
+        total_query = total_query.bind(value);
+    }
     let total = total_query.fetch_one(pool).await?;
 
-    // Anonymous placeholders bind in textual order: search, then limit, offset.
+    // Anonymous placeholders bind in textual order: search, genre, limit, offset.
     let rows_sql = format!("{base} {where_sql} ORDER BY {sort} LIMIT ? OFFSET ?");
     let mut query_builder = sqlx::query(&rows_sql);
     if let Some(value) = &pattern {
         query_builder = query_builder.bind(value).bind(value);
+    }
+    if let Some(value) = genre {
+        query_builder = query_builder.bind(value);
     }
     let rows = query_builder
         .bind(limit)
@@ -106,9 +133,11 @@ pub async fn list_mangas(
         .iter()
         .map(|row| {
             let favorite: i64 = row.try_get("favorite")?;
+            let genres: String = row.try_get("genres")?;
             let progress = match row.try_get::<Option<String>, _>("progress_chapter_id")? {
                 Some(chapter_id) => Some(LibraryProgressDto {
                     chapter_id,
+                    chapter_title: row.try_get("progress_chapter_title")?,
                     page_index: row
                         .try_get::<Option<i64>, _>("progress_page_index")?
                         .unwrap_or(0),
@@ -122,6 +151,12 @@ pub async fn list_mangas(
             Ok(LibraryMangaDto {
                 id: row.try_get("id")?,
                 title: row.try_get("title")?,
+                description: row.try_get("description")?,
+                genres: genres
+                    .split(GENRE_SEPARATOR)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect(),
                 author: row.try_get("author")?,
                 status: row.try_get("status")?,
                 source_id: row.try_get("source_id")?,
@@ -142,21 +177,54 @@ pub async fn list_mangas(
     Ok((items, total))
 }
 
+/// Genres present in the local library, with how many saved stories carry
+/// each. Counts are our own rows, not the source's, so they can be shown.
+pub async fn genres(pool: &SqlitePool) -> Result<Vec<LibraryGenreDto>, AppError> {
+    let rows = sqlx::query(
+        "SELECT mg.genre AS genre, COUNT(DISTINCT mg.manga_id) AS manga_count \
+         FROM manga_genres mg JOIN mangas m ON m.id = mg.manga_id \
+         GROUP BY mg.genre ORDER BY manga_count DESC, mg.genre COLLATE NOCASE ASC",
+    )
+    .fetch_all(pool)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(LibraryGenreDto {
+                genre: row.try_get("genre")?,
+                manga_count: row.try_get("manga_count")?,
+            })
+        })
+        .collect()
+}
+
 /// Phase 08 Home overview — one aggregate pass, all from persisted truth.
 pub async fn stats(pool: &SqlitePool) -> Result<LibraryStatsDto, AppError> {
     let row = sqlx::query(
         "SELECT (SELECT COUNT(*) FROM mangas) AS saved_mangas, \
+                (SELECT COUNT(*) FROM chapters) AS total_chapters, \
                 (SELECT COUNT(*) FROM chapters WHERE local_path IS NOT NULL) AS downloaded_chapters, \
                 (SELECT IFNULL(SUM(local_size_bytes), 0) FROM chapters WHERE local_path IS NOT NULL) AS local_size_bytes, \
-                (SELECT COUNT(*) FROM favorites) AS favorites",
+                (SELECT COUNT(*) FROM favorites) AS favorites, \
+                (SELECT COUNT(DISTINCT c.manga_id) FROM chapters c WHERE c.local_path IS NOT NULL) AS downloaded_mangas, \
+                (SELECT COUNT(*) FROM mangas m WHERE EXISTS (SELECT 1 FROM reading_progress rp WHERE rp.manga_id = m.id)) AS reading, \
+                (SELECT COUNT(*) FROM mangas WHERE status = 'completed') AS completed, \
+                (SELECT COUNT(*) FROM download_tasks WHERE status = 'paused') AS paused, \
+                (SELECT COUNT(DISTINCT c.manga_id) FROM download_tasks dt JOIN chapters c ON c.id = dt.chapter_id \
+                  WHERE dt.status = 'completed' AND dt.output_relpath IS NOT NULL AND c.local_path IS NULL) AS missing",
     )
     .fetch_one(pool)
     .await?;
     Ok(LibraryStatsDto {
         saved_mangas: row.try_get("saved_mangas")?,
+        total_chapters: row.try_get("total_chapters")?,
         downloaded_chapters: row.try_get("downloaded_chapters")?,
         local_size_bytes: row.try_get("local_size_bytes")?,
         favorites: row.try_get("favorites")?,
+        downloaded_mangas: row.try_get("downloaded_mangas")?,
+        reading: row.try_get("reading")?,
+        completed: row.try_get("completed")?,
+        paused: row.try_get("paused")?,
+        missing: row.try_get("missing")?,
     })
 }
 
@@ -446,10 +514,102 @@ mod tests {
     }
 
     async fn list_all(lib: &Lib, filter: &str) -> Vec<LibraryMangaDto> {
-        list_mangas(&lib.pool, None, Some("title"), Some(filter), 50, 0)
+        list_mangas(&lib.pool, None, Some("title"), Some(filter), None, 50, 0)
             .await
             .unwrap()
             .0
+    }
+
+    #[tokio::test]
+    async fn t11_genre_filter_and_counts_come_from_the_genre_table() {
+        let (lib, manga_a, _) = seeded().await;
+        // `seeded()` returns generated pks, so the second story is seeded here
+        // to get an id to tag.
+        let (manga_b, _) = testkit::seed_manga(&lib.pool, "mc", 1).await;
+        for (id, genre) in [
+            (manga_a.as_str(), "Hành động"),
+            (manga_a.as_str(), "Viễn tưởng"),
+            (manga_b.as_str(), "Hành động"),
+        ] {
+            sqlx::query("INSERT INTO manga_genres (manga_id, genre) VALUES (?1, ?2)")
+                .bind(id)
+                .bind(genre)
+                .execute(&lib.pool)
+                .await
+                .unwrap();
+        }
+        let action = list_mangas(
+            &lib.pool,
+            None,
+            Some("title"),
+            Some("all"),
+            Some("Hành động"),
+            50,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(action.0.len(), 2, "both tagged stories come back");
+        let first = action
+            .0
+            .iter()
+            .find(|row| row.id == manga_a)
+            .expect("manga_a carries the genre");
+        assert_eq!(
+            first.genres,
+            vec!["Hành động".to_string(), "Viễn tưởng".to_string()],
+            "a story keeps all of its genres, in the source's order"
+        );
+
+        let scifi = list_mangas(
+            &lib.pool,
+            None,
+            Some("title"),
+            Some("all"),
+            Some("Viễn tưởng"),
+            50,
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(scifi.0.len(), 1);
+        assert_eq!(scifi.0[0].id, manga_a);
+
+        let tags = genres(&lib.pool).await.unwrap();
+        assert_eq!(tags[0].genre, "Hành động");
+        assert_eq!(tags[0].manga_count, 2, "counted from our own rows");
+        assert_eq!(tags[1].genre, "Viễn tưởng");
+        assert_eq!(tags[1].manga_count, 1);
+    }
+
+    #[tokio::test]
+    async fn t11_quick_filters_match_the_counts_they_display() {
+        let (lib, manga_a, _) = seeded().await;
+        sqlx::query("INSERT INTO manga_genres (manga_id, genre) VALUES (?1, ?2)")
+            .bind(&manga_a)
+            .bind("Hành động")
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+        let stats = stats(&lib.pool).await.unwrap();
+        // Every stat must be reproducible by the filter of the same name,
+        // otherwise a quick-filter tile would show a number it cannot reach.
+        for (filter, count) in [
+            ("downloaded", stats.downloaded_mangas),
+            ("reading", stats.reading),
+            ("favorite", stats.favorites),
+            ("completed", stats.completed),
+            ("missing", stats.missing),
+        ] {
+            let (_, total) =
+                list_mangas(&lib.pool, None, Some("title"), Some(filter), None, 100, 0)
+                    .await
+                    .unwrap();
+            assert_eq!(total, count, "filter {filter} disagrees with its stat");
+        }
+        assert_eq!(stats.saved_mangas, 2);
+        assert!(stats.downloaded_mangas >= 1);
+        assert_eq!(stats.reading, 1);
     }
 
     #[tokio::test]
@@ -468,7 +628,7 @@ mod tests {
         assert_eq!(list_all(&lib, "downloaded").await.len(), 1);
         assert_eq!(list_all(&lib, "favorite").await.len(), 1);
         assert_eq!(list_all(&lib, "partial").await.len(), 1);
-        let (none, _) = list_mangas(&lib.pool, Some("%"), None, None, 50, 0)
+        let (none, _) = list_mangas(&lib.pool, Some("%"), None, None, None, 50, 0)
             .await
             .unwrap();
         assert!(
@@ -625,7 +785,7 @@ mod tests {
             let pool = l.pool.clone();
             let manga = manga_id.clone();
             async move {
-                list_mangas(&pool, None, Some("title"), Some("all"), 50, 0)
+                list_mangas(&pool, None, Some("title"), Some("all"), None, 50, 0)
                     .await
                     .unwrap()
                     .0

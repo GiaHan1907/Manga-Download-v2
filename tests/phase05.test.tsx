@@ -337,11 +337,49 @@ describe("T05 Library truthfulness (round-1 finding)", () => {
           offset: 0,
         });
       }
+      if (cmd === "library_stats") {
+        return Promise.resolve({
+          savedMangas: 1,
+          totalChapters: 2,
+          downloadedChapters: 0,
+          downloadedMangas: 0,
+          localSizeBytes: 0,
+          favorites: 0,
+          reading: 0,
+          completed: 0,
+          paused: 0,
+          missing: 0,
+        });
+      }
+      if (cmd === "storage_status") {
+        return Promise.resolve({
+          libraryBytes: 0,
+          cacheBytes: 0,
+          stagingDirs: 0,
+          activeTasks: 0,
+          rootAvailable: true,
+          approximate: true,
+          customRoot: false,
+          rootLinkOk: true,
+          volumeTotalBytes: null,
+          volumeFreeBytes: null,
+        });
+      }
+      if (cmd === "library_genres") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "app_list_read_history") {
+        return Promise.resolve({ items: [], total: 0, limit: 3, offset: 0 });
+      }
       return Promise.resolve([]);
     });
     renderAt("/library");
     // Saved metadata with zero downloaded chapters must NOT look downloaded.
-    expect(await screen.findByText("0/2 chương offline · không rõ tác giả")).toBeDefined();
+    // The same row can appear in more than one rail, so assert the label on
+    // every place it is shown rather than assuming a single card.
+    const labels = await screen.findAllByText("0/2 chương offline");
+    expect(labels.length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Chưa tải").length).toBeGreaterThan(0);
     expect(screen.queryByText(/đã có file|chương offline \d/)).toBeNull();
   });
 });

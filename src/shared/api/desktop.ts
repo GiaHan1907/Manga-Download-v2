@@ -19,6 +19,7 @@ import type {
 import type { QueueResultDto, DownloadTaskEvent, ClearHistoryDto } from "../../types/downloads";
 import type {
   DownloadedChapterDto,
+  LibraryGenreDto,
   LibraryMangaDto,
   ReconcileReportDto,
   ReaderManifestDto,
@@ -355,10 +356,16 @@ export async function libraryList(args: {
   query?: string;
   sort?: string;
   filter?: string;
+  genre?: string;
   limit: number;
   offset: number;
 }): Promise<PagedResult<LibraryMangaDto>> {
   return invoke<PagedResult<LibraryMangaDto>>("library_list", args);
+}
+
+/// Genres present in the local library, with our own per-genre story counts.
+export async function libraryGenres(): Promise<LibraryGenreDto[]> {
+  return invoke<LibraryGenreDto[]>("library_genres");
 }
 
 export async function libraryDownloadedChapters(mangaId: string): Promise<{

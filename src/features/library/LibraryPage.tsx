@@ -1,38 +1,73 @@
-import { BellRing, ArrowRight, LayoutGrid, RefreshCw, Rows3, Star } from "lucide-react";
+import {
+  BellRing,
+  BookOpen,
+  Check,
+  Clock,
+  Download,
+  Heart,
+  Layers,
+  LayoutGrid,
+  Pause,
+  RefreshCw,
+  Rows3,
+  Search,
+  ShieldAlert,
+  SortDesc,
+  Star,
+  Trophy,
+} from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
-import MangaCard from "../../components/ui/MangaCard";
 import Skeleton from "../../components/ui/Skeleton";
-import StatusBadge from "../../components/ui/StatusBadge";
-import { normalizeIpcError } from "../../shared/api/desktop";
-import { watchRunNow as desktopWatchRunNow } from "../../shared/api/desktop";
+import { normalizeIpcError, libraryStats, storageStatus } from "../../shared/api/desktop";
+import { watchRunNow } from "../../shared/api/desktop";
 import { pushToast } from "../../components/ui/toastStore";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
-import { localServices } from "../../services/provider";
-import type { LibraryFilter, LibraryMangaDto, LibrarySort } from "../../types/library";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
+import { localServices } from "../../services/provider";
 import { formatBytes } from "../../types/downloads";
+import { relativeAge } from "../../shared/lib/time";
+import type {
+  LibraryFilter,
+  LibraryGenreDto,
+  LibraryMangaDto,
+  LibrarySort,
+} from "../../types/library";
 
 const PAGE_SIZE = 24;
+const RAIL_SIZE = 3;
+const TILE_SIZE = 6;
 
 const SORTS: { id: LibrarySort; label: string }[] = [
   { id: "lastRead", label: "Đọc gần đây" },
-  { id: "recentDownload", label: "Tải gần đây" },
-  { id: "title", label: "Tên" },
-  { id: "chapters", label: "Số chương đã tải" },
+  { id: "recentDownload", label: "Mới cập nhật" },
+  { id: "title", label: "Tên A → Z" },
+  { id: "chapters", label: "Nhiều chương đã tải" },
 ];
-const FILTERS: { id: LibraryFilter; label: string }[] = [
+
+/// Every entry here is a real `library_list` filter, so each pill and each
+/// quick-filter tile changes what the database returns.
+const STATES: { id: LibraryFilter; label: string }[] = [
   { id: "all", label: "Tất cả" },
-  { id: "downloaded", label: "Có nội dung offline" },
+  { id: "downloaded", label: "Đã tải" },
   { id: "partial", label: "Tải dở" },
+  { id: "reading", label: "Đang đọc" },
+  { id: "completed", label: "Hoàn thành" },
   { id: "favorite", label: "Yêu thích" },
   { id: "alerts", label: "Có chương mới" },
+  { id: "missing", label: "Thiếu file" },
 ];
+
+const STATUS_LABEL: Record<string, string> = {
+  ongoing: "Đang tiến hành",
+  completed: "Đã hoàn thành",
+  unknown: "Chưa rõ",
+};
 
 function readViewMode(): "grid" | "list" {
   try {
@@ -42,15 +77,152 @@ function readViewMode(): "grid" | "list" {
   }
 }
 
-function relativeTime(iso: string | null): string {
-  if (!iso) {
-    return "";
+function progressPercent(manga: LibraryMangaDto): number | null {
+  const total = manga.progress?.pageTotal ?? 0;
+  if (!manga.progress || total <= 0) {
+    return null;
   }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return "";
+  return Math.min(100, Math.round(((manga.progress.pageIndex + 1) / total) * 100));
+}
+
+function Cover({ manga, size }: { manga: LibraryMangaDto; size: "tile" | "wide" }) {
+  const url = useCoverUrl(manga.sourceId, manga.sourceMangaId, manga.coverKey);
+  if (!url) {
+    return (
+      <span className={`lib-cover lib-cover--empty lib-cover--${size}`} aria-hidden="true">
+        <BookOpen size={size === "wide" ? 22 : 16} />
+      </span>
+    );
   }
-  return date.toLocaleDateString();
+  return <img className={`lib-cover lib-cover--${size}`} src={url} alt="" loading="lazy" />;
+}
+
+function GenreChips({ manga }: { manga: LibraryMangaDto }) {
+  const genres = (manga.genres ?? []).slice(0, 3);
+  if (genres.length === 0) {
+    return null;
+  }
+  return (
+    <span className="lib-chips">
+      {genres.map((genre) => (
+        <span key={genre} className="lib-chip">
+          {genre}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function ContinueCard({ manga }: { manga: LibraryMangaDto }) {
+  const percent = progressPercent(manga);
+  return (
+    <article className="lib-continue">
+      <Link to={`/library/${manga.id}`} className="lib-continue__art" aria-label={`Mở ${manga.title}`}>
+        <Cover manga={manga} size="wide" />
+      </Link>
+      <div className="lib-continue__body">
+        <Link to={`/library/${manga.id}`} className="lib-continue__title">
+          {manga.title}
+        </Link>
+        <span className="lib-badge lib-badge--reading">Đang đọc</span>
+        <p className="lib-continue__chapter">
+          <span>{manga.progress?.chapterTitle ?? "Chưa có chương nào offline"}</span>
+          {percent !== null && <span className="lib-continue__pct">{percent}% trang</span>}
+        </p>
+        {percent !== null && (
+          <span className="lib-progress" role="img" aria-label={`Đã đọc ${percent}%`}>
+            <span className="lib-progress__bar" style={{ width: `${percent}%` }} />
+          </span>
+        )}
+        <p className="muted lib-continue__meta">
+          <GenreChips manga={manga} />
+          {manga.lastReadAt && <span>Đọc {relativeAge(manga.lastReadAt)}</span>}
+        </p>
+        <div className="lib-actions">
+          <Button to={`/library/${manga.id}`} variant="primary">
+            <BookOpen size={14} aria-hidden="true" /> Đọc tiếp
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MangaTile({
+  manga,
+  onToggleFavorite,
+}: {
+  manga: LibraryMangaDto;
+  onToggleFavorite: (manga: LibraryMangaDto) => void;
+}) {
+  const offline = manga.downloadedChapters > 0;
+  return (
+    <article className="lib-tile">
+      <Link to={`/library/${manga.id}`} className="lib-tile__art" aria-label={`Mở ${manga.title}`}>
+        <Cover manga={manga} size="tile" />
+        <span
+          className={`lib-badge lib-badge--float ${offline ? "lib-badge--ok" : "lib-badge--warn"}`}
+        >
+          {offline ? "Đã tải" : "Chưa tải"}
+        </span>
+      </Link>
+      <div className="lib-tile__body">
+        <Link to={`/library/${manga.id}`} className="lib-tile__title">
+          {manga.title}
+        </Link>
+        <p className="muted lib-tile__meta">
+          {manga.downloadedChapters}/{manga.totalChapters} chương offline
+          {manga.localSizeBytes ? ` · ${formatBytes(manga.localSizeBytes)}` : ""}
+        </p>
+        <GenreChips manga={manga} />
+        <p className="muted lib-tile__status">
+          {STATUS_LABEL[manga.status] ?? manga.status}
+          {manga.lastDownloadAt ? ` · tải ${relativeAge(manga.lastDownloadAt)}` : ""}
+        </p>
+        {manga.hasMissing && (
+          <p className="queue-error lib-tile__missing" role="status">
+            <ShieldAlert size={12} aria-hidden="true" /> Có file đã mất
+          </p>
+        )}
+        <div className="lib-actions">
+          <Button to={`/library/${manga.id}`} variant="primary" className="lib-tile__open">
+            <BookOpen size={14} aria-hidden="true" /> {offline ? "Đọc tiếp" : "Mở"}
+          </Button>
+          <Button
+            variant={manga.favorite ? "secondary" : "ghost"}
+            iconOnly
+            aria-pressed={manga.favorite}
+            aria-label={`${manga.favorite ? "Bỏ yêu thích" : "Yêu thích"} ${manga.title}`}
+            onClick={() => onToggleFavorite(manga)}
+          >
+            <Heart size={15} aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function StatTile({
+  icon,
+  value,
+  label,
+}: {
+  icon: React.ReactNode;
+  value: string;
+  label: string;
+}) {
+  return (
+    <div className="lib-stat">
+      <span className="lib-stat__icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="lib-stat__text">
+        <span className="lib-stat__value">{value}</span>
+        <span className="muted lib-stat__label">{label}</span>
+      </span>
+    </div>
+  );
 }
 
 export default function LibraryPage() {
@@ -58,6 +230,7 @@ export default function LibraryPage() {
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<LibrarySort>("lastRead");
   const [filter, setFilter] = useState<LibraryFilter>("all");
+  const [genre, setGenre] = useState("");
   const [view, setView] = useState<"grid" | "list">(readViewMode);
   const [retryNonce, setRetryNonce] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -65,18 +238,49 @@ export default function LibraryPage() {
   const debouncedQuery = useDebouncedValue(query, 300);
   const libraryVersion = useDomainVersion("library");
 
+  const args = {
+    query: debouncedQuery || undefined,
+    sort,
+    filter,
+    genre: genre || undefined,
+  };
   const page = useAsyncData(
+    () => localServices.libraryV2.list({ ...args, limit: PAGE_SIZE, offset }),
+    [debouncedQuery, offset, sort, filter, genre, retryNonce, libraryVersion],
+  );
+  // Rails and the aside read the same tables with their own ordering; they are
+  // unfiltered on purpose so "Tiếp tục đọc" never disappears behind a filter.
+  const continuing = useAsyncData(
+    () => localServices.libraryV2.list({ sort: "lastRead", filter: "reading", limit: RAIL_SIZE, offset: 0 }),
+    [libraryVersion, retryNonce],
+  );
+  const recent = useAsyncData(
     () =>
       localServices.libraryV2.list({
-        query: debouncedQuery || undefined,
-        sort,
-        filter,
-        limit: PAGE_SIZE,
-        offset,
+        sort: "recentDownload",
+        filter: "downloaded",
+        limit: TILE_SIZE,
+        offset: 0,
       }),
-    // Real-IPC screen: must NOT refetch when only mock/dev state changes.
-    [debouncedQuery, offset, sort, filter, retryNonce, libraryVersion],
+    [libraryVersion, retryNonce],
   );
+  const genres = useAsyncData<LibraryGenreDto[]>(
+    () => localServices.libraryV2.genres(),
+    [libraryVersion, retryNonce],
+  );
+  const stats = useAsyncData(() => libraryStats(), [libraryVersion, retryNonce]);
+  const storage = useAsyncData(() => storageStatus(), [libraryVersion, retryNonce]);
+  const readHistory = useAsyncData(
+    () => localServices.history.listRead({ limit: 3, offset: 0 }),
+    [libraryVersion, retryNonce],
+  );
+
+  const items = page.state === "success" ? page.data.items : [];
+  const reading = (continuing.state === "success" ? continuing.data.items : []).filter(
+    (manga) => manga.progress !== null,
+  );
+  const newest = recent.state === "success" ? recent.data.items : [];
+  const highlight = reading[0] ?? items[0];
 
   function toggleView() {
     setView((value) => {
@@ -117,221 +321,455 @@ export default function LibraryPage() {
     }
   }
 
-  const items = page.state === "success" ? page.data.items : [];
+  function runWatchCheck() {
+    void watchRunNow()
+      .then((report) =>
+        pushToast(
+          report.alertedChapters > 0
+            ? `${report.alertedChapters} chương mới từ ${report.checked} truyện được kiểm tra.`
+            : `Đã kiểm tra ${report.checked} truyện theo dõi — không có chương mới.${report.failed > 0 ? ` (${report.failed} nguồn lỗi, sẽ thử lại sau)` : ""}`,
+        ),
+      )
+      .catch((error: unknown) => {
+        const normalized = normalizeIpcError(error);
+        pushToast(
+          normalized.code === "DB_CONFLICT"
+            ? "Vừa kiểm tra xong — chờ ~1 phút rồi thử lại."
+            : normalized.message,
+        );
+      });
+  }
+
+  const stat = stats.state === "success" ? stats.data : null;
+  const volume = storage.state === "success" ? storage.data : null;
+  const usedBytes = volume?.libraryBytes ?? stat?.localSizeBytes ?? 0;
+  const capacity = volume?.volumeTotalBytes ?? null;
+  const usedPercent =
+    capacity && capacity > 0 ? Math.min(100, Math.round((usedBytes / capacity) * 100)) : null;
+
+  // Sorted on the raw instant, not the formatted string — "2 giờ trước" sorts
+  // alphabetically before "1 ngày trước" and would order the feed backwards.
+  const activity: { icon: React.ReactNode; text: string; at: number }[] = [];
+  for (const entry of readHistory.state === "success" ? readHistory.data.items : []) {
+    activity.push({
+      icon: <BookOpen size={13} aria-hidden="true" />,
+      text: `Đọc ${entry.mangaTitle} — ${entry.chapterTitle}`,
+      at: Date.parse(entry.readAt) || 0,
+    });
+  }
+  for (const manga of newest.slice(0, 3)) {
+    if (manga.lastDownloadAt) {
+      activity.push({
+        icon: <Download size={13} aria-hidden="true" />,
+        text: `Đã tải ${manga.title} — ${manga.downloadedChapters}/${manga.totalChapters} chương`,
+        at: Date.parse(manga.lastDownloadAt) || 0,
+      });
+    }
+  }
+  activity.sort((a, b) => b.at - a.at);
 
   return (
-    <div className="page-stack">
-      <div className="library-toolbar" role="toolbar" aria-label="Điều khiển thư viện">
-        <input
-          className="input library-toolbar__search"
-          type="search"
-          placeholder="Tìm theo tên hoặc tác giả…"
-          aria-label="Tìm theo tên/tác giả"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOffset(0);
-          }}
-        />
-        <div className="chip-row" role="group" aria-label="Lọc">
-          {FILTERS.map((option) => (
+    <div className="page-stack library-page">
+      <section className="library-hero" aria-label="Thư viện của bạn">
+        <div className="library-hero__top">
+          <div>
+            <h1 className="library-hero__title">
+              Thư viện <span className="library-hero__accent">của bạn</span>
+            </h1>
+            <p className="muted">
+              Quản lý truyện đã tải, tiếp tục đọc và thưởng thức mọi lúc, mọi nơi.
+            </p>
+          </div>
+          {highlight ? (
+            <span className="library-hero__art" aria-hidden="true">
+              <Cover manga={highlight} size="wide" />
+            </span>
+          ) : null}
+        </div>
+
+        <div className="discover-search">
+          <Search size={16} aria-hidden="true" />
+          <input
+            className="discover-search__input"
+            type="search"
+            aria-label="Tìm trong thư viện"
+            placeholder="Tìm trong thư viện của bạn..."
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOffset(0);
+            }}
+          />
+          <div className="lib-viewswitch" role="group" aria-label="Dạng hiển thị">
             <button
-              key={option.id}
               type="button"
-              className={option.id === filter ? "filter-chip filter-chip--active" : "filter-chip"}
-              aria-pressed={option.id === filter}
-              onClick={() => {
-                setFilter(option.id);
+              aria-pressed={view === "grid"}
+              className={view === "grid" ? "lib-viewswitch__on" : ""}
+              onClick={() => view !== "grid" && toggleView()}
+            >
+              <LayoutGrid size={14} aria-hidden="true" /> Lưới
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "list"}
+              className={view === "list" ? "lib-viewswitch__on" : ""}
+              onClick={() => view !== "list" && toggleView()}
+            >
+              <Rows3 size={14} aria-hidden="true" /> Danh sách
+            </button>
+          </div>
+        </div>
+
+        <div className="discover-filters">
+          {genres.state === "success" && genres.data.length > 0 && (
+            <label className="filter-pill">
+              <Layers size={13} aria-hidden="true" />
+              <span>Thể loại:</span>
+              <select
+                value={genre}
+                onChange={(event) => {
+                  setGenre(event.target.value);
+                  setOffset(0);
+                }}
+              >
+                <option value="">Tất cả thể loại</option>
+                {genres.data.map((entry) => (
+                  <option key={entry.genre} value={entry.genre}>
+                    {entry.genre} ({entry.mangaCount})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="filter-pill">
+            <Check size={13} aria-hidden="true" />
+            <span>Trạng thái:</span>
+            <select
+              value={filter}
+              onChange={(event) => {
+                setFilter(event.target.value as LibraryFilter);
                 setOffset(0);
               }}
             >
-              {option.label}
-            </button>
-          ))}
+              {STATES.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="filter-pill">
+            <SortDesc size={13} aria-hidden="true" />
+            <span>Sắp xếp:</span>
+            <select
+              value={sort}
+              onChange={(event) => {
+                setSort(event.target.value as LibrarySort);
+                setOffset(0);
+              }}
+            >
+              {SORTS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="muted lib-count">
+            {page.state === "success" ? `Tổng ${page.data.total} truyện` : "Đang đếm…"}
+          </span>
         </div>
-        <label className="library-field">
-          <span className="muted">Sắp xếp</span>
-          <select className="input" value={sort} onChange={(event) => { setSort(event.target.value as LibrarySort); setOffset(0); }}>
-            {SORTS.map((option) => (
-              <option key={option.id} value={option.id}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-        <Button variant="ghost" iconOnly onClick={toggleView} aria-label="Đổi dạng lưới/danh sách">
-          {view === "grid" ? <Rows3 size={16} aria-hidden="true" /> : <LayoutGrid size={16} aria-hidden="true" />}
-        </Button>
-        <Button variant="ghost" onClick={() => void runReconcile()}>
-          <RefreshCw size={14} aria-hidden="true" />
-          Kiểm tra file
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            void desktopWatchRunNow()
-              .then((report) =>
-                pushToast(
-                  report.alertedChapters > 0
-                    ? `${report.alertedChapters} chương mới từ ${report.checked} truyện được kiểm tra.`
-                    : `Đã kiểm tra ${report.checked} truyện theo dõi — không có chương mới.${report.failed > 0 ? ` (${report.failed} nguồn lỗi, sẽ thử lại sau)` : ""}`,
-                ),
-              )
-              .catch((error: unknown) => {
-                const normalized = normalizeIpcError(error);
-                pushToast(
-                  normalized.code === "DB_CONFLICT"
-                    ? "Vừa kiểm tra xong — chờ ~1 phút rồi thử lại."
-                    : normalized.message,
-                );
-              });
-          }}
-        >
-          <BellRing size={14} aria-hidden="true" />
-          Kiểm tra chương mới
-        </Button>
-        <span className="muted library-count">
-          {page.state === "success" ? `${page.data.total} truyện` : ""}
-        </span>
-      </div>
 
-      {reconcileNote && <p className="panel__note" role="status">{reconcileNote}</p>}
-
-      {page.state === "loading" && (
-        <div className="card-grid" aria-busy="true">
-          <Skeleton height="16rem" />
-          <Skeleton height="16rem" />
+        <div className="lib-tools">
+          <Button variant="ghost" onClick={() => void runReconcile()}>
+            <RefreshCw size={14} aria-hidden="true" /> Kiểm tra file
+          </Button>
+          <Button variant="ghost" onClick={runWatchCheck}>
+            <BellRing size={14} aria-hidden="true" /> Kiểm tra chương mới
+          </Button>
         </div>
-      )}
+        {reconcileNote && (
+          <p className="panel__note" role="status">
+            {reconcileNote}
+          </p>
+        )}
+      </section>
 
-      {page.state === "error" && (
-        <ErrorState
-          title="Không đọc được Library từ database"
-          description={`${normalizeIpcError(page.error).message} — Thư viện trống và lỗi DB là hai trạng thái khác nhau.`}
-          action={<Button variant="primary" onClick={() => setRetryNonce((value) => value + 1)}>Thử lại</Button>}
-        />
-      )}
+      <div className="library-layout">
+        <div className="library-main page-stack">
+          {reading.length > 0 && (
+            <section aria-label="Tiếp tục đọc">
+              <div className="section-header">
+                <h2>
+                  <Clock size={16} aria-hidden="true" /> Tiếp tục đọc
+                </h2>
+              </div>
+              <div className="lib-continue-row">
+                {reading.map((manga) => (
+                  <ContinueCard key={manga.id} manga={manga} />
+                ))}
+              </div>
+            </section>
+          )}
 
-      {page.state === "success" && items.length === 0 && (
-        <EmptyState
-          title={filter === "all" ? "Thư viện local đang trống" : "Không có kết quả khớp bộ lọc"}
-          description={
-            filter === "all"
-              ? "Chưa có truyện nào được lưu. Lưu từ Khám phá để nó xuất hiện ở đây."
-              : "Đổi bộ lọc/sắp xếp, hoặc xóa từ khóa tìm kiếm."
-          }
-          action={<Button to="/discover" variant="secondary">Tới Discover</Button>}
-        />
-      )}
-
-      {page.state === "success" && items.length > 0 && (
-        <>
-          <div className={view === "grid" ? "card-grid" : "library-list"}>
-            {items.map((manga) => (
-              <LibraryEntry
-                key={manga.id}
-                manga={manga}
-                view={view}
-                onToggleFavorite={() => void toggleFavorite(manga)}
-              />
-            ))}
-          </div>
-          <div className="chapter-toolbar__footer">
-            <span className="muted">
-              Trang {Math.floor(offset / PAGE_SIZE) + 1} · tổng {page.data.total} bản ghi
-            </span>
-            <div className="settings-actions">
-              <Button variant="ghost" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-                Trước
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={offset + PAGE_SIZE >= page.data.total}
-                onClick={() => setOffset(offset + PAGE_SIZE)}
-              >
-                Sau
-              </Button>
+          <section aria-label="Tất cả truyện trong thư viện">
+            <div className="section-header">
+              <h2>
+                <BookOpen size={16} aria-hidden="true" /> Tất cả truyện trong thư viện
+              </h2>
             </div>
-          </div>
-        </>
-      )}
 
-      {actionError && <p className="queue-error" role="alert">{actionError}</p>}
-    </div>
-  );
-}
+            {page.state === "loading" && (
+              <div className="lib-tile-row" aria-busy="true">
+                <Skeleton height="19rem" />
+                <Skeleton height="19rem" />
+                <Skeleton height="19rem" />
+              </div>
+            )}
+            {page.state === "error" && (
+              <ErrorState
+                title="Không đọc được Library từ database"
+                description={`${normalizeIpcError(page.error).message} — Thư viện trống và lỗi DB là hai trạng thái khác nhau.`}
+                action={
+                  <Button variant="primary" onClick={() => setRetryNonce((value) => value + 1)}>
+                    Thử lại
+                  </Button>
+                }
+              />
+            )}
+            {page.state === "success" && items.length === 0 && (
+              <EmptyState
+                title={filter === "all" && !genre ? "Thư viện local đang trống" : "Không có kết quả khớp bộ lọc"}
+                description={
+                  filter === "all" && !genre
+                    ? "Chưa có truyện nào được lưu. Lưu từ Khám phá để nó xuất hiện ở đây."
+                    : "Đổi bộ lọc hoặc xóa từ khóa tìm kiếm."
+                }
+                action={<Button to="/discover" variant="secondary">Tới Khám phá</Button>}
+              />
+            )}
+            {page.state === "success" && items.length > 0 && (
+              <>
+                <div className={view === "grid" ? "lib-tile-row" : "library-list"}>
+                  {view === "grid"
+                    ? items.map((manga) => (
+                        <MangaTile key={manga.id} manga={manga} onToggleFavorite={(m) => void toggleFavorite(m)} />
+                      ))
+                    : items.map((manga) => (
+                        <div key={manga.id} className="library-row">
+                          <Link to={`/library/${manga.id}`} className="library-row__link">
+                            <span className="library-row__title">{manga.title}</span>
+                            <span className="muted">{manga.author ?? "—"}</span>
+                            <span className="muted">
+                              {manga.downloadedChapters}/{manga.totalChapters} offline
+                              {manga.localSizeBytes ? ` · ${formatBytes(manga.localSizeBytes)}` : ""}
+                            </span>
+                            <span className="muted">
+                              {manga.lastReadAt ? `đọc ${relativeAge(manga.lastReadAt)}` : "chưa đọc"}
+                            </span>
+                          </Link>
+                          <Button
+                            variant={manga.favorite ? "secondary" : "ghost"}
+                            iconOnly
+                            aria-label={`${manga.favorite ? "Bỏ yêu thích" : "Yêu thích"} ${manga.title}`}
+                            onClick={() => void toggleFavorite(manga)}
+                          >
+                            <Star size={15} aria-hidden="true" />
+                          </Button>
+                        </div>
+                      ))}
+                </div>
+                <div className="chapter-toolbar__footer">
+                  <span className="muted">
+                    Trang {Math.floor(offset / PAGE_SIZE) + 1} · tổng {page.data.total} bản ghi
+                  </span>
+                  <div className="settings-actions">
+                    <Button
+                      variant="ghost"
+                      disabled={offset === 0}
+                      onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                    >
+                      Trước
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={offset + PAGE_SIZE >= page.data.total}
+                      onClick={() => setOffset(offset + PAGE_SIZE)}
+                    >
+                      Sau
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
 
-function LibraryEntry({
-  manga,
-  view,
-  onToggleFavorite,
-}: {
-  manga: LibraryMangaDto;
-  view: "grid" | "list";
-  onToggleFavorite: () => void;
-}) {
-  const pct =
-    manga.progress && (manga.progress.pageTotal ?? 0) > 0
-      ? Math.min(
-          100,
-          Math.round(((manga.progress.pageIndex + 1) / (manga.progress.pageTotal ?? 0)) * 100),
-        )
-      : 0;
-  // Grid-only: the list view has no cover slot, so skip the fetch entirely.
-  const coverUrl = useCoverUrl(
-    manga.sourceId,
-    manga.sourceMangaId,
-    view === "grid" ? manga.coverKey : null,
-  );
-  const card = (
-    <MangaCard
-      to={`/library/${manga.id}`}
-      title={manga.title}
-      subtitle={`${manga.downloadedChapters}/${manga.totalChapters} chương offline · ${manga.author ?? "không rõ tác giả"}`}
-      status={manga.status}
-      alertCount={manga.newAlerts ?? 0}
-      coverUrl={coverUrl ?? undefined}
-    />
-  );
-  return (
-    <div className={view === "grid" ? "library-item" : "library-row"}>
-      {view === "list" ? (
-        <Link to={`/library/${manga.id}`} className="library-row__link">
-          <span className="library-row__title">{manga.title}</span>
-          <span className="muted">{manga.author ?? "—"}</span>
-          <span className="muted">
-            {manga.downloadedChapters}/{manga.totalChapters} offline
-            {manga.localSizeBytes ? ` · ${formatBytes(manga.localSizeBytes)}` : ""}
-          </span>
-          <span className="muted">
-            {manga.lastReadAt ? `đọc ${relativeTime(manga.lastReadAt)}` : "chưa đọc"}
-          </span>
-        </Link>
-      ) : (
-        card
-      )}
-      {manga.hasMissing && (
-        <p className="library-item__offline">
-          <StatusBadge tone="error">Có file đã mất — cần tải lại</StatusBadge>
-        </p>
-      )}
-      {manga.progress && (
-        <p className="muted library-item__progress" role="status">
-          Đang đọc · {pct}%
-        </p>
-      )}
-      <div className="library-item__actions">
-        <Button
-          variant={manga.favorite ? "primary" : "ghost"}
-          iconOnly
-          aria-pressed={manga.favorite}
-          aria-label={`${manga.favorite ? "Bỏ yêu thích" : "Yêu thích"} ${manga.title}`}
-          onClick={onToggleFavorite}
-        >
-          <Star size={15} aria-hidden="true" />
-        </Button>
-        <Button to={`/library/${manga.id}`} variant="ghost" iconOnly aria-label={`Mở ${manga.title}`}>
-          <ArrowRight size={15} aria-hidden="true" />
-        </Button>
+          {newest.length > 0 && (
+            <section aria-label="Mới thêm vào">
+              <div className="section-header">
+                <h2>
+                  <Download size={16} aria-hidden="true" /> Mới thêm vào
+                </h2>
+              </div>
+              <div className="lib-tile-row">
+                {newest.map((manga) => (
+                  <MangaTile key={manga.id} manga={manga} onToggleFavorite={(m) => void toggleFavorite(m)} />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <aside className="library-aside page-stack">
+          <section className="panel" aria-label="Thống kê thư viện">
+            <h2 className="panel__title">
+              <Layers size={16} aria-hidden="true" /> Thống kê thư viện
+            </h2>
+            {stats.state === "loading" && <Skeleton height="6rem" label="Đang tải thống kê" />}
+            {stats.state === "error" && (
+              <p className="queue-error" role="alert">
+                {normalizeIpcError(stats.error).message}
+              </p>
+            )}
+            {stat && (
+              <>
+                <div className="lib-stats">
+                  <StatTile
+                    icon={<BookOpen size={15} aria-hidden="true" />}
+                    value={String(stat.savedMangas)}
+                    label="Tổng truyện"
+                  />
+                  <StatTile
+                    icon={<Download size={15} aria-hidden="true" />}
+                    value={(stat.totalChapters ?? 0).toLocaleString("vi-VN")}
+                    label="Tổng chương"
+                  />
+                  <StatTile
+                    icon={<Layers size={15} aria-hidden="true" />}
+                    value={formatBytes(stat.localSizeBytes)}
+                    label="Dung lượng"
+                  />
+                </div>
+                {capacity !== null && usedPercent !== null ? (
+                  <p className="muted lib-capacity">
+                    <span className="lib-progress lib-progress--thin" role="img" aria-label={`Đã dùng ${usedPercent}% dung lượng ổ`}>
+                      <span className="lib-progress__bar" style={{ width: `${usedPercent}%` }} />
+                    </span>
+                    <span className="lib-capacity__text">
+                      Đã dùng {formatBytes(usedBytes)} / {formatBytes(capacity)} · {usedPercent}%
+                    </span>
+                  </p>
+                ) : (
+                  <p className="muted lib-capacity">
+                    Không đọc được dung lượng ổ đĩa — chỉ hiển thị dung lượng thư viện
+                    ({formatBytes(usedBytes)}).
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+
+          {stat && (
+            <section className="panel" aria-label="Bộ lọc nhanh">
+              <h2 className="panel__title">
+                <Check size={16} aria-hidden="true" /> Bộ lọc nhanh
+              </h2>
+              <div className="lib-quick">
+                {(
+                  [
+                    { id: "all", label: "Tất cả", value: stat.savedMangas, icon: <LayoutGrid size={14} aria-hidden="true" /> },
+                    { id: "downloaded", label: "Đã tải", value: stat.downloadedMangas ?? 0, icon: <Download size={14} aria-hidden="true" /> },
+                    { id: "reading", label: "Đang đọc", value: stat.reading ?? 0, icon: <Clock size={14} aria-hidden="true" /> },
+                    { id: "completed", label: "Hoàn thành", value: stat.completed ?? 0, icon: <Trophy size={14} aria-hidden="true" /> },
+                    { id: "favorite", label: "Yêu thích", value: stat.favorites, icon: <Heart size={14} aria-hidden="true" /> },
+                    { id: "missing", label: "Thiếu file", value: stat.missing ?? 0, icon: <ShieldAlert size={14} aria-hidden="true" /> },
+                  ] as const
+                ).map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={`lib-quick__tile${filter === entry.id ? " lib-quick__tile--on" : ""}`}
+                    aria-pressed={filter === entry.id}
+                    onClick={() => {
+                      setFilter(entry.id);
+                      setOffset(0);
+                    }}
+                  >
+                    <span className="lib-quick__icon" aria-hidden="true">
+                      {entry.icon}
+                    </span>
+                    <span className="lib-quick__text">
+                      <span className="lib-quick__label">{entry.label}</span>
+                      <span className="muted lib-quick__value">{entry.value}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {stat.paused ? (
+                <p className="muted lib-quick__note">
+                  <Pause size={12} aria-hidden="true" /> {stat.paused} chương đang tạm dừng trong hàng đợi
+                  — mở Trạm tải để tiếp tục.
+                </p>
+              ) : null}
+            </section>
+          )}
+
+          {highlight && (
+            <section className="panel" aria-label="Đọc tiếp nổi bật">
+              <h2 className="panel__title">
+                <BookOpen size={16} aria-hidden="true" /> Đọc tiếp nổi bật
+              </h2>
+              <div className="lib-feature">
+                <Link to={`/library/${highlight.id}`} className="lib-feature__art" aria-label={`Mở ${highlight.title}`}>
+                  <Cover manga={highlight} size="wide" />
+                </Link>
+                <div className="lib-feature__body">
+                  <Link to={`/library/${highlight.id}`} className="lib-feature__title">
+                    {highlight.title}
+                  </Link>
+                  <GenreChips manga={highlight} />
+                  <p className="muted lib-feature__meta">
+                    {highlight.downloadedChapters}/{highlight.totalChapters} chương offline
+                  </p>
+                  {highlight.description && (
+                    <p className="lib-feature__desc">{highlight.description.slice(0, 220)}</p>
+                  )}
+                  <Button to={`/library/${highlight.id}`} variant="primary">
+                    <BookOpen size={14} aria-hidden="true" /> Đọc tiếp
+                  </Button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section className="panel" aria-label="Hoạt động gần đây">
+            <h2 className="panel__title">
+              <Clock size={16} aria-hidden="true" /> Hoạt động gần đây
+            </h2>
+            {activity.length === 0 ? (
+              <p className="muted">Chưa có hoạt động nào được ghi lại.</p>
+            ) : (
+              <ul className="lib-activity">
+                {activity.slice(0, 5).map((entry, index) => (
+                  <li key={`${entry.text}-${index}`}>
+                    <span className="lib-activity__icon" aria-hidden="true">
+                      {entry.icon}
+                    </span>
+                    <span className="lib-activity__text">{entry.text}</span>
+                    <span className="muted lib-activity__age">{relativeAge(new Date(entry.at).toISOString())}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
       </div>
+
+      {actionError && (
+        <p className="queue-error" role="alert">
+          {actionError}
+        </p>
+      )}
     </div>
   );
 }

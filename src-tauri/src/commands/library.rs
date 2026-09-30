@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::domain::{
-    LibraryMangaDto, LibraryStatsDto, PagedResult, ReconcileReportDto, RemoveMangaFilesDto,
+    LibraryGenreDto, LibraryMangaDto, LibraryStatsDto, PagedResult, ReconcileReportDto,
+    RemoveMangaFilesDto,
 };
 use crate::error::AppError;
 use crate::services::library_service;
@@ -15,6 +16,7 @@ pub async fn library_list(
     query: Option<String>,
     sort: Option<String>,
     filter: Option<String>,
+    genre: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
     state: tauri::State<'_, AppState>,
@@ -26,6 +28,7 @@ pub async fn library_list(
         query.as_deref(),
         sort.as_deref(),
         filter.as_deref(),
+        genre.as_deref(),
         limit,
         offset,
     )
@@ -36,6 +39,14 @@ pub async fn library_list(
         limit,
         offset,
     })
+}
+
+/// Genres present in the local library, with our own per-genre story counts.
+#[tauri::command]
+pub async fn library_genres(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<LibraryGenreDto>, AppError> {
+    library_service::genres(&state.db).await
 }
 
 #[tauri::command]

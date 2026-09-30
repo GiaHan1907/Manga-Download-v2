@@ -2,6 +2,7 @@ import * as desktop from "../shared/api/desktop";
 import { normalizeIpcError } from "../shared/api/desktop";
 import type {
   DownloadedChapterDto,
+  LibraryGenreDto,
   LibraryMangaDto,
   ReconcileReportDto,
   RemoveMangaFilesDto,
@@ -15,9 +16,11 @@ export interface LibraryApi {
     query?: string;
     sort?: string;
     filter?: string;
+    genre?: string;
     limit: number;
     offset: number;
   }): Promise<PagedResult<LibraryMangaDto>>;
+  genres(): Promise<LibraryGenreDto[]>;
   downloadedChapters(mangaId: string): Promise<DownloadedChapterDto[]>;
   reconcile(): Promise<ReconcileReportDto>;
   removeChapter(chapterId: string): Promise<void>;
@@ -40,6 +43,7 @@ function rethrow(err: unknown): never {
 
 export const libraryApi: LibraryApi = {
   list: (args) => desktop.libraryList(args).catch(rethrow),
+  genres: () => desktop.libraryGenres().catch(rethrow),
   downloadedChapters: async (mangaId) => {
     try {
       const result = await desktop.libraryDownloadedChapters(mangaId);

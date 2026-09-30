@@ -218,14 +218,49 @@ describe("S1/S2 review-round-2 boundaries", () => {
       if (cmd === "app_set_manga_favorite") {
         return Promise.reject({ code: "NOT_FOUND", message: "Bản ghi không tồn tại.", retryable: false });
       }
+      // The Library's hero and side column read these; a rejected call would
+      // raise its own role="alert" and steal the assertion below.
+      if (cmd === "library_stats") {
+        return Promise.resolve({
+          savedMangas: 1,
+          totalChapters: 3,
+          downloadedChapters: 0,
+          downloadedMangas: 0,
+          localSizeBytes: 0,
+          favorites: 0,
+          reading: 0,
+          completed: 0,
+          paused: 0,
+          missing: 0,
+        });
+      }
+      if (cmd === "storage_status") {
+        return Promise.resolve({
+          libraryBytes: 0,
+          cacheBytes: 0,
+          stagingDirs: 0,
+          activeTasks: 0,
+          rootAvailable: true,
+          approximate: true,
+          customRoot: false,
+          rootLinkOk: true,
+          volumeTotalBytes: null,
+          volumeFreeBytes: null,
+        });
+      }
+      if (cmd === "library_genres" || cmd === "app_list_read_history") {
+        return Promise.resolve(cmd === "library_genres" ? [] : { items: [], total: 0, limit: 3, offset: 0 });
+      }
       return Promise.reject(new Error("Unknown command"));
     });
 
     renderAt("/library");
-    const star = await screen.findByRole("button", { name: "Yêu thích Manga Đã Đăng Ký" });
-    fireEvent.click(star);
+    // The same story can appear in more than one rail, so any of its favorite
+    // buttons proves the failure path — click the first.
+    const stars = await screen.findAllByRole("button", { name: "Yêu thích Manga Đã Đăng Ký" });
+    fireEvent.click(stars[0]);
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Bản ghi không tồn tại.");
-    expect(await screen.findByText("Manga Đã Đăng Ký")).toBeDefined();
+    expect((await screen.findAllByText("Manga Đã Đăng Ký")).length).toBeGreaterThan(0);
   });
 });

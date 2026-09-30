@@ -97,7 +97,8 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 | Command | Input (camelCase) | Output | Ghi chú |
 |---|---|---|---|
-| `library_list` | `{ query?, sort?('lastRead'│'recentDownload'│'title'│'chapters'), filter?('all'│'downloaded'│'partial'│'favorite'), limit(1..100), offset }` | `PagedResult<LibraryMangaDto>` | aggregate 1 query (counts, size, progress, hasMissing) — không N+1; query escape LIKE |
+| `library_list` | `{ query?, sort?('lastRead'│'recentDownload'│'title'│'chapters'), filter?('all'│'downloaded'│'partial'│'favorite'│'alerts'│'reading'│'completed'│'missing'), genre?, limit(1..100), offset }` | `PagedResult<LibraryMangaDto>` | aggregate 1 query (counts, size, progress, hasMissing) — không N+1; query escape LIKE. Library redesign: thêm `genres[]` + `description` trên mỗi dòng và `genre` (lọc qua `manga_genres`, EXIST nên không nhân bản dòng); ba filter mới `reading`/`completed`/`missing` chính là bộ đếm ở "Bộ lọc nhanh" — test `t11_quick_filters_match_the_counts_they_display` buộc hai bên khớp nhau |
+| `library_genres` | — | `LibraryGenreDto[] { genre, mangaCount }` | Thể loại CÓ TRONG THƯ VIỆN local, đếm từ `manga_genres` của chính app (không phải số liệu nguồn). Rỗng → UI ẩn pill, không hiện danh sách bịa |
 | `library_get_downloaded_chapters` | `{ mangaId }` | `{ chapters: DownloadedChapterDto[] }` | `artifactOk` = Rust fs-check tại lúc gọi |
 | `library_reconcile` | — | `{ checked, healthy, missing, corrupted }` | phi phá hủy: missing⇒clear cờ offline, corrupted⇒clear cờ + GIỮ file; không bao giờ xóa |
 | `library_remove_chapter` | `{ chapterId }` | — | path lấy từ DB, validate relpath + under library root; **xóa disk trước, DB sau**; fail ⇒ `DELETE_FAILED`, trạng thái nguyên |
@@ -113,8 +114,8 @@ Frontend parse qua `normalizeIpcError(err): AppError` (`contracts.ts`). Code l�
 
 | Command | Input | Output | Ghi chú |
 |---|---|---|---|
-| `library_stats` | — | `LibraryStatsDto { savedMangas, downloadedChapters, localSizeBytes, favorites }` | 1 SQL aggregate cho Home thật; không N+1 |
-| `storage_status` | — | `StorageStatusDto { libraryBytes, cacheBytes, stagingDirs, activeTasks, rootAvailable, approximate:true }` | kích thước từ DB + walk root app-owned; symlink bỏ qua; **không absolute path** |
+| `library_stats` | — | `LibraryStatsDto { savedMangas, totalChapters, downloadedChapters, downloadedMangas, localSizeBytes, favorites, reading, completed, paused, missing }` | 1 SQL aggregate cho Home + "Bộ lọc nhanh" của Thư viện; không N+1. `downloadedMangas` là số TRUYỆN có ≥1 chương offline (khác `downloadedChapters`), `paused` đếm chương trình trong hàng đợi nên UI diễn đạt bằng chữ, không gọi nó là "truyện tạm dừng" |
+| `storage_status` | — | `StorageStatusDto { libraryBytes, cacheBytes, stagingDirs, activeTasks, rootAvailable, approximate:true, customRoot, rootLinkOk, volumeTotalBytes\|null, volumeFreeBytes\|null }` | kích thước từ DB + walk root app-owned; symlink bỏ qua; **không absolute path**. `volume*Bytes` là dung lượng Ổ THẬT của volume chứa thư viện (`GetDiskFreeSpaceExW` khai báo FFI tay, không thêm dependency; junction được đi theo nên đúng ổ người dùng chọn). `null` khi ngoài Windows hoặc gọi lỗi → UI bỏ thanh dung lượng, **không thay bằng quota bịa** |
 | `clear_regenerable_cache` | — | `CacheCleanupDto { removedDirs, freedBytes, keptActiveDirs }` | chỉ staging của task terminal/unknown + covers; active-set chặn tuyệt đối; idempotent; cũng chạy tự động ở startup sau recovery |
 
 **Settings keys mới** (`AppSettingsDto`): `notificationsEnabled` (bool, default true) — Rust notify theo chapter-terminal; `closeToTray` (bool, default false) — X ẩn cửa sổ. Validate trong `domain/settings.rs`; `RuntimeFlags` mirror cho sync path; command save/reset đồng bộ flag sau persist. UI bỏ option `pdf` (engine vẫn từ chối pdf tại queue như cũ).

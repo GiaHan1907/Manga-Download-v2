@@ -248,6 +248,9 @@ pub struct ReaderManifestDto {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryProgressDto {
     pub chapter_id: String,
+    /// The saved chapter's own title, so the Library can name the position
+    /// instead of showing a bare id.
+    pub chapter_title: Option<String>,
     pub page_index: i64,
     pub page_total: Option<i64>,
     pub updated_at: String,
@@ -258,8 +261,14 @@ pub struct LibraryProgressDto {
 pub struct LibraryMangaDto {
     pub id: String,
     pub title: String,
+    /// The source's own synopsis, shown by the Library's "read next" panel.
+    pub description: Option<String>,
     pub author: Option<String>,
     pub status: String,
+    /// Genres the source published when this story was saved. Empty for manga
+    /// saved before the genre table existed — the UI shows no chip rather than
+    /// inventing one.
+    pub genres: Vec<String>,
     /// Cover trio for `get_manga_cover` (path key only — never a URL).
     pub source_id: String,
     pub source_manga_id: String,
@@ -275,6 +284,14 @@ pub struct LibraryMangaDto {
     pub has_missing: bool,
     /// Feature plan F1: unacknowledged new-chapter alerts for this manga.
     pub new_alerts: i64,
+}
+
+/// One genre present in the local library and how many saved stories carry it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryGenreDto {
+    pub genre: String,
+    pub manga_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -312,9 +329,21 @@ pub struct SettingsPatchInput {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryStatsDto {
     pub saved_mangas: i64,
+    pub total_chapters: i64,
     pub downloaded_chapters: i64,
     pub local_size_bytes: i64,
     pub favorites: i64,
+    /// Stories with at least one verified offline chapter — the Library's
+    /// "đã tải" count, distinct from the chapter total.
+    pub downloaded_mangas: i64,
+    /// Stories with a reading-progress row — the Library's "đang đọc" count.
+    pub reading: i64,
+    /// Stories the source itself marks completed.
+    pub completed: i64,
+    /// Download tasks sitting in the queue paused.
+    pub paused: i64,
+    /// Stories with at least one recorded-but-missing artifact.
+    pub missing: i64,
 }
 
 /// Phase 08 — storage accounting. Sizes are approximate by construction
@@ -329,6 +358,11 @@ pub struct StorageStatusDto {
     pub active_tasks: i64,
     pub root_available: bool,
     pub approximate: bool,
+    /// Real volume capacity of the filesystem holding the library, in bytes.
+    /// `None` off Windows or when the OS call fails — the UI drops the bar
+    /// rather than showing a made-up quota.
+    pub volume_total_bytes: Option<i64>,
+    pub volume_free_bytes: Option<i64>,
     /// Custom download root (junction into a user-chosen folder) is active.
     pub custom_root: bool,
     /// False when custom but the link/target is missing — never render that

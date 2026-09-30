@@ -69,6 +69,7 @@ async fn t09_perf_library_aggregates_and_search() {
             None,
             Some("title"),
             Some("downloaded"),
+            None,
             24,
             0,
         )
@@ -84,6 +85,7 @@ async fn t09_perf_library_aggregates_and_search() {
             &pool,
             Some("Perf Manga 999"),
             Some("lastRead"),
+            None,
             None,
             24,
             0,

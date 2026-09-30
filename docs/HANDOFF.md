@@ -44,6 +44,20 @@
 
 **Chưa xác nhận:** cả 3 kỳ bảng xếp hạng đang trả cùng một truyện ở ngôi đầu — mới chứng minh mỗi kỳ trả 10 dòng hợp lệ và kỳ lạ bị từ chối, chưa chứng minh 3 danh sách THỰC SỰ khác nhau.
 
+### 1e. Thư viện theo mockup — 2026-09-30 (user: "Sửa lại giao diện Thư Viện giống hệt mockup")
+
+Mockup mới (`Desktop\ChatGPT Image Sep 30, 2026, 11_02_45 AM.png`) vẽ Thư viện có dữ liệu CHƯA TỒN TẠI trong app, nên backend phải làm trước (user chọn "Đủ 100% mockup (làm backend)"):
+
+- **migration `0011_manga_genres.sql`** (schema 10→11): bảng `manga_genres(manga_id, genre)` PK ghép, index theo genre. Thể loại được ghi trong ĐÚNG transaction `discovery_service::save` (xoá-and-ghi lại toàn bộ mỗi lần lưu/nhập lại metadata, nên refresh không để lại tag cũ). Nguồn đã có `RemoteMangaDetail.genres` (adapter cắt 12) — trước đây bị vứt.
+- `library_list`: thêm `genres[]` + `description` mỗi dòng và tham số `genre` (EXISTS, không nhân bản dòng). Ba filter mới `reading` / `completed` / `missing` để đúng 6 ô "Bộ lọc nhanh" đều bấm được thật.
+- `library_stats` mở rộng: `totalChapters`, `downloadedMangas` (số TRUYỆN có ≥1 chương offline — khác số chương), `reading`, `completed`, `paused`, `missing`. Test `t11_quick_filters_match_the_counts_they_display` buộc mỗi con số hiển thị = tổng của filter cùng tên, chống "đếm một đường, lọc một nẻo".
+- **`library_genres`** (lệnh mới): thể loại có trong thư viện + số truyện của chính app.
+- **Dung lượng ổ thật**: `storage::volume_space()` gọi `GetDiskFreeSpaceExW` qua FFI tự khai báo (`#[link(name="kernel32")]`) — KHÔNG thêm dependency mới. Đi theo junction nên số liệu đúng ổ người dùng chọn. `null` ngoài Windows/lỗi → UI bỏ thanh, không thay bằng quota bịa.
+
+**Bỏ vì không có nguồn số liệu:** ★ rating (9.1/9.2 trong mockup), và "500 GB" cố định. "Tạm dừng" trong mockup là số CHƯƠNG trong hàng đợi nên hiển thị thành ghi chú chữ, không phải ô đếm truyện.
+
+Layout: hero "Thư viện của bạn" (ảnh = bìa truyện đầu tiên đang đọc, không phải artwork), thanh tìm kiếm + chuyển Lưới/Danh sách, hàng pill Thể loại/Trạng thái/Sắp xếp + "Tổng N truyện", rail "Tiếp tục đọc" (3 card ngang có % tiến độ), lưới "Tất cả truyện" (6/hàng), "Mới thêm vào", cột phải 4 panel (Thống kê + thanh dung lượng, Bộ lọc nhanh, Đọc tiếp nổi bật có description, Hoạt động gần đây). Hai nút "Kiểm tra file"/"Kiểm tra chương mới" được GIỮ (chức năng thật) ở một hàng nhỏ trong hero.
+
 ### 1c. Feature plan (F2 + F5 + F1 + F4, 2026-09-23)
 
 **F2** dọn lịch sử download: chỉ dòng terminal; completed còn artifact trên đĩa được GIỮ (row là bằng chứng offline); DELETE có guard status nên task vừa retry giữa chừng không bị xóa; `download_pages` cascade; không bao giờ xóa file. **F5** bulk retry mọi task lỗi (FIFO cap 200, đi qua guarded retry từng task — race-safe) + cancel mọi tác vụ chưa xong của một manga (worker nhận cancel flag hợp tác). UI: Dialog "Dọn lịch sử" (chọn trạng thái + tuổi) + "Thử lại tất cả lỗi" ở Downloads; "Hủy mọi tác vụ của truyện" ở LocalMangaPage; phản hồi qua toast. Test: 4 Rust (service+repo) + 3 vitest wrapper IPC. **F1 đã làm sớm hơn lịch v1.1:** watcher ~6h qua `manga_detail` adapter (pacing/GuardedHttp giữ nguyên), schema 6 `chapter_alerts`, per-manga opt-in, notification tổng + event `library-alerts`, filter "Có chương mới" + badge, banner chi tiết + "Kiểm tra chương mới" (rate-limit 60s). **F4 đã làm:** `read_history` (schema 7) UPSERT trong transaction save_progress khi đến 2 trang cuối; lệnh list/clear + section "Đã đọc gần đây" (list + xóa) trong LocalMangaPage. **F3 đã làm:** đọc CBZ STORE+DEFLATE (`flate2`) + import CBZ ngoài qua dialog Rust-side (`tauri-plugin-dialog`, không capability JS). **Đã làm thêm (2026-09-23, từ live probe R-1):** AJAX `ajax/chapters/` cho nguồn holder-pattern + allowlist `imageHosts` per-source (migration 8, tối đa 4 exact-host, chỉ dùng cho request ảnh). **Nút tải nhanh 5/10/toàn bộ chương chưa tải** (LocalMangaPage, theo thứ tự mục lục): frontend `queueMany` chia lô 100/chuỗi gọi `queue_downloads` (mirror `MAX_BATCH_SIZE` phía Rust) — **không đổi IPC/capability**. **Chưa làm:** F6 updater (owner-gate).

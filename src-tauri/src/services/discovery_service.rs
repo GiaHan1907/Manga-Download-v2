@@ -792,6 +792,24 @@ pub async fn save(
         }
     };
 
+    // Genres come from the same trusted detail fetch, so the set is rewritten
+    // wholesale: a refresh must not leave stale tags behind.
+    sqlx::query("DELETE FROM manga_genres WHERE manga_id = ?1")
+        .bind(&manga_id)
+        .execute(&mut *tx)
+        .await?;
+    let mut genre_order: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for genre in &detail.genres {
+        if genre.trim().is_empty() || !genre_order.insert(genre.as_str()) {
+            continue;
+        }
+        sqlx::query("INSERT INTO manga_genres (manga_id, genre) VALUES (?1, ?2)")
+            .bind(&manga_id)
+            .bind(genre.trim())
+            .execute(&mut *tx)
+            .await?;
+    }
+
     let mut saved_chapters = 0_i64;
     for chapter in &detail.chapters {
         let existing_chapter: Option<(String,)> = sqlx::query_as(

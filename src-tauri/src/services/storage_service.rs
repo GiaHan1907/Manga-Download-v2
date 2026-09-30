@@ -43,6 +43,7 @@ pub async fn status(pool: &SqlitePool, app_data_dir: &Path) -> Result<StorageSta
     let covers_bytes = dir_size(&app_data_dir.join("covers"));
     let root = crate::services::storage_root::current(pool, app_data_dir).await?;
     let link_ok = root.link_ok;
+    let volume = storage::volume_space(&library_root);
     Ok(StorageStatusDto {
         library_bytes: library_bytes.unwrap_or(0),
         cache_bytes: (cache_bytes + covers_bytes) as i64,
@@ -56,6 +57,8 @@ pub async fn status(pool: &SqlitePool, app_data_dir: &Path) -> Result<StorageSta
         approximate: true,
         custom_root: root.is_custom,
         root_link_ok: link_ok,
+        volume_total_bytes: volume.map(|(total, _)| total),
+        volume_free_bytes: volume.map(|(_, free)| free),
     })
 }
 

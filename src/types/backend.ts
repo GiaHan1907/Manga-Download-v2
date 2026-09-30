@@ -111,6 +111,13 @@ export type LibraryStatsDto = {
   downloadedChapters: number;
   localSizeBytes: number;
   favorites: number;
+  /** Rust sends these; older dev fixtures omit them, so treat as optional. */
+  totalChapters?: number;
+  downloadedMangas?: number;
+  reading?: number;
+  completed?: number;
+  paused?: number;
+  missing?: number;
 };
 
 /// Phase 08 — storage accounting (approximate by contract; no paths).
@@ -123,6 +130,11 @@ export type StorageStatusDto = {
   approximate: boolean;
   customRoot: boolean;
   rootLinkOk: boolean;
+  /** Real volume capacity of the drive holding the library. Absent off
+   *  Windows or when the OS call fails — the UI drops the bar rather than
+   *  showing an invented quota. */
+  volumeTotalBytes?: number | null;
+  volumeFreeBytes?: number | null;
 };
 
 export type DownloadRootDto = {

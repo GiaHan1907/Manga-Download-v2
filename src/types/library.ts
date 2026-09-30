@@ -4,10 +4,27 @@ import type { ReadingProgressDto } from "./backend";
 /// paths: pages are (chapterId, index) addressed and bytes come per page.
 
 export type LibrarySort = "lastRead" | "recentDownload" | "title" | "chapters";
-export type LibraryFilter = "all" | "downloaded" | "partial" | "favorite" | "alerts";
+export type LibraryFilter =
+  | "all"
+  | "downloaded"
+  | "partial"
+  | "favorite"
+  | "alerts"
+  | "reading"
+  | "completed"
+  | "missing";
+
+/// One genre present in the local library. The count is OUR row count, so it
+/// can be displayed; it is never the source's story total.
+export type LibraryGenreDto = {
+  genre: string;
+  mangaCount: number;
+};
 
 export type LibraryProgressDto = {
   chapterId: string;
+  /** The saved chapter's own title, for the "Tiếp tục đọc" rail. */
+  chapterTitle?: string | null;
   pageIndex: number;
   pageTotal: number | null;
   updatedAt: string;
@@ -16,8 +33,13 @@ export type LibraryProgressDto = {
 export type LibraryMangaDto = {
   id: string;
   title: string;
+  /** The source's own synopsis; the Library's highlight panel quotes it. */
+  description?: string | null;
   author: string | null;
   status: "ongoing" | "completed" | "unknown";
+  /** Genres saved with the story. Rust always sends the field; dev fixtures
+   *  may omit it, so treat undefined as "no genres known". */
+  genres?: string[];
   /** Cover trio for get_manga_cover (path key only — never a URL). */
   sourceId: string;
   sourceMangaId: string;
