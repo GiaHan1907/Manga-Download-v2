@@ -754,22 +754,70 @@ const QQ_BROWSE_CAP: usize = 42;
 /// Catalog route for one filtered page. Live recon (2026-09-30) found
 /// `the-loai/<slug>`, `truyen-dang-theo-doi`, `truyen-hoan-thanh` and
 /// `truyen-moi-cap-nhat`, all paginating as `/trang-N`.
+/// The catalog page's own sort `?select` (recon 2026-09-30) offers exactly six
+/// orderings; anything else is rejected rather than silently defaulted.
+fn qq_sort_value(sort: &str) -> Result<u8, SourceError> {
+    match sort {
+        "newest-desc" => Ok(0),
+        "newest-asc" => Ok(1),
+        "updated-desc" => Ok(2),
+        "updated-asc" => Ok(3),
+        "views-desc" => Ok(4),
+        "views-asc" => Ok(5),
+        _ => Err(SourceError::MalformedUrl),
+    }
+}
+
+/// Genre and status DO combine on a genre page (`?status=0|2`) — the standalone
+/// `truyen-*` routes only exist for a status on its own. Sorting is a genre
+/// page feature only (`?sort=0..5`).
 fn qq_browse_path(
     genre: Option<&str>,
     status: Option<&str>,
+    sort: Option<&str>,
     page: u32,
 ) -> Result<String, SourceError> {
-    let base = match (genre, status) {
-        (Some(slug), _) => format!("the-loai/{slug}"),
-        (None, Some("ongoing")) => "truyen-dang-theo-doi".to_string(),
-        (None, Some("completed")) => "truyen-hoan-thanh".to_string(),
-        (None, Some("new") | None) => "truyen-moi-cap-nhat".to_string(),
-        (None, Some(_)) => return Err(SourceError::MalformedUrl),
+    let base = match genre {
+        Some(slug) => format!("the-loai/{slug}"),
+        None => match status {
+            Some("ongoing") => "truyen-dang-theo-doi",
+            Some("completed") => "truyen-hoan-thanh",
+            Some("new") | None => "truyen-moi-cap-nhat",
+            Some(_) => return Err(SourceError::MalformedUrl),
+        }
+        .to_string(),
     };
-    Ok(if page > 1 {
+    let path = if page > 1 {
         format!("{base}/trang-{page}")
     } else {
         base
+    };
+    let mut query: Vec<String> = Vec::new();
+    if genre.is_some() {
+        let status_value = match status {
+            Some("ongoing") => Some(0),
+            Some("completed") => Some(2),
+            // "new" is the genre page's own default order, so no param.
+            _ => None,
+        };
+        if let Some(value) = status_value {
+            query.push(format!("status={value}"));
+        }
+    }
+    if let Some(sort) = sort {
+        // Live probe 2026-09-30: `?sort=` reorders a genre page but changes
+        // nothing on the three `truyen-*` status routes (identical order). The
+        // source only publishes the sort select on genre pages, so asking for
+        // a sort anywhere else is refused rather than quietly ignored.
+        if genre.is_none() {
+            return Err(SourceError::UnsupportedOperation);
+        }
+        query.push(format!("sort={}", qq_sort_value(sort)?));
+    }
+    Ok(if query.is_empty() {
+        path
+    } else {
+        format!("{path}?{}", query.join("&"))
     })
 }
 
@@ -1155,13 +1203,14 @@ impl SourceAdapter for MadaraGeneric {
         &self,
         genre: Option<&str>,
         status: Option<&str>,
+        sort: Option<&str>,
         page: u32,
     ) -> Result<RemoteSearchPage, SourceError> {
         if self.profile != SiteProfile::TruyenQQ {
             return Err(SourceError::UnsupportedOperation);
         }
         let page = page.max(1);
-        let path = qq_browse_path(genre, status, page)?;
+        let path = qq_browse_path(genre, status, sort, page)?;
         let html = self
             .http
             .get_text(&format!("{}{}", self.base, path))
@@ -2462,6 +2511,106 @@ mod tests {
         assert!(len > 1000);
     }
 
+    /// Two open questions, both answerable only from the live site:
+    /// (1) does a catalog page expose a sort control we can drive, and
+    /// (2) do the three ranking periods actually return different lists?
+    #[tokio::test]
+    #[ignore = "live network probe: TruyenQQ sort vocabulary and ranking period differences"]
+    async fn live_builtin_qq_sort_and_periods_recon() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+
+        // 1. What sort controls does a genre page itself publish?
+        let html = adapter
+            .http
+            .get_text(&format!("{}the-loai/action-26", adapter.base))
+            .await
+            .expect("genre page");
+        {
+            let document = Html::parse_document(&html);
+            for select in document.select(&Selector::parse("select").unwrap()) {
+                let name = select.value().attr("name").unwrap_or("-");
+                let options: Vec<String> = select
+                    .select(&Selector::parse("option").unwrap())
+                    .map(|o| {
+                        format!(
+                            "{}={}",
+                            o.value().attr("value").unwrap_or("-"),
+                            o.text().collect::<String>().trim()
+                        )
+                    })
+                    .take(10)
+                    .collect();
+                println!("RECON SORT select name={name} options={options:?}");
+            }
+            let mut hrefs: HashSet<String> = HashSet::new();
+            for anchor in document.select(&Selector::parse("a[href]").unwrap()) {
+                let Some(href) = anchor.value().attr("href") else {
+                    continue;
+                };
+                let text = anchor.text().collect::<String>().trim().to_string();
+                let interesting = href.contains('?')
+                    || href.contains("danh-sach")
+                    || href.contains("sap-xep")
+                    || text.chars().count() < 24
+                        && (text.contains("Hot")
+                            || text.contains("hot")
+                            || text.contains("ới")
+                            || text.contains("hi hoàn thành")
+                            || text.contains("ượt xem"));
+                if interesting {
+                    hrefs.insert(format!("{href} | {text}"));
+                }
+            }
+            let mut hrefs: Vec<String> = hrefs.into_iter().collect();
+            hrefs.sort();
+            println!("RECON SORT links ({})", hrefs.len());
+            for line in hrefs.iter().take(25) {
+                println!("  {line}");
+            }
+        }
+
+        // 2. Do the ranking periods actually differ?
+        let mut lists: Vec<(String, Vec<String>)> = Vec::new();
+        for period in ["day", "week", "month"] {
+            let rail = adapter.ranking(period).await.unwrap_or_else(|error| {
+                println!("RECON RANKING {period} error {error:?}");
+                Vec::new()
+            });
+            println!("RECON RANKING {period} = {} rows", rail.len());
+            lists.push((
+                period.to_string(),
+                rail.iter()
+                    .map(|item| item.summary.source_manga_id.clone())
+                    .collect(),
+            ));
+        }
+        for a in 0..lists.len() {
+            for b in (a + 1)..lists.len() {
+                let shared = lists[a]
+                    .1
+                    .iter()
+                    .filter(|slug| lists[b].1.contains(slug))
+                    .count();
+                println!(
+                    "RECON RANKING overlap {}∩{} = {shared}/{}",
+                    lists[a].0,
+                    lists[b].0,
+                    lists[a].1.len().min(lists[b].1.len())
+                );
+            }
+        }
+        for (period, slugs) in &lists {
+            println!("  {period}: {:?}", slugs.iter().take(3).collect::<Vec<_>>());
+        }
+    }
+
     /// Browse must reuse the catalog grid the ranking rails already parse —
     /// but only if the genre/status pages really use it. Count the SAME
     /// selectors there before writing any implementation.
@@ -2593,7 +2742,7 @@ mod tests {
         );
 
         let first = adapter
-            .browse(Some("action-26"), None, 1)
+            .browse(Some("action-26"), None, None, 1)
             .await
             .expect("browse p1");
         println!(
@@ -2621,7 +2770,7 @@ mod tests {
         );
 
         let second = adapter
-            .browse(Some("action-26"), None, 2)
+            .browse(Some("action-26"), None, None, 2)
             .await
             .expect("browse p2");
         let overlap = second
@@ -2645,41 +2794,225 @@ mod tests {
         );
 
         let done = adapter
-            .browse(None, Some("completed"), 1)
+            .browse(None, Some("completed"), None, 1)
             .await
             .expect("completed");
         println!("LIVE BROWSE completed={}", done.items.len());
         assert!(!done.items.is_empty());
     }
 
+    /// The "Sắp xếp" pill is only honest if `?sort=` actually reorders the
+    /// grid and survives `/trang-N` — a source that ignored the parameter
+    /// would make the control a lie. The same probe settles whether a genre
+    /// and a status combine or exclude each other.
+    #[tokio::test]
+    #[ignore = "live network probe: TruyenQQ ?sort= reorders, pages, and combines with status"]
+    async fn live_builtin_qq_sort_probe() {
+        let adapter = MadaraGeneric::built_in(
+            "truyenqq",
+            "TruyenQQ",
+            "https://truyenqqko.com/",
+            &[],
+            SiteProfile::TruyenQQ,
+        )
+        .unwrap();
+        let ids = |page: &RemoteSearchPage| -> Vec<String> {
+            page.items
+                .iter()
+                .map(|item| item.source_manga_id.clone())
+                .collect()
+        };
+
+        let mut orders: Vec<(String, Vec<String>)> = Vec::new();
+        for sort in ["newest-desc", "updated-desc", "views-desc", "views-asc"] {
+            match adapter.browse(Some("action-26"), None, Some(sort), 1).await {
+                Ok(page) => {
+                    let list = ids(&page);
+                    println!(
+                        "PROBE SORT {sort} n={} head={:?}",
+                        list.len(),
+                        list.iter().take(3).collect::<Vec<_>>()
+                    );
+                    orders.push((sort.to_string(), list));
+                }
+                Err(error) => println!("PROBE SORT {sort} error {error:?}"),
+            }
+        }
+        assert_eq!(orders.len(), 4, "every advertised sort must resolve a grid");
+        let mut distinct = 0;
+        for a in 0..orders.len() {
+            for b in (a + 1)..orders.len() {
+                let same_order = orders[a].1 == orders[b].1;
+                let shared = orders[b]
+                    .1
+                    .iter()
+                    .filter(|id| orders[a].1.contains(id))
+                    .count();
+                println!(
+                    "PROBE SORT {} vs {} same_order={same_order} shared={shared}/{}",
+                    orders[a].0,
+                    orders[b].0,
+                    orders[a].1.len().min(orders[b].1.len())
+                );
+                if !same_order {
+                    distinct += 1;
+                }
+            }
+        }
+        assert!(
+            distinct >= 3,
+            "the sorts must actually change the ordering, not be ignored"
+        );
+
+        let hot1 = adapter
+            .browse(Some("action-26"), None, Some("views-desc"), 1)
+            .await
+            .expect("sorted p1");
+        let hot2 = adapter
+            .browse(Some("action-26"), None, Some("views-desc"), 2)
+            .await
+            .expect("sorted p2");
+        let overlap = ids(&hot2)
+            .iter()
+            .filter(|id| ids(&hot1).contains(id))
+            .count();
+        println!(
+            "PROBE SORT paged p1={} p2={} overlap={}",
+            hot1.items.len(),
+            hot2.items.len(),
+            overlap
+        );
+        assert!(
+            hot2.items.len() >= 20 && overlap * 2 < hot1.items.len(),
+            "?sort= must survive /trang-N"
+        );
+
+        let plain = adapter
+            .browse(Some("action-26"), None, None, 1)
+            .await
+            .expect("genre only");
+        let combo = adapter
+            .browse(Some("action-26"), Some("completed"), None, 1)
+            .await
+            .expect("genre + status");
+        println!(
+            "PROBE COMBO genre={} genre+status={} head_orphan={}",
+            plain.items.len(),
+            combo.items.len(),
+            ids(&combo)
+                .iter()
+                .filter(|id| !ids(&plain).contains(id))
+                .count()
+        );
+        assert!(!combo.items.is_empty());
+        assert_ne!(
+            ids(&plain),
+            ids(&combo),
+            "status must narrow a genre page, not be silently dropped"
+        );
+
+        // Does a sort mean anything without a genre? Each status route answers
+        // for itself — a route that ignores the parameter must not be offered
+        // a control that pretends to drive it.
+        for status in ["new", "ongoing", "completed"] {
+            let plain = adapter.browse(None, Some(status), None, 1).await;
+            let sorted = adapter
+                .browse(None, Some(status), Some("views-desc"), 1)
+                .await;
+            match (plain, sorted) {
+                (Ok(plain), Ok(sorted)) => println!(
+                    "PROBE SORTONLY status={status} same_order={}",
+                    ids(&plain) == ids(&sorted)
+                ),
+                (plain, sorted) => {
+                    println!("PROBE SORTONLY status={status} plain={plain:?} sorted={sorted:?}")
+                }
+            }
+        }
+
+        let all_three = adapter
+            .browse(Some("action-26"), Some("ongoing"), Some("views-desc"), 2)
+            .await
+            .expect("genre + status + sort, page 2");
+        println!(
+            "PROBE ALL THREE n={} head={:?}",
+            all_three.items.len(),
+            all_three
+                .items
+                .iter()
+                .take(2)
+                .map(|item| item.source_manga_id.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(!all_three.items.is_empty());
+    }
+
     #[test]
     fn qq_browse_path_uses_the_routes_recon_found() {
         assert_eq!(
-            qq_browse_path(Some("action-26"), None, 1).unwrap(),
+            qq_browse_path(Some("action-26"), None, None, 1).unwrap(),
             "the-loai/action-26"
         );
         assert_eq!(
-            qq_browse_path(Some("action-26"), None, 3).unwrap(),
+            qq_browse_path(Some("action-26"), None, None, 3).unwrap(),
             "the-loai/action-26/trang-3"
         );
         assert_eq!(
-            qq_browse_path(None, Some("ongoing"), 1).unwrap(),
+            qq_browse_path(None, Some("ongoing"), None, 1).unwrap(),
             "truyen-dang-theo-doi"
         );
         assert_eq!(
-            qq_browse_path(None, Some("completed"), 2).unwrap(),
+            qq_browse_path(None, Some("completed"), None, 2).unwrap(),
             "truyen-hoan-thanh/trang-2"
         );
         assert_eq!(
-            qq_browse_path(None, Some("new"), 1).unwrap(),
+            qq_browse_path(None, Some("new"), None, 1).unwrap(),
             "truyen-moi-cap-nhat"
         );
         assert_eq!(
-            qq_browse_path(None, None, 1).unwrap(),
+            qq_browse_path(None, None, None, 1).unwrap(),
             "truyen-moi-cap-nhat"
         );
         // An unknown status is rejected rather than silently defaulted.
-        assert!(qq_browse_path(None, Some("yesterday"), 1).is_err());
+        assert!(qq_browse_path(None, Some("yesterday"), None, 1).is_err());
+        assert!(qq_browse_path(None, None, Some("by-vibes"), 1).is_err());
+    }
+
+    #[test]
+    fn qq_browse_path_combines_genre_status_and_sort() {
+        // Recon: a genre page narrows with `?status=0|2` and orders with `?sort=0..5`.
+        assert_eq!(
+            qq_browse_path(Some("action-26"), Some("ongoing"), None, 1).unwrap(),
+            "the-loai/action-26?status=0"
+        );
+        assert_eq!(
+            qq_browse_path(Some("action-26"), Some("completed"), Some("views-desc"), 2).unwrap(),
+            "the-loai/action-26/trang-2?status=2&sort=4"
+        );
+        assert_eq!(
+            qq_browse_path(Some("action-26"), Some("new"), Some("updated-asc"), 1).unwrap(),
+            "the-loai/action-26?sort=3"
+        );
+        // A status route has no sort control, so it is refused, not ignored.
+        assert!(matches!(
+            qq_browse_path(None, Some("new"), Some("updated-asc"), 1),
+            Err(SourceError::UnsupportedOperation)
+        ));
+        // "new" is a genre page's own default order, so no status param is sent.
+        assert_eq!(
+            qq_browse_path(Some("action-26"), Some("new"), None, 1).unwrap(),
+            "the-loai/action-26"
+        );
+        for (name, value) in [
+            ("newest-desc", 0),
+            ("newest-asc", 1),
+            ("updated-desc", 2),
+            ("updated-asc", 3),
+            ("views-desc", 4),
+            ("views-asc", 5),
+        ] {
+            assert_eq!(qq_sort_value(name).unwrap(), value, "{name}");
+        }
     }
 
     /// The advanced-search page builds its form in JS, so its endpoint has to

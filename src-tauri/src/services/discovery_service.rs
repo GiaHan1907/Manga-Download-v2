@@ -538,14 +538,15 @@ pub async fn genres(
     adapter.genres().await.map_err(AppError::Source)
 }
 
-/// One filtered catalog page. Status is a closed set (rejected, never silently
-/// defaulted) and the genre slug is validated before it reaches a URL path.
+/// One filtered catalog page. Status and sort are closed sets (rejected, never
+/// silently defaulted) and the genre slug is validated before it reaches a URL.
 pub async fn browse(
     registry: &SourceRegistry,
     pool: &SqlitePool,
     source_id: &str,
     genre: Option<&str>,
     status: Option<&str>,
+    sort: Option<&str>,
     page: u32,
 ) -> Result<SearchResult, AppError> {
     validate_id(source_id, "sourceId")?;
@@ -556,14 +557,31 @@ pub async fn browse(
             ));
         }
     }
+    if let Some(value) = sort {
+        if !matches!(
+            value,
+            "newest-desc"
+                | "newest-asc"
+                | "updated-desc"
+                | "updated-asc"
+                | "views-desc"
+                | "views-asc"
+        ) {
+            return Err(AppError::validation(
+                "Kiểu sắp xếp không được nguồn hỗ trợ.",
+            ));
+        }
+    }
     if let Some(slug) = genre {
         if !valid_genre_slug(slug) {
             return Err(AppError::validation("Thể loại không hợp lệ."));
         }
     }
-    if genre.is_some() && status.is_some() {
+    if sort.is_some() && genre.is_none() {
+        // The source only publishes its sort control on genre pages; its
+        // status routes answer any `?sort=` with the unchanged list.
         return Err(AppError::validation(
-            "Chỉ lọc theo một tiêu chí: thể loại hoặc trạng thái.",
+            "Chỉ sắp xếp được khi đã chọn thể loại.",
         ));
     }
     if genre.is_none() && status.is_none() {
@@ -572,7 +590,7 @@ pub async fn browse(
     let rows = source_repo::list_sources(pool).await?;
     let adapter = require_enabled(registry, &rows, source_id)?;
     let result = adapter
-        .browse(genre, status, page.max(1))
+        .browse(genre, status, sort, page.max(1))
         .await
         .map_err(AppError::Source)?;
     // One source serves a browse, so a failure is the whole failure — there is

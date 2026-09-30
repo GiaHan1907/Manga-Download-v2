@@ -148,6 +148,7 @@ pub async fn browse_manga(
     source_id: String,
     genre: Option<String>,
     status: Option<String>,
+    sort: Option<String>,
     page: Option<u32>,
     state: State<'_, AppState>,
 ) -> Result<SearchResult, AppError> {
@@ -159,6 +160,7 @@ pub async fn browse_manga(
         &source_id,
         genre.as_deref(),
         status.as_deref(),
+        sort.as_deref(),
         page.unwrap_or(1),
     )
     .await

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CircleDot, History, Search, SlidersHorizontal, Tags, X } from "lucide-react";
+import { ArrowUpDown, CircleDot, History, Search, SlidersHorizontal, Tags, X } from "lucide-react";
 import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
@@ -13,13 +13,14 @@ import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import type { RecentSearchDto } from "../../types/backend";
 import type {
+  BrowseSort,
   BrowseStatus,
   GenreTagDto,
   RemoteMangaSummaryDto,
   SearchResultDto,
   SourceViewDto,
 } from "../../types/source";
-import { BROWSE_STATUS_LABEL } from "../../types/source";
+import { BROWSE_SORT_LABEL, BROWSE_STATUS_LABEL } from "../../types/source";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 
 /// Catalog source for genre/status browsing. Only adapters with a real
@@ -86,7 +87,21 @@ function readStoredSearch(): { query: string; selected: string[] } | null {
   }
 }
 
-export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: string }) {
+/// A deep link may start the screen in catalog mode, but only with a value the
+/// source itself publishes — anything else falls back to keyword search.
+export type CatalogSelection = {
+  genre: string;
+  status: BrowseStatus | "";
+  sort: BrowseSort | "";
+};
+
+export default function LiveSearchPanel({
+  initialQuery = "",
+  initialCatalog,
+}: {
+  initialQuery?: string;
+  initialCatalog?: CatalogSelection;
+}) {
   const [stored] = useState(() => (initialQuery ? null : readStoredSearch()));
   const [query, setQuery] = useState(initialQuery || stored?.query || "");
   const [sourceFilter, setSourceFilter] = useState<string>(stored?.selected[0] ?? "all");
@@ -177,8 +192,14 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
 
   // Catalog browsing is a different mode from keyword search: the source's
   // genre/status pages carry no keyword, so the two cannot be combined here.
-  const [genre, setGenre] = useState("");
-  const [status, setStatus] = useState<BrowseStatus | "">("");
+  // Sort is a modifier of a genre page, never a mode of its own — the source
+  // ignores `?sort=` on its status routes, so picking it alone would lie.
+  const [genre, setGenre] = useState(initialCatalog?.genre ?? "");
+  const [status, setStatus] = useState<BrowseStatus | "">(initialCatalog?.status ?? "");
+  // A sort needs a genre to act on, so a deep link cannot carry one without it.
+  const [sort, setSort] = useState<BrowseSort | "">(
+    initialCatalog && initialCatalog.genre ? initialCatalog.sort : "",
+  );
   const browsing = genre !== "" || status !== "";
   const genres = useAsyncData<GenreTagDto[]>(
     () => localServices.source.genres(CATALOG_SOURCE_ID),
@@ -192,7 +213,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
   // React derived-state pattern — no effect, no stale-frame flash).
   const searchKey = [
     browsing ? "browse" : "q",
-    browsing ? `${genre}|${status}` : term,
+    browsing ? `${genre}|${status}|${sort}` : term,
     effectiveIds?.join(",") ?? "all",
     "r",
     reload,
@@ -209,6 +230,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           sourceId: CATALOG_SOURCE_ID,
           genre: genre || undefined,
           status: status || undefined,
+          sort: sort || undefined,
           page: 1,
         });
       }
@@ -218,7 +240,16 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
     },
     // effectiveIds key: disabling/removing a source must invalidate rendered
     // results that were gathered from sources which are no longer searchable.
-    [term, sourceFilter, effectiveIds?.join(",") ?? "all", reload, browsing, genre, status],
+    [
+      term,
+      sourceFilter,
+      effectiveIds?.join(",") ?? "all",
+      reload,
+      browsing,
+      genre,
+      status,
+      sort,
+    ],
   );
 
   // Everything below is derived during render — accumulating in an effect
@@ -326,7 +357,15 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           <label className="filter-pill">
             <Tags size={13} aria-hidden="true" />
             <span>Thể loại:</span>
-            <select value={genre} onChange={(event) => setGenre(event.target.value)}>
+            <select
+              value={genre}
+              onChange={(event) => {
+                setGenre(event.target.value);
+                // Sorting lives on the genre page only, so dropping the genre
+                // must drop the sort rather than leave it pending and ignored.
+                if (event.target.value === "") setSort("");
+              }}
+            >
               <option value="">Tất cả</option>
               {genreOptions.map((tag) => (
                 <option key={tag.slug} value={tag.slug}>
@@ -341,7 +380,6 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
           <span>Trạng thái:</span>
           <select
             value={status}
-            disabled={genre !== ""}
             onChange={(event) => setStatus(event.target.value as BrowseStatus | "")}
           >
             <option value="">Tất cả</option>
@@ -352,12 +390,32 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
             ))}
           </select>
         </label>
+        {genreOptions.length > 0 && (
+          <label className="filter-pill">
+            <ArrowUpDown size={13} aria-hidden="true" />
+            <span>Sắp xếp:</span>
+            <select
+              value={sort}
+              disabled={genre === ""}
+              title={genre === "" ? "Nguồn chỉ sắp xếp được trong một thể loại" : undefined}
+              onChange={(event) => setSort(event.target.value as BrowseSort | "")}
+            >
+              <option value="">Mặc định</option>
+              {(Object.keys(BROWSE_SORT_LABEL) as BrowseSort[]).map((value) => (
+                <option key={value} value={value}>
+                  {BROWSE_SORT_LABEL[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {searchable.length === 0 && !browsing && (
           <p className="muted">Chưa có nguồn nào bật hỗ trợ tìm kiếm. Đăng ký trong Cài đặt → Nguồn.</p>
         )}
         {browsing && (
           <p className="muted discover-filters__note">
-            Đang xem danh mục theo bộ lọc — nguồn không lọc kèm từ khóa, nên ô tìm kiếm tạm ngưng.
+            Đang xem danh mục theo bộ lọc — nguồn không nhận từ khóa kèm bộ lọc nên ô tìm kiếm tạm
+            ngưng, và chỉ sắp xếp được bên trong một thể loại.
           </p>
         )}
       </div>
@@ -440,6 +498,7 @@ export default function LiveSearchPanel({ initialQuery = "" }: { initialQuery?: 
                   onClick={() => {
                     setGenre("");
                     setStatus("");
+                    setSort("");
                   }}
                 >
                   Bỏ bộ lọc

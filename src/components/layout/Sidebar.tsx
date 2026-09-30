@@ -58,7 +58,7 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
             <NavLink
               key={route.id}
               to={route.path}
-              end={route.path === "/"}
+              end={route.path === "/" || route.exact === true}
               className={({ isActive }) => `sidebar__link${isActive ? " sidebar__link--active" : ""}`}
               aria-label={collapsed ? route.label : undefined}
             >

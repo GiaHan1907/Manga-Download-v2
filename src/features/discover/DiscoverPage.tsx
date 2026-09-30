@@ -8,10 +8,11 @@ import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { useServicesVersion } from "../../shared/hooks/useServices";
-import type { HomeFeedDto, HomeFeedItemDto } from "../../types/source";
+import type { BrowseSort, BrowseStatus, HomeFeedDto, HomeFeedItemDto } from "../../types/source";
+import { BROWSE_SORT_LABEL, BROWSE_STATUS_LABEL } from "../../types/source";
 import DiscoverSourcesPanel from "./DiscoverSourcesPanel";
 import DiscoverSuggestions from "./DiscoverSuggestions";
-import LiveSearchPanel from "./LiveSearchPanel";
+import LiveSearchPanel, { type CatalogSelection } from "./LiveSearchPanel";
 import LiveUrlImportPanel from "./LiveUrlImportPanel";
 import UrlImportPanel from "./components/UrlImportPanel";
 import SearchPanel from "./components/SearchPanel";
@@ -69,6 +70,19 @@ export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
   const requested = searchParams.get("tab") ?? "search";
   const onlineQuery = searchParams.get("q") ?? "";
+  // Home's "Xem tất cả" links arrive as a catalog deep link. Unknown values
+  // are dropped rather than forwarded, so a stale bookmark searches normally.
+  const statusParam = searchParams.get("status") ?? "";
+  const sortParam = searchParams.get("sort") ?? "";
+  const catalog: CatalogSelection | undefined =
+    onlineQuery === "" &&
+    (searchParams.get("genre") || statusParam || sortParam)
+      ? {
+          genre: searchParams.get("genre") ?? "",
+          status: statusParam in BROWSE_STATUS_LABEL ? (statusParam as BrowseStatus) : "",
+          sort: sortParam in BROWSE_SORT_LABEL ? (sortParam as BrowseSort) : "",
+        }
+      : undefined;
   const homeVersion = useDomainVersion("home");
   // Fetched once for the whole screen: the hero art and the suggestion rail
   // read the same payload, and the source is paced per session.
@@ -109,7 +123,7 @@ export default function DiscoverPage() {
           </div>
           <HeroArt item={spotlight} />
         </div>
-        <LiveSearchPanel initialQuery={onlineQuery} />
+        <LiveSearchPanel initialQuery={onlineQuery} initialCatalog={catalog} />
       </section>
 
       <div className="discover-layout">

@@ -302,7 +302,10 @@ describe("T05 sources management", () => {
 
   it("keeps the demo sandbox section separate from the real registry", async () => {
     renderAt("/settings/sources");
-    expect(await screen.findByText("Nguồn truyện")).toBeDefined();
+    // The sidebar carries its own "Nguồn truyện" nav label, so the page
+    // heading has to be asserted inside the content region.
+    const content = within(screen.getByLabelText("Nội dung ứng dụng"));
+    expect(await content.findByText("Nguồn truyện")).toBeDefined();
     expect(screen.getByText("Demo sandbox (Phase 03)")).toBeDefined();
         // Demo mock sources render their own toggles, separate from real ones.
     const demoToggles = await screen.findAllByRole("button", { name: "Tắt nguồn" });

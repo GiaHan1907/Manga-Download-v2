@@ -45,9 +45,14 @@ function Ranking({ seed }: { seed: HomeFeedItemDto[] }) {
 
   return (
     <section className="panel home-ranking" aria-label="Bảng xếp hạng">
-      <h2 className="panel__title">
-        <Crown size={16} aria-hidden="true" /> Bảng xếp hạng
-      </h2>
+      <div className="section-header">
+        <h2 className="panel__title">
+          <Crown size={16} aria-hidden="true" /> Bảng xếp hạng
+        </h2>
+        <Button to="/ranking" variant="ghost">
+          Xem tất cả
+        </Button>
+      </div>
       <div className="home-tabs" role="tablist" aria-label="Kỳ xếp hạng">
         {RANKING_TABS.map((tab) => (
           <button
@@ -226,7 +231,7 @@ function HotRail({ items }: { items: HomeFeedItemDto[] }) {
           <Flame size={16} aria-hidden="true" /> Truyện đang hot
         </h2>
         <div className="home-pager">
-          <Button to="/discover" variant="ghost">
+          <Button to="/ranking" variant="ghost">
             Xem tất cả
           </Button>
           <button
@@ -339,7 +344,7 @@ export default function HomePage() {
               <h2>
                 <Clock size={16} aria-hidden="true" /> Cập nhật gần đây
               </h2>
-              <Button to="/discover" variant="ghost">
+              <Button to="/discover?status=new" variant="ghost">
                 Xem tất cả
               </Button>
             </div>

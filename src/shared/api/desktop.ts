@@ -28,6 +28,7 @@ import type {
 } from "../../types/library";
 import { DOWNLOAD_EVENT } from "../../types/downloads";
 import type {
+  BrowseSort,
   BrowseStatus,
   GenreTagDto,
   HomeFeedDto,
@@ -210,6 +211,7 @@ export async function browseManga(args: {
   sourceId: string;
   genre?: string;
   status?: BrowseStatus;
+  sort?: BrowseSort;
   page?: number;
 }): Promise<SearchResultDto> {
   return invoke<SearchResultDto>("browse_manga", args);

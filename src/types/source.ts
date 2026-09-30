@@ -91,3 +91,21 @@ export const BROWSE_STATUS_LABEL: Record<BrowseStatus, string> = {
   ongoing: "Đang tiến hành",
   completed: "Đã hoàn thành",
 };
+
+/// The six orderings the source's own catalog page publishes as `?sort=0..5`.
+export type BrowseSort =
+  | "newest-desc"
+  | "newest-asc"
+  | "updated-desc"
+  | "updated-asc"
+  | "views-desc"
+  | "views-asc";
+
+export const BROWSE_SORT_LABEL: Record<BrowseSort, string> = {
+  "newest-desc": "Ngày đăng: mới nhất",
+  "newest-asc": "Ngày đăng: cũ nhất",
+  "updated-desc": "Cập nhật: mới nhất",
+  "updated-asc": "Cập nhật: cũ nhất",
+  "views-desc": "Lượt xem: cao nhất",
+  "views-asc": "Lượt xem: thấp nhất",
+};

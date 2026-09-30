@@ -1,5 +1,6 @@
 import * as desktop from "../shared/api/desktop";
 import type {
+  BrowseSort,
   BrowseStatus,
   GenreTagDto,
   HomeFeedDto,
@@ -42,6 +43,7 @@ export interface SourceService {
     sourceId: string;
     genre?: string;
     status?: BrowseStatus;
+    sort?: BrowseSort;
     page?: number;
   }): Promise<SearchResultDto>;
   resolveUrl(url: string): Promise<RemoteMangaDetailDto>;
