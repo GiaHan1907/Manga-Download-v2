@@ -91,6 +91,10 @@ User báo "không tải được chapter nào": 5 task fail `SOURCE_PARSE_ERROR`
 
 **Bài học:** khi chẩn đoán lỗi của app, probe phải đi qua ĐÚNG đường dựng đối tượng của app (registry + row DB), không phải đường tương đương viết tay. "Probe chạy được" không phải bằng chứng app chạy được.
 
+### 2b. Hàng đợi tải chạy lộn xộn — 2026-10-01
+
+User: "trong hàng đợi không download theo thứ tự chapter mà download random". `claim_next` xếp `priority DESC, created_at ASC, id ASC`, nhưng `queue_batch` ghi **cùng một `created_at`** cho cả batch (DB user: 64 chương đều `2026-10-01T05:53:55.471Z`) → tiebreak rơi xuống `id` là UUID → thứ tự đúng nghĩa ngẫu nhiên. Sửa: nối `chapters` và tiebreak theo **đúng biểu thức `manga_repo::list_chapters`** (`number IS NULL, number, created_at, id`) để hàng đợi chạy giống danh sách chương user nhìn thấy; `retryable_failed_ids` cũng đổi theo cho khớp. Test `t06_claim_order_follows_chapter_number_within_one_submission` seed chương theo thứ tự 3-1-2 và chốt claim ra 1-2-3. Không cần migration — thứ tự tính lúc claim, nên hàng đợi 64 chương đang chờ của user tự vào lại đúng trật tự.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

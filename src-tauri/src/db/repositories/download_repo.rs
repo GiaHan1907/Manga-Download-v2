@@ -323,13 +323,22 @@ pub async fn set_priority(
 
 /// Dispatcher claim: the highest-priority, oldest eligible queued task whose
 /// retry window (if any) has elapsed, atomically moved to `resolving`.
+///
+/// A bulk submission writes every row with the SAME `created_at`, so the
+/// timestamp cannot order it — falling through to the task id made the queue
+/// run in UUID order, i.e. chapters arrived random. The remaining tiebreak is
+/// therefore the chapter's own reading order, exactly the expression
+/// `manga_repo::list_chapters` uses so the queue matches the chapter list.
 pub async fn claim_next(pool: &SqlitePool) -> Result<Option<TaskRow>, AppError> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
     let candidate: Option<(String,)> = sqlx::query_as(
-        "SELECT id FROM download_tasks \
-         WHERE status = 'queued' AND (next_retry_at IS NULL OR next_retry_at <= ?1) \
-         ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1",
+        "SELECT t.id FROM download_tasks t \
+         JOIN chapters c ON c.id = t.chapter_id \
+         WHERE t.status = 'queued' AND (t.next_retry_at IS NULL OR t.next_retry_at <= ?1) \
+         ORDER BY t.priority DESC, t.created_at ASC, \
+                  c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+         LIMIT 1",
     )
     .bind(&ts)
     .fetch_optional(&mut *tx)
@@ -752,14 +761,20 @@ pub async fn delete_terminal_task(pool: &SqlitePool, task_id: &str) -> Result<bo
     Ok(changed == 1)
 }
 
-/// Feature plan F5: ids of `failed` tasks, FIFO (fair ordering with the
-/// dispatcher), capped so one bulk click cannot flood the queue.
+/// Feature plan F5: ids of `failed` tasks, in the same reading order the
+/// dispatcher claims them (a whole manga retried at once should come back
+/// chapter by chapter, not in UUID order), capped so one bulk click cannot
+/// flood the queue.
 pub async fn retryable_failed_ids(
     pool: &SqlitePool,
     limit: usize,
 ) -> Result<Vec<String>, AppError> {
     let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT id FROM download_tasks WHERE status = 'failed' ORDER BY created_at ASC LIMIT ?1",
+        "SELECT t.id FROM download_tasks t \
+         JOIN chapters c ON c.id = t.chapter_id \
+         WHERE t.status = 'failed' \
+         ORDER BY t.created_at ASC, c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+         LIMIT ?1",
     )
     .bind(limit as i64)
     .fetch_all(pool)
@@ -847,6 +862,50 @@ mod tests {
             .await
             .unwrap();
         chapter_id
+    }
+
+    /// A bulk submission stamps ONE `created_at` on every row, so the timestamp
+    /// cannot order it. Before the fix the claim fell through to the task id —
+    /// a random UUID — and the user's 64-chapter queue ran in scrambled order.
+    #[tokio::test]
+    async fn t06_claim_order_follows_chapter_number_within_one_submission() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        ensure_source(&pool, "src-a", "Source A").await.unwrap();
+        let (manga_id, _) = upsert_manga(&pool, "src-a", "m1", "T", None, None, "ongoing")
+            .await
+            .unwrap();
+        // Seeded deliberately out of reading order: 3, 1, 2.
+        let mut by_number: Vec<(f64, String)> = Vec::new();
+        for number in [3.0, 1.0, 2.0] {
+            let (chapter_id, _) = upsert_chapter(
+                &pool,
+                &manga_id,
+                &format!("chap-{number}"),
+                &format!("Tập {number}"),
+                Some(number),
+                None,
+            )
+            .await
+            .unwrap();
+            by_number.push((number, chapter_id));
+        }
+        let ids: Vec<String> = by_number.iter().map(|(_, id)| id.clone()).collect();
+        let outcome = queue_batch(&pool, &ids, "cbz", 0).await.unwrap();
+        assert_eq!(outcome.created.len(), 3);
+
+        let mut claimed = Vec::new();
+        for _ in 0..3 {
+            let task = claim_next(&pool).await.unwrap().expect("a queued task");
+            claimed.push(task.chapter_title.clone().unwrap_or_default());
+            transition(&pool, &task.id, &["resolving"], "completed")
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            claimed,
+            vec!["Tập 1", "Tập 2", "Tập 3"],
+            "the queue must run chapter by chapter, not by task id"
+        );
     }
 
     #[tokio::test]
