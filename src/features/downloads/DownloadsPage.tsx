@@ -108,7 +108,10 @@ export default function DownloadsPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeStatuses, setPurgeStatuses] = useState<string[]>(["failed", "cancelled"]);
-  const [purgeOlderThanDays, setPurgeOlderThanDays] = useState<number | null>(7);
+  // "Toàn bộ thời gian" is the default on purpose: the age limit is a filter
+  // the user adds, not a precondition. With 7 days selected by default,
+  // clearing today's failed tasks silently deleted nothing.
+  const [purgeOlderThanDays, setPurgeOlderThanDays] = useState<number | null>(null);
   const [linkText, setLinkText] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
 
@@ -155,10 +158,20 @@ export default function DownloadsPage() {
       olderThanDays: purgeOlderThanDays ?? undefined,
     })
       .then((outcome) => {
-        pushToast(
-          `Đã xóa ${outcome.deleted} mục lịch sử` +
-            (outcome.skippedArtifact > 0 ? ` · giữ ${outcome.skippedArtifact} mục còn file.` : "."),
-        );
+        const limit =
+          purgeOlderThanDays === null ? "" : ` chỉ mục cũ hơn ${purgeOlderThanDays} ngày`;
+        if (outcome.deleted === 0 && outcome.skippedArtifact === 0) {
+          pushToast(
+            `Không có mục nào khớp${limit === "" ? " bộ lọc" : limit} — lịch sử vẫn nguyên.`,
+          );
+        } else {
+          pushToast(
+            `Đã xóa ${outcome.deleted} mục lịch sử${limit}` +
+              (outcome.skippedArtifact > 0
+                ? ` · giữ ${outcome.skippedArtifact} mục còn file.`
+                : "."),
+          );
+        }
         setPurgeOpen(false);
       })
       .catch((err: unknown) => pushToast(err instanceof Error ? err.message : "Không xóa được lịch sử."))

@@ -57,6 +57,9 @@ function mockQueue(tasks: ReturnType<typeof baseTask>[]) {
       return Promise.resolve(paused.find((t) => t.id === args.taskId));
     }
     if (cmd === "remove_download_task") return Promise.resolve(true);
+    if (cmd === "clear_download_history") {
+      return Promise.resolve({ deleted: 2, skippedArtifact: 0, skippedOther: 0 });
+    }
     if (cmd === "app_get_info") return Promise.resolve({ name: "x", version: "0.1.0", platform: "windows" });
     if (cmd === "app_health_check") return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 4 });
     return Promise.reject(new Error(`unexpected command ${cmd}`));
@@ -101,6 +104,21 @@ describe("T06 Downloads manager (real backend)", () => {
     fireEvent.click(within(card).getByRole("button", { name: /Gỡ khỏi danh sách/ }));
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("remove_download_task", { taskId: "t9" });
+    });
+  });
+
+  it("clears history by default across all time, not only rows older than a week", async () => {
+    mockQueue([baseTask("t9", "failed", 1)]);
+    renderDownloads();
+    await screen.findByText("Truyện t9");
+    fireEvent.click(screen.getByRole("button", { name: /Dọn lịch sử/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Xóa đã chọn" }));
+    // The age limit is a filter the user adds. Defaulting it to 7 days made
+    // "Dọn lịch sử" delete nothing for a queue that failed today.
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("clear_download_history", {
+        statuses: ["failed", "cancelled"],
+      });
     });
   });
 
