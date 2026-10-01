@@ -91,7 +91,15 @@ User báo "không tải được chapter nào": 5 task fail `SOURCE_PARSE_ERROR`
 
 **Bài học:** khi chẩn đoán lỗi của app, probe phải đi qua ĐÚNG đường dựng đối tượng của app (registry + row DB), không phải đường tương đương viết tay. "Probe chạy được" không phải bằng chứng app chạy được.
 
-### 2b. Hàng đợi tải chạy lộn xộn — 2026-10-01
+### 2b. Cầu dao mạng cho hàng đợi — 2026-10-01
+
+Cùng ngày, DB cho thấy **45/47 chương fail trong 5 giây** (06:31:13–18) với `SOURCE_NETWORK`, `attempts=2`, trong khi `chapterConcurrency = 1`. Không có đường ghi hàng loạt nào trong code: một worker duy nhất đã lần lượt claim từng chương và mỗi lần connect bị RST trả lỗi trong ~50 ms, nên chỉ vài giây là đốt hết retry budget của cả truyện.
+
+Sửa: `Coordinator::observe_network_failure` (gọi sau mỗi worker kết thúc) đếm chuỗi fail `SOURCE_NETWORK` **liên tiếp**; chuỗi khác (thành công hoặc lỗi nội dung như `VALIDATION_ERROR`) chứng tỏ nguồn vẫn trả lời nên reset. Đến ngưỡng 3 thì đóng `queue_paused` (đúng gate "Dừng toàn bộ" — người dùng bấm Tiếp tục để chạy tiếp) và **trả 3 chương vừa mất về `queued`** thay vì để `failed`. UI: hook re-read `get_download_queue_paused` khi thấy một row về `queued` mà không ai bấm retry, để marker "Đã dừng toàn bộ" không bị trễ.
+
+Test: `network_breaker_stops_the_queue_and_returns_the_chapters_it_cost` (2 → chưa dừng, 3 → dừng + 5 row queued, 0 failed) và `network_breaker_only_counts_unreachable_source_failures` (xen một lỗi nội dung là chuỗi tính lại).
+
+### 2c. Hàng đợi tải chạy lộn xộn — 2026-10-01
 
 User: "trong hàng đợi không download theo thứ tự chapter mà download random". `claim_next` xếp `priority DESC, created_at ASC, id ASC`, nhưng `queue_batch` ghi **cùng một `created_at`** cho cả batch (DB user: 64 chương đều `2026-10-01T05:53:55.471Z`) → tiebreak rơi xuống `id` là UUID → thứ tự đúng nghĩa ngẫu nhiên. Sửa: nối `chapters` và tiebreak theo **đúng biểu thức `manga_repo::list_chapters`** (`number IS NULL, number, created_at, id`) để hàng đợi chạy giống danh sách chương user nhìn thấy; `retryable_failed_ids` cũng đổi theo cho khớp. Test `t06_claim_order_follows_chapter_number_within_one_submission` seed chương theo thứ tự 3-1-2 và chốt claim ra 1-2-3. Không cần migration — thứ tự tính lúc claim, nên hàng đợi 64 chương đang chờ của user tự vào lại đúng trật tự.
 

@@ -26,6 +26,11 @@ use crate::sources::registry::SourceRegistry;
 const TICK: Duration = Duration::from_secs(1);
 /// Upper bound on simultaneously live workers even if settings are odd.
 const MAX_CHAPTER_WORKERS: i64 = 5;
+/// Consecutive chapters that failed because the SOURCE COULD NOT BE REACHED
+/// before the queue stops itself. Without this, one network/DPI blip spends the
+/// whole retry budget of every queued chapter: a live incident burned 45
+/// chapters in five seconds while the source refused connections.
+const NETWORK_FAILURE_BREAKER: usize = 3;
 
 struct ActiveWorker {
     cancel: Arc<AtomicBool>,
@@ -44,6 +49,10 @@ pub struct Coordinator {
     shutdown: Arc<AtomicBool>,
     /// Global queue gate: while set the dispatcher claims nothing new.
     queue_paused: AtomicBool,
+    /// Chapters that just failed on an unreachable source, oldest first. Its
+    /// length is the streak the breaker counts, and its contents are the rows
+    /// handed back to the queue when it trips.
+    network_streak: Mutex<Vec<String>>,
 }
 
 impl Coordinator {
@@ -62,6 +71,7 @@ impl Coordinator {
             active: Mutex::new(HashMap::new()),
             shutdown: Arc::new(AtomicBool::new(false)),
             queue_paused: AtomicBool::new(false),
+            network_streak: Mutex::new(Vec::new()),
         })
     }
 
@@ -180,6 +190,7 @@ impl Coordinator {
         // coordinator; the worker's own DB effects stay valid regardless.
         let weak = Arc::downgrade(self);
         let task_id = task.id.clone();
+        let observed_id = task_id.clone();
         tauri::async_runtime::spawn(async move {
             // RAII cleanup releases the active slot even if the worker future
             // panics mid-await (prevents a leaked worker permit).
@@ -195,10 +206,15 @@ impl Coordinator {
                 }
             }
             let _guard = SlotGuard {
-                coordinator: weak,
+                coordinator: std::sync::Weak::clone(&weak),
                 task_id,
             };
             worker::run_task(task, deps).await;
+            // After the guard's slot release would be too late to read the
+            // settled row, so the breaker observes here.
+            if let Some(coordinator) = weak.upgrade() {
+                coordinator.observe_network_failure(&observed_id).await;
+            }
         });
     }
 
@@ -334,6 +350,43 @@ impl Coordinator {
     fn worker_finished(&self, task_id: &str) {
         self.active.lock().unwrap().remove(task_id);
         self.wake.notify_one();
+    }
+
+    /// Network-failure breaker seam: called once per finished worker with the
+    /// row as it settled in the database. `SOURCE_NETWORK` is the only failure
+    /// that implicates the SOURCE rather than one chapter, so only it extends
+    /// the streak; anything else (a success, a content error) proves the source
+    /// is answering and clears it. On the third consecutive network failure the
+    /// queue pauses itself and the chapters it cost are put back in the queue
+    /// instead of being left `failed`.
+    pub(crate) async fn observe_network_failure(&self, task_id: &str) {
+        let Ok(Some(row)) = download_repo::get_task(&self.pool, task_id).await else {
+            return;
+        };
+        if row.status != "failed" || row.error_code.as_deref() != Some("SOURCE_NETWORK") {
+            self.network_streak.lock().unwrap().clear();
+            return;
+        }
+        let tripped = {
+            let mut streak = self.network_streak.lock().unwrap();
+            if !streak.iter().any(|seen| seen == task_id) {
+                streak.push(task_id.to_string());
+            }
+            streak.len() >= NETWORK_FAILURE_BREAKER
+        };
+        if !tripped {
+            return;
+        }
+        let cost: Vec<String> = std::mem::take(&mut *self.network_streak.lock().unwrap());
+        self.queue_paused.store(true, Ordering::Relaxed);
+        for id in cost {
+            if let Ok(Some(moved)) = download_repo::retry_failed(&self.pool, &id).await {
+                self.publish_now(&moved);
+            }
+        }
+        eprintln!(
+            "download queue auto-paused after {NETWORK_FAILURE_BREAKER} consecutive SOURCE_NETWORK failures"
+        );
     }
 }
 

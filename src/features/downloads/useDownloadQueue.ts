@@ -92,6 +92,17 @@ export function useDownloadQueue() {
           return; // stale frame — authoritative snapshot wins
         }
         const { id, completedPages, totalPages, status } = event.task;
+        // A row landing back in `queued` that nobody retried is the network
+        // breaker closing the gate behind our back — re-read it so the
+        // "Đã dừng toàn bộ" marker is honest without a manual refresh.
+        if (status === "queued") {
+          void downloadsApi
+            .getQueuePaused()
+            .then((paused) => {
+              if (!cancelled && mounted.current) setQueuePausedState(paused);
+            })
+            .catch(() => undefined);
+        }
         setLive((prev) => ({
           ...prev,
           [id]: { bytes: event.downloadedBytes, speed: event.speedBytesPerSecond },

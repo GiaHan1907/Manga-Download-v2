@@ -723,3 +723,94 @@ async fn second_completed_download_never_overwrites_first_artifact() {
         "first artifact untouched"
     );
 }
+
+async fn fail_task(pool: &SqlitePool, task_id: &str, code: &str) {
+    sqlx::query("UPDATE download_tasks SET status = 'failed', error_code = ?2 WHERE id = ?1")
+        .bind(task_id)
+        .bind(code)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn breaker_world() -> (
+    World,
+    Vec<String>,
+    Arc<crate::downloader::scheduler::Coordinator>,
+) {
+    let world = World::new(Script::new(1)).await;
+    let mut ids = Vec::new();
+    for index in 0..5 {
+        let chapter = world.seed_chapter(&format!("ch-brk{index}")).await;
+        ids.push(world.queue(&chapter, "cbz").await.id);
+    }
+    let coordinator = crate::downloader::scheduler::Coordinator::new(
+        world.pool.clone(),
+        Arc::new(std::sync::Mutex::new(SourceRegistry::with_adapters(vec![]))),
+        world.data_dir.path().to_path_buf(),
+        world.events.clone(),
+    );
+    (world, ids, coordinator)
+}
+
+async fn count(pool: &SqlitePool, status: &str) -> i64 {
+    sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM download_tasks WHERE status = ?1")
+        .bind(status)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .0
+}
+
+#[tokio::test]
+async fn network_breaker_stops_the_queue_and_returns_the_chapters_it_cost() {
+    let (world, ids, coordinator) = breaker_world().await;
+    for id in ids.iter().take(3) {
+        fail_task(&world.pool, id, "SOURCE_NETWORK").await;
+    }
+    coordinator.observe_network_failure(&ids[0]).await;
+    coordinator.observe_network_failure(&ids[1]).await;
+    assert!(
+        !coordinator.is_queue_paused(),
+        "two failures is not yet a blackout"
+    );
+
+    coordinator.observe_network_failure(&ids[2]).await;
+    assert!(
+        coordinator.is_queue_paused(),
+        "the third consecutive network failure must stop the queue"
+    );
+    assert_eq!(count(&world.pool, "failed").await, 0);
+    assert_eq!(
+        count(&world.pool, "queued").await,
+        5,
+        "the chapters the blackout cost go back to the queue, not to failed"
+    );
+}
+
+#[tokio::test]
+async fn network_breaker_only_counts_unreachable_source_failures() {
+    let (world, ids, coordinator) = breaker_world().await;
+    fail_task(&world.pool, &ids[0], "SOURCE_NETWORK").await;
+    fail_task(&world.pool, &ids[1], "SOURCE_NETWORK").await;
+    coordinator.observe_network_failure(&ids[0]).await;
+    coordinator.observe_network_failure(&ids[1]).await;
+
+    // A content error proves the source IS answering, so the streak restarts.
+    fail_task(&world.pool, &ids[2], "VALIDATION_ERROR").await;
+    coordinator.observe_network_failure(&ids[2]).await;
+    fail_task(&world.pool, &ids[3], "SOURCE_NETWORK").await;
+    fail_task(&world.pool, &ids[4], "SOURCE_NETWORK").await;
+    coordinator.observe_network_failure(&ids[3]).await;
+    coordinator.observe_network_failure(&ids[4]).await;
+
+    assert!(
+        !coordinator.is_queue_paused(),
+        "a reset streak must not trip on the next two network failures"
+    );
+    assert_eq!(
+        count(&world.pool, "failed").await,
+        5,
+        "nothing was re-queued, so all five rows stay as they settled"
+    );
+}
