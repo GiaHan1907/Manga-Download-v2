@@ -77,7 +77,19 @@ Reader immersive (auto-hide thông minh 2.5s + không nuốt focus, progress rin
 
 - **Thật (Rust + SQLite + đĩa):** Settings (kèm notification/tray keys có consumer thật), Library/Favorites local (pagination), discovery Phase 05, download engine + history pagination Phase 06, Library chi tiết + Offline Reader + Continue Reading + Home stats Phase 07–08, storage status/cleanup, Windows notification + tray (code+smoke; thao tác thật = manual checklist P09).
 - **Demo còn lại — CHỈ trong bản dev (`import.meta.env.DEV`):** tab Demo sandbox Discover, khối Demo sandbox trong Settings → Sources (gate bổ sung ở review 4 vòng), `/manga/:id`, `/reader/:mangaId/:chapterId` (mock `src/services/mock/`). Production build: các route này rơi về 404, Home/Topbar/Settings không còn fixture/mock leakage. (Ghi chú hygiene: mock vẫn được static-import trong bundle prod — chỉ là vấn đề size, không có đường thực thi từ UI production.)
-- **Live download:** ĐÃ chứng minh thật trên máy user — TTT (`madara-truyentuoitho-com`) tải xong 5 chương Ninja Loạn Thị 188–234 trang/chương ngày 2026-09-25 (DB `download_tasks.status=completed`). MangaDex vẫn BLOCKED ở mạng dev. Ngày 2026-09-30 user báo 5 chương fail `SOURCE_PARSE_ERROR` cùng lúc: probe live cho thấy markup TTT đã bỏ class `wp-manga-chapter-img` (nên app đọc chương bằng selector loose `.reading-content img` — nhánh cũng ăn cả ảnh quảng cáo trong cùng container), và nhánh cũ coi MỌI ảnh ngoài allowlist là lỗi của cả manifest → một ad rotation giết cả chương. Nay loose path BỎ QUA ảnh ngoài allowlist (không bao giờ request host lạ), chỉ fail khi không còn ảnh hợp lệ nào; strict/boxed vẫn fail như cũ vì ở đó host lạ là tín hiệu CDN dời domain.
+- **Live download:** ĐÃ chứng minh thật trên máy user — TTT (`madara-truyentuoitho-com`) tải xong 5 chương Ninja Loạn Thị 188–234 trang/chương ngày 2026-09-25 (DB `download_tasks.status=completed`). MangaDex vẫn BLOCKED ở mạng dev.
+
+### 2a. Sự cố TTT `SOURCE_PARSE_ERROR` — 2026-10-01 (bài học đắt, giữ lại đây)
+
+User báo "không tải được chapter nào": 5 task fail `SOURCE_PARSE_ERROR` với `total_pages = 0`, retry vẫn fail. Chuỗi nguyên nhân theo thứ tự đã loại trừ:
+
+1. **Không phải** markup nguồn đổi, **không phải** tải song song — probe live đọc đúng tap-9/tap-10 trả 234 trang; 5 chương × 3 vòng song song = 15/15 OK.
+2. Nguyên nhân thật: `sources.image_hosts` của row built-in là **NULL** (row chỉ do bật/tắt, chưa từng sửa). `builtin_adapters` dịch NULL thành "không có host ảnh" → adapter mất đúng `img.resourcehub.shop` mà built-in khai báo → mọi trang bị coi là host lạ → `Parse`.
+3. Probe ở bước 1 KHÔNG tái hiện được vì nó truyền tay `TTT_IMAGE_HOSTS` thay vì dựng adapter qua registry — tức không đi đúng đường của app.
+4. Sửa: `built_in_image_hosts()` — row có giá trị thì thắng, NULL nghĩa là "chưa chỉnh" nên dùng list shipped. Test thuận/đảo: `registry::tests` (2), `pages_on_a_host_the_source_never_registered_fail_the_chapter` (chứng minh host lạ vẫn giết chương), và probe live `live_registry_builtin_parses_ttt_chapter` dựng qua `SourceRegistry::from_rows` với row NULL → 231 trang thật.
+5. Sửa đổi PHỤ được giữ: TTT đã bỏ class `wp-manga-chapter-img` nên chương đọc bằng nhánh loose `.reading-content img`; nhánh này nay BỎ QUA ảnh ngoài allowlist thay vì bỏ cả chương (một ad rotation không còn giết chương; vẫn không bao giờ request host lạ; vẫn fail nếu không còn ảnh hợp lệ). strict/boxed giữ hành vi nghiêm cũ.
+
+**Bài học:** khi chẩn đoán lỗi của app, probe phải đi qua ĐÚNG đường dựng đối tượng của app (registry + row DB), không phải đường tương đương viết tay. "Probe chạy được" không phải bằng chứng app chạy được.
 
 ## 3. Bất biến kiến trúc (không được phá)
 

@@ -83,6 +83,18 @@ pub fn is_builtin(id: &str) -> bool {
 /// Built-in adapters, honoring a persisted override row (domain/name/hosts
 /// edited by the user in Settings → Nguồn). An invalid override falls back to
 /// the shipped defaults with a diagnostic — startup never fails on it.
+/// Image hosts a built-in adapter may read chapter pages from. A persisted row
+/// wins, but its NULL column is the state of a row created by a plain
+/// enable/disable toggle — that means "never edited", so the shipped list
+/// still applies. Only an explicit value replaces it.
+fn built_in_image_hosts<'a>(
+    row: Option<&'a SourceRow>,
+    spec: &'a BuiltInHtmlSpec,
+) -> Option<&'a str> {
+    row.and_then(|r| r.image_hosts.as_deref())
+        .or(spec.image_hosts)
+}
+
 fn builtin_adapters(rows: &[SourceRow]) -> Vec<Arc<dyn SourceAdapter>> {
     let mut adapters: Vec<Arc<dyn SourceAdapter>> = vec![Arc::new(MangaDex::live())];
     for spec in BUILTIN_HTML_SOURCES {
@@ -93,11 +105,12 @@ fn builtin_adapters(rows: &[SourceRow]) -> Vec<Arc<dyn SourceAdapter>> {
         let base_url = row
             .and_then(|r| r.base_url.as_deref())
             .unwrap_or(spec.base_url);
-        let hosts_csv = match row.map(|r| r.image_hosts.as_deref()) {
-            Some(Some(csv)) => Some(csv),
-            Some(None) => None,
-            None => spec.image_hosts,
-        };
+        // A built-in's row is created by a mere enable/disable toggle, which
+        // stores NULL — so NULL means "never edited", NOT "no image hosts".
+        // Treating it as an empty list silently strips the shipped CDN host and
+        // every chapter then fails as SOURCE_PARSE_ERROR (live bug, 2026-10-01:
+        // TTT serves all its pages from img.resourcehub.shop).
+        let hosts_csv = built_in_image_hosts(row, spec);
         let hosts: Vec<String> = hosts_csv
             .map(|csv| {
                 csv.split(',')
@@ -211,5 +224,47 @@ impl SourceRegistry {
             .iter()
             .find(|adapter| adapter.info().id == source_id)
             .cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(image_hosts: Option<&str>) -> SourceRow {
+        SourceRow {
+            id: "madara-truyentuoitho-com".to_string(),
+            display_name: TTT_DISPLAY_NAME.to_string(),
+            adapter: "madara".to_string(),
+            base_url: Some(TTT_BASE_URL.to_string()),
+            image_hosts: image_hosts.map(str::to_string),
+            enabled: true,
+        }
+    }
+
+    /// A row created by a plain enable toggle stores NULL. That must not be
+    /// read as "this source has no image CDN" — it silently stripped TTT's
+    /// shipped host and made every chapter fail SOURCE_PARSE_ERROR.
+    #[test]
+    fn a_never_edited_builtin_row_keeps_the_shipped_image_hosts() {
+        let spec = builtin_html_spec("madara-truyentuoitho-com").expect("TTT is built in");
+        assert_eq!(
+            built_in_image_hosts(Some(&row(None)), spec),
+            Some(TTT_IMAGE_HOSTS)
+        );
+        assert_eq!(built_in_image_hosts(None, spec), Some(TTT_IMAGE_HOSTS));
+    }
+
+    /// An explicit value is the user's own list and replaces the shipped one.
+    #[test]
+    fn an_edited_builtin_row_overrides_the_shipped_image_hosts() {
+        let spec = builtin_html_spec("madara-truyentuoitho-com").expect("TTT is built in");
+        assert_eq!(
+            built_in_image_hosts(Some(&row(Some("cdn.example.net"))), spec),
+            Some("cdn.example.net")
+        );
+        // A built-in that ships no extra host stays base-host-only.
+        let qq = builtin_html_spec("truyenqq").expect("TruyenQQ is built in");
+        assert_eq!(built_in_image_hosts(Some(&row(None)), qq), None);
     }
 }

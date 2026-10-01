@@ -2209,6 +2209,33 @@ mod tests {
         }
     }
 
+    /// End-to-end proof of the 2026-10-01 fix: build the adapter the way the app
+    /// does — from the user's persisted row, whose `image_hosts` is NULL — and
+    /// read a real chapter. Before the fix this failed with SOURCE_PARSE_ERROR
+    /// because the shipped CDN host was dropped on the way.
+    #[tokio::test]
+    #[ignore = "live probe: a registry-built TTT adapter parses a real chapter"]
+    async fn live_registry_builtin_parses_ttt_chapter() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "madara-truyentuoitho-com".to_string(),
+            display_name: "Truyen Tuoi Tho".to_string(),
+            adapter: "madara".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry
+            .get("madara-truyentuoitho-com")
+            .expect("TTT is a built-in");
+        let manifest = adapter
+            .page_manifest("ninja-loan-thi", "tap-8")
+            .await
+            .expect("a registry-built adapter must parse a real chapter");
+        println!("LIVE REGISTRY tap-8 pages={}", manifest.pages.len());
+        assert!(manifest.pages.len() > 100, "TTT chapters run ~230 pages");
+    }
+
     const CHAPTER_FIXTURE: &str = r#"<html><body>
       <div class="reading-content">
         <img class="wp-manga-chapter-img" src="  /uploads/p1.jpg  "/>
@@ -2280,6 +2307,25 @@ mod tests {
         )]);
         assert!(matches!(
             provider.page_manifest("m", "tap-1").await,
+            Err(SourceError::Parse)
+        ));
+    }
+
+    /// The exact state the live failure had: TTT serves every page from
+    /// `img.resourcehub.shop`, and a built-in row whose image-host column is
+    /// NULL produced precisely this adapter — base host only. Every page then
+    /// looked like a foreign ad and the chapter died. `registry::tests` is what
+    /// stops that row shape from being built; this pins what it would do.
+    #[tokio::test]
+    async fn pages_on_a_host_the_source_never_registered_fail_the_chapter() {
+        let (provider, _) = adapter(vec![Ok(
+            r#"<div class="reading-content">
+                 <img src="https://img.resourcehub.shop/truyen/1.jpg"/>
+                 <img src="https://img.resourcehub.shop/truyen/2.jpg"/>
+               </div>"#,
+        )]);
+        assert!(matches!(
+            provider.page_manifest("ninja-loan-thi", "tap-8").await,
             Err(SourceError::Parse)
         ));
     }
