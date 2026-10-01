@@ -83,10 +83,20 @@ export function allowedDownloadActions(status: DownloadTaskDto["status"]): ("pau
     case "paused":
       return ["resume", "cancel"];
     case "failed":
-      return ["retry", "cancel"];
+      // Nothing is running to cancel — Rust only accepts cancel from
+      // queued/paused/in-flight, so offering it here was a dead button.
+      // Settled rows are dropped with `removeDownloadTask` instead.
+      return ["retry"];
     default:
       return [];
   }
+}
+
+/// Rows the "Gỡ khỏi danh sách" action may remove: exactly the states Rust
+/// treats as settled. A `completed` row whose file is still on disk is refused
+/// server-side, so the button can still report an error for that one case.
+export function canRemoveTask(status: DownloadTaskDto["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 export function progressPercent(task: DownloadTaskDto): number {

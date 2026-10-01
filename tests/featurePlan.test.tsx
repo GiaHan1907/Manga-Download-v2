@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 import {
   clearDownloadHistory,
+  removeDownloadTask,
   retryAllFailedDownloads,
   cancelDownloadsForManga,
 } from "../src/shared/api/desktop";
@@ -37,8 +38,13 @@ describe("F2/F5 IPC wrappers", () => {
     expect(outcome).toEqual({ deleted: 2, skippedArtifact: 1, skippedOther: 0 });
   });
 
-  it("retry_all_failed_downloads takes no arguments", async () => {
-    vi.mocked(invoke).mockResolvedValue(3);
+  it("remove_download_task forwards only the task id", async () => {
+    vi.mocked(invoke).mockResolvedValue(true);
+    await expect(removeDownloadTask("t-1")).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith("remove_download_task", { taskId: "t-1" });
+  });
+
+  it("retry_all_failed_downloads takes no arguments", async () => {    vi.mocked(invoke).mockResolvedValue(3);
     await expect(retryAllFailedDownloads()).resolves.toBe(3);
     expect(invoke).toHaveBeenCalledWith("retry_all_failed_downloads");
   });

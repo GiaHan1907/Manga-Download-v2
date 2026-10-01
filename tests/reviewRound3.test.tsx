@@ -21,7 +21,7 @@ vi.mock("../src/services/downloads.api", () => ({
 
 import { downloadsApi } from "../src/services/downloads.api";
 import { useDownloadQueue } from "../src/features/downloads/useDownloadQueue";
-import { allowedDownloadActions } from "../src/types/downloads";
+import { allowedDownloadActions, canRemoveTask } from "../src/types/downloads";
 
 function task(id: string, revision: number, status = "downloading"): DownloadTaskDto {
   return {
@@ -47,6 +47,16 @@ describe("download action table mirrors the Rust lifecycle", () => {
     expect(allowedDownloadActions("resolving")).toContain("pause");
     expect(allowedDownloadActions("queued")).toEqual(["pause", "cancel"]);
     expect(allowedDownloadActions("paused")).toEqual(["resume", "cancel"]);
+  });
+
+  it("offers a failed task only what the backend accepts", async () => {
+    // Rust `cancel` takes queued/paused/in-flight; a failed row has nothing
+    // running to cancel, so the button used to fail with VALIDATION_ERROR.
+    expect(allowedDownloadActions("failed")).toEqual(["retry"]);
+    expect(canRemoveTask("failed")).toBe(true);
+    expect(canRemoveTask("cancelled")).toBe(true);
+    expect(canRemoveTask("downloading")).toBe(false);
+    expect(canRemoveTask("queued")).toBe(false);
   });
 });
 

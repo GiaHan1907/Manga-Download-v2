@@ -18,6 +18,8 @@ export interface DownloadManagerService {
   resume(taskId: string): Promise<DownloadTaskDto>;
   cancel(taskId: string): Promise<DownloadTaskDto>;
   retry(taskId: string): Promise<DownloadTaskDto>;
+  /// Drop one settled task row from the list (no file is ever deleted).
+  removeTask(taskId: string): Promise<boolean>;
   setPriority(taskId: string, priority: number): Promise<DownloadTaskDto>;
   clearHistory(args: { statuses?: string[]; olderThanDays?: number }): Promise<ClearHistoryDto>;
   retryAllFailed(): Promise<number>;
@@ -70,6 +72,7 @@ export const downloadsApi: DownloadManagerService = {
   resume: (taskId) => desktop.resumeDownload(taskId).catch(rethrow),
   cancel: (taskId) => desktop.cancelDownload(taskId).catch(rethrow),
   retry: (taskId) => desktop.retryDownload(taskId).catch(rethrow),
+  removeTask: (taskId) => desktop.removeDownloadTask(taskId).catch(rethrow),
   setPriority: (taskId, priority) => desktop.setDownloadPriority({ taskId, priority }).catch(rethrow),
   clearHistory: (args) => desktop.clearDownloadHistory(args).catch(rethrow),
   retryAllFailed: () => desktop.retryAllFailedDownloads().catch(rethrow),

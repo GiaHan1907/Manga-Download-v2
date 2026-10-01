@@ -15,6 +15,7 @@ import {
 import type { DownloadTaskDto } from "../../types/backend";
 import {
   allowedDownloadActions,
+  canRemoveTask,
   formatBytes,
   formatEtaSeconds,
   formatSpeed,
@@ -95,6 +96,7 @@ export default function DownloadsPage() {
     loading,
     error,
     actions,
+    removeTask,
     retryAllFailed,
     clearHistory,
     refresh,
@@ -351,6 +353,23 @@ export default function DownloadsPage() {
                     </Button>
                   );
                 })}
+                {canRemoveTask(task.status) && (
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      void removeTask(task.id)
+                        .then(() => pushToast("Đã gỡ tác vụ khỏi danh sách."))
+                        .catch((err: unknown) =>
+                          pushToast(
+                            err instanceof Error ? err.message : "Không gỡ được tác vụ.",
+                          ),
+                        )
+                    }
+                  >
+                    <Eraser size={14} aria-hidden="true" />
+                    Gỡ khỏi danh sách
+                  </Button>
+                )}
               </DownloadCard>
             );
           })}

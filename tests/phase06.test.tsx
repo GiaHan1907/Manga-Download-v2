@@ -56,6 +56,7 @@ function mockQueue(tasks: ReturnType<typeof baseTask>[]) {
       const paused = tasks.map((t) => (t.id === args.taskId ? { ...t, status: "paused", revision: t.revision + 1 } : t));
       return Promise.resolve(paused.find((t) => t.id === args.taskId));
     }
+    if (cmd === "remove_download_task") return Promise.resolve(true);
     if (cmd === "app_get_info") return Promise.resolve({ name: "x", version: "0.1.0", platform: "windows" });
     if (cmd === "app_health_check") return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 4 });
     return Promise.reject(new Error(`unexpected command ${cmd}`));
@@ -91,8 +92,19 @@ describe("T06 Downloads manager (real backend)", () => {
     expect(within(doneCard).queryByText(/Đã xác minh/)).toBeNull(); // outputRelpath null in fixture
   });
 
-  it("invokes pause for the right task and re-renders the authoritative snapshot", async () => {
-    mockQueue([baseTask("t1", "downloading", 3)]);
+  it("a failed task offers retry and removal, never a cancel the backend rejects", async () => {
+    mockQueue([baseTask("t9", "failed", 1)]);
+    renderDownloads();
+    const card = (await screen.findByText("Truyện t9")).closest("article") as HTMLElement;
+    expect(within(card).queryByRole("button", { name: /Hủy/ })).toBeNull();
+    expect(within(card).getByRole("button", { name: /Thử lại/ })).toBeDefined();
+    fireEvent.click(within(card).getByRole("button", { name: /Gỡ khỏi danh sách/ }));
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("remove_download_task", { taskId: "t9" });
+    });
+  });
+
+  it("invokes pause for the right task and re-renders the authoritative snapshot", async () => {    mockQueue([baseTask("t1", "downloading", 3)]);
     renderDownloads();
     const card = (await screen.findByText("Truyện t1")).closest("article") as HTMLElement;
     fireEvent.click(within(card).getByRole("button", { name: /Tạm dừng/ }));

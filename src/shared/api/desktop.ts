@@ -285,6 +285,12 @@ export async function retryDownload(taskId: string): Promise<DownloadTaskDto> {
   return invoke<DownloadTaskDto>("retry_download", { taskId });
 }
 
+/// Remove one settled task row from the list. Rust owns the safety rule: only
+/// terminal rows, and never a completed one whose file is still on disk.
+export async function removeDownloadTask(taskId: string): Promise<boolean> {
+  return invoke<boolean>("remove_download_task", { taskId });
+}
+
 export async function setDownloadPriority(args: {
   taskId: string;
   priority: number;

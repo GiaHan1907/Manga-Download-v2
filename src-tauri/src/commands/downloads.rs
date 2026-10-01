@@ -287,6 +287,16 @@ pub async fn clear_download_history(
     download_history_service::clear(&state.db, &state.app_data_dir, statuses, older_than_days).await
 }
 
+/// Remove a single settled task row from the list (`failed` / `cancelled`, or
+/// `completed` once its artifact is gone). Never deletes a file.
+#[tauri::command]
+pub async fn remove_download_task(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, AppError> {
+    download_history_service::remove_one(&state.db, &state.app_data_dir, &task_id).await
+}
+
 /// Feature plan F5 — bulk-requeue every `failed` task (FIFO, capped).
 /// Each row goes through the same guarded retry transition as a single
 /// retry, so races with the dispatcher or a concurrent cancel are safe.

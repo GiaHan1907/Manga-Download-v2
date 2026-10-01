@@ -191,6 +191,23 @@ export function useDownloadQueue() {
     [applyAction],
   );
 
+  /// Drop one settled row. Unlike the other actions there is no DTO to merge
+  /// (the row is gone), so this only refetches the authoritative snapshot.
+  const removeTask = useCallback(
+    async (taskId: string): Promise<boolean> => {
+      try {
+        const removed = await downloadsApi.removeTask(taskId);
+        await refresh();
+        return removed;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Không gỡ được tác vụ.";
+        setActionErrors((prev) => ({ ...prev, [taskId]: message }));
+        throw err;
+      }
+    },
+    [refresh],
+  );
+
   /// Feature plan F5 bulk retry — server caps and guards every row; the
   /// snapshot refetch afterwards is authoritative regardless of the count.
   const retryAllFailed = useCallback(async (): Promise<number> => {
@@ -232,6 +249,7 @@ export function useDownloadQueue() {
     loading,
     error,
     actions,
+    removeTask,
     retryAllFailed,
     clearHistory,
     total,
