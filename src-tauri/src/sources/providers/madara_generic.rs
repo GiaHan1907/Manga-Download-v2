@@ -2318,12 +2318,10 @@ mod tests {
     /// stops that row shape from being built; this pins what it would do.
     #[tokio::test]
     async fn pages_on_a_host_the_source_never_registered_fail_the_chapter() {
-        let (provider, _) = adapter(vec![Ok(
-            r#"<div class="reading-content">
+        let (provider, _) = adapter(vec![Ok(r#"<div class="reading-content">
                  <img src="https://img.resourcehub.shop/truyen/1.jpg"/>
                  <img src="https://img.resourcehub.shop/truyen/2.jpg"/>
-               </div>"#,
-        )]);
+               </div>"#)]);
         assert!(matches!(
             provider.page_manifest("ninja-loan-thi", "tap-8").await,
             Err(SourceError::Parse)
