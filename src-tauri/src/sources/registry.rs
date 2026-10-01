@@ -15,7 +15,11 @@ pub const BUILTIN_IDS: &[&str] = &[
 ];
 pub const TTT_BASE_URL: &str = "https://truyentuoitho.com/";
 pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
-pub const TTT_IMAGE_HOSTS: &str = "img.resourcehub.shop";
+/// Exact image hosts this built-in ships with. `anooymi.workers.dev` is the
+/// Cloudflare Worker TTT serves its script-rendered (newer) chapters from,
+/// read off the live page 2026-10-01 — the images are no longer on the base
+/// host or `img.resourcehub.shop` for those chapters.
+pub const TTT_IMAGE_HOSTS: &str = "img.resourcehub.shop,truyentuoitho.anooymi.workers.dev";
 pub const QQ_BASE_URL: &str = "https://truyenqqko.com/";
 pub const QQ_DISPLAY_NAME: &str = "TruyenQQ";
 pub const NT_BASE_URL: &str = "https://nettruyen.gg/";

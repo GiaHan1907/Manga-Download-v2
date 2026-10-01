@@ -213,11 +213,16 @@ impl MadaraGeneric {
         base.set_fragment(None);
         let mut allowed_hosts = vec![host.clone()];
         allowed_hosts.extend(extras.iter().cloned());
-        // Hotlink-protected CDNs (the sharded image hosts these two sites
-        // serve chapters from) 403 any request without the site's own origin
-        // as Referer. Always our own base origin, never caller-supplied.
-        let referer = matches!(profile, SiteProfile::TruyenQQ | SiteProfile::Nettruyen)
-            .then(|| base.as_str().to_string());
+        // Hotlink-protected CDNs (the sharded image hosts these sites serve
+        // chapters from, and TTT's Cloudflare worker for its script-rendered
+        // chapters) 403 any request without the site's own origin as Referer.
+        // Always our own base origin, never caller-supplied. Dilib serves from
+        // its base host and stays without one.
+        let referer = matches!(
+            profile,
+            SiteProfile::TruyenQQ | SiteProfile::Nettruyen | SiteProfile::Madara
+        )
+        .then(|| base.as_str().to_string());
         let http = Arc::new(GuardedHttp::new(match profile {
             SiteProfile::Madara => HttpPolicy {
                 allowed_hosts,
@@ -1373,6 +1378,27 @@ impl SourceAdapter for MadaraGeneric {
                 let loose = Selector::parse(".reading-content img").unwrap();
                 collect_page_urls(&document, &loose, &self.base, &allowed, false, &mut urls)?;
             }
+            if urls.is_empty() {
+                // The container exists but is empty because the images are
+                // injected by an encrypted script. Still filtered through the
+                // source's own allowlist: decrypting never widens what we fetch.
+                for raw in encrypted_reader_images(&document).unwrap_or_default() {
+                    let Ok(joined) = self.base.join(&raw) else {
+                        continue;
+                    };
+                    if joined.scheme() != "https"
+                        || !joined
+                            .host_str()
+                            .is_some_and(|host| allowed.iter().any(|allowed| allowed == host))
+                    {
+                        continue;
+                    }
+                    if urls.len() >= MAX_PAGE_COUNT {
+                        break;
+                    }
+                    urls.push(joined.to_string());
+                }
+            }
         }
         if urls.is_empty() || urls.len() > MAX_PAGE_COUNT {
             return Err(SourceError::Parse);
@@ -1566,6 +1592,94 @@ impl SourceAdapter for MadaraGeneric {
     }
 }
 
+/// TTT hides the image list of some chapters in an inline script instead of
+/// `<img>` tags. Both live variants decrypt the same way — reverse the payload,
+/// base64-decode it, XOR against a key, `JSON.parse` — and differ only in where
+/// the key comes from and what the JSON looks like:
+///
+/// * `comic-app` chapters: `const d=atob('..')+atob('..')+…,s='<payload>'`,
+///   giving `{"images":["url", …]}`.
+/// * `c-w` chapters: `var k1='..',…,k4='..',d='<payload>'` with
+///   `gk(){atob(k1)+…}`, giving `{"i":[{"u":"url", …}, …]}`.
+///
+/// So the key is every `atob('<literal>')` in the script (in both variants
+/// those are exactly the four key chunks, and nothing else uses a literal), and
+/// the payload is the longest quoted string. Both JSON shapes are read. If a
+/// future variant stops matching, this returns `None` and the chapter fails
+/// loudly as `Parse` rather than downloading the wrong things.
+fn encrypted_reader_images(document: &Html) -> Option<Vec<String>> {
+    use base64::Engine as _;
+    let engine = base64::engine::general_purpose::STANDARD;
+    let script_selector = Selector::parse("script").ok()?;
+    let atob_literal = Regex::new(r#"atob\(['"]([^'"]+)['"]\)"#).ok()?;
+    let named_key = Regex::new(r#"\bk\d+=['"]([A-Za-z0-9+/=]{4,})['"]"#).ok()?;
+    let quoted = Regex::new(r#"['"]([A-Za-z0-9+/=]{200,})['"]"#).ok()?;
+
+    for node in document.select(&script_selector) {
+        let script = node.text().collect::<String>();
+        if !script.contains("String.fromCharCode(") || !script.contains("atob(") {
+            continue;
+        }
+        let mut key: Vec<u8> = Vec::new();
+        let decode_into = |key: &mut Vec<u8>, text: &str| {
+            if let Ok(bytes) = engine.decode(text.trim()) {
+                // Key chunks are short; anything large is payload material.
+                if !bytes.is_empty() && bytes.len() <= 32 {
+                    key.extend(bytes);
+                }
+            }
+        };
+        // Variant 1 inlines the chunks: `atob('..')+atob('..')`.
+        for capture in atob_literal.captures_iter(&script) {
+            decode_into(&mut key, &capture[1]);
+        }
+        // Variant 2 names them and calls `atob(k1)`, so the literals sit in
+        // `k1='..'` assignments instead.
+        if key.is_empty() {
+            for capture in named_key.captures_iter(&script) {
+                decode_into(&mut key, &capture[1]);
+            }
+        }
+        let payload = quoted
+            .captures_iter(&script)
+            .map(|capture| capture[1].to_string())
+            .max_by_key(|entry| entry.len())?;
+        if key.is_empty() {
+            continue;
+        }
+        let reversed: String = payload.chars().rev().collect();
+        let bytes = engine.decode(&reversed).ok()?;
+        let plain: Vec<u8> = bytes
+            .iter()
+            .enumerate()
+            .map(|(index, byte)| byte ^ key[index % key.len()])
+            .collect();
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&plain) else {
+            continue;
+        };
+        let entries = value
+            .get("images")
+            .or_else(|| value.get("i"))
+            .and_then(|list| list.as_array())?;
+        let urls: Vec<String> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                serde_json::Value::String(url) => Some(url.clone()),
+                object => object
+                    .get("u")
+                    .and_then(|url| url.as_str())
+                    .map(str::to_string),
+            })
+            .map(|url| url.trim().to_string())
+            .filter(|url| !url.is_empty())
+            .collect();
+        if !urls.is_empty() {
+            return Some(urls);
+        }
+    }
+    None
+}
+
 /// Collect reader images into `out`, resolving them against `base`.
 ///
 /// `reject_foreign` decides what an image on a host outside the source's
@@ -1726,6 +1840,15 @@ mod tests {
         <li><a href="https://truyentuoitho.com/manga/ninja-loan-thi/extern-special/">Special</a></li>
       </ul></div>
       </body></html>"#;
+
+    /// The built-in's shipped image hosts, split the way the registry splits
+    /// them: `live()` validates every entry as ONE exact hostname.
+    fn ttt_image_hosts() -> Vec<String> {
+        crate::sources::registry::TTT_IMAGE_HOSTS
+            .split(',')
+            .map(|entry| entry.trim().to_string())
+            .collect()
+    }
 
     fn adapter(
         replies: Vec<Result<&'static str, &'static str>>,
@@ -2064,7 +2187,7 @@ mod tests {
         let adapter = MadaraGeneric::live(
             "Truyen Tuoi Tho",
             "https://truyentuoitho.com/",
-            &[crate::sources::registry::TTT_IMAGE_HOSTS.to_string()],
+            &ttt_image_hosts(),
         )
         .unwrap();
         match adapter.search("ninja", 1).await {
@@ -2095,7 +2218,7 @@ mod tests {
         let adapter = MadaraGeneric::live(
             "Truyen Tuoi Tho",
             "https://truyentuoitho.com/",
-            &[crate::sources::registry::TTT_IMAGE_HOSTS.to_string()],
+            &ttt_image_hosts(),
         )
         .unwrap();
         for chapter in ["tap-9", "tap-10"] {
@@ -2173,7 +2296,7 @@ mod tests {
             MadaraGeneric::live(
                 "Truyen Tuoi Tho",
                 "https://truyentuoitho.com/",
-                &[crate::sources::registry::TTT_IMAGE_HOSTS.to_string()],
+                &ttt_image_hosts(),
             )
             .unwrap(),
         );
@@ -2214,7 +2337,7 @@ mod tests {
     /// read a real chapter. Before the fix this failed with SOURCE_PARSE_ERROR
     /// because the shipped CDN host was dropped on the way.
     #[tokio::test]
-    #[ignore = "live probe: a registry-built TTT adapter parses a real chapter"]
+    #[ignore = "live probe: a registry-built TTT adapter parses real chapters"]
     async fn live_registry_builtin_parses_ttt_chapter() {
         let row = crate::db::repositories::source_repo::SourceRow {
             id: "madara-truyentuoitho-com".to_string(),
@@ -2228,12 +2351,316 @@ mod tests {
         let adapter = registry
             .get("madara-truyentuoitho-com")
             .expect("TTT is a built-in");
-        let manifest = adapter
-            .page_manifest("ninja-loan-thi", "tap-8")
-            .await
-            .expect("a registry-built adapter must parse a real chapter");
-        println!("LIVE REGISTRY tap-8 pages={}", manifest.pages.len());
-        assert!(manifest.pages.len() > 100, "TTT chapters run ~230 pages");
+        let raw = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        // 61 and 65 are the chapters the user's retry still fails on (build
+        // with the NULL-host and ad-skip fixes), 32 is a known good one. The
+        // rest sample the SOURCE_NETWORK burst: those may simply retry fine.
+        for chapter in [
+            "tap-16", "tap-17", "tap-30", "tap-32", "tap-44", "tap-47", "tap-51", "tap-56",
+            "tap-57", "tap-61", "tap-64", "tap-65",
+        ] {
+            match adapter.page_manifest("ninja-loan-thi", chapter).await {
+                Ok(manifest) => {
+                    println!("LIVE REGISTRY {chapter} pages={}", manifest.pages.len())
+                }
+                Err(error) => println!("LIVE REGISTRY {chapter} ERR {}", error.code()),
+            }
+            // Count the raw candidates too: a chapter over MAX_PAGE_COUNT is
+            // refused as Parse, which looks identical to a markup failure.
+            let url = format!("https://truyentuoitho.com/manga/ninja-loan-thi/{chapter}/");
+            let html = match raw.http.get_text(&url).await {
+                Ok(html) => html,
+                Err(error) => {
+                    println!("LIVE REGISTRY {chapter} raw fetch err {error:?}");
+                    continue;
+                }
+            };
+            let document = Html::parse_document(&html);
+            let container = Selector::parse(".reading-content").unwrap();
+            let imgs = Selector::parse(".reading-content img").unwrap();
+            println!(
+                "LIVE REGISTRY {chapter} bytes={} container={} imgs_in_container={}",
+                html.len(),
+                document.select(&container).count(),
+                document.select(&imgs).count()
+            );
+            if document.select(&imgs).count() == 0 {
+                // The container exists but holds no image: dump what it DOES
+                // hold, and where the page's images actually are.
+                if let Some(node) = document.select(&container).next() {
+                    let snippet: String = node.html().chars().take(1500).collect();
+                    println!("LIVE REGISTRY {chapter} container html = {snippet}");
+                }
+                let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+                let all = Selector::parse("img").unwrap();
+                for node in document.select(&all) {
+                    let Some(raw) = ["src", "data-src", "data-lazy-src", "data-original"]
+                        .iter()
+                        .filter_map(|attr| node.value().attr(attr))
+                        .map(str::trim)
+                        .find(|value| !value.is_empty())
+                    else {
+                        continue;
+                    };
+                    if let Ok(joined) = Url::parse(raw) {
+                        *hosts
+                            .entry(joined.host_str().unwrap_or("-").to_string())
+                            .or_default() += 1;
+                    }
+                }
+                let classes: Vec<String> = document
+                    .select(&Selector::parse("div[class], span[class], iframe").unwrap())
+                    .take(400)
+                    .filter_map(|node| node.value().attr("class").map(str::to_string))
+                    .collect::<std::collections::BTreeSet<String>>()
+                    .into_iter()
+                    .take(30)
+                    .collect();
+                println!("LIVE REGISTRY {chapter} page img hosts={hosts:?}");
+                println!(
+                    "LIVE REGISTRY {chapter} iframes={}",
+                    document.select(&Selector::parse("iframe").unwrap()).count()
+                );
+                println!("LIVE REGISTRY {chapter} class sample={classes:?}");
+            }
+        }
+    }
+
+    /// Dump the obfuscated reader script of a real chapter to disk so the
+    /// decoding scheme can be studied offline instead of guessed from a
+    /// truncated log line.
+    #[tokio::test]
+    #[ignore = "live probe: save TTT's JS reader script for analysis"]
+    async fn live_builtin_ttt_dump_reader_script() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        for chapter in ["tap-56", "tap-61", "tap-65"] {
+            let url = format!("https://truyentuoitho.com/manga/ninja-loan-thi/{chapter}/");
+            let html = adapter
+                .http
+                .get_text(&url)
+                .await
+                .unwrap_or_else(|error| panic!("{chapter} fetch: {}", error.code()));
+            let document = Html::parse_document(&html);
+            let container = Selector::parse(".reading-content").unwrap();
+            let node = document
+                .select(&container)
+                .next()
+                .expect("reading-content must exist");
+            std::fs::write(
+                format!("D:/Project/Mangav2/.scratch/{chapter}-container.html"),
+                node.html(),
+            )
+            .expect("write container");
+            let scripts = Selector::parse("script").unwrap();
+            let mut longest = String::new();
+            for script in document.select(&scripts) {
+                let text = script.text().collect::<String>();
+                if text.len() > longest.len() {
+                    longest = text;
+                }
+            }
+            std::fs::write(
+                format!("D:/Project/Mangav2/.scratch/{chapter}-script.js"),
+                &longest,
+            )
+            .expect("write script");
+            println!(
+                "DUMP {chapter} container={} script={}",
+                node.html().len(),
+                longest.len()
+            );
+        }
+    }
+
+    /// Encode a payload the way the site does: XOR with the key, base64, then
+    /// reverse the string. The key is handed back split into four `atob`
+    /// literals, which is how both live variants ship it.
+    fn reader_script(json: &str, container_id: &str) -> String {
+        use base64::Engine as _;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let key = "urqGM1maNScG7tAI";
+        let xored: Vec<u8> = json
+            .bytes()
+            .enumerate()
+            .map(|(index, byte)| byte ^ key.as_bytes()[index % key.len()])
+            .collect();
+        let payload: String = engine.encode(&xored).chars().rev().collect();
+        let parts: Vec<String> = key
+            .as_bytes()
+            .chunks(4)
+            .map(|chunk| format!("atob('{}')", engine.encode(chunk)))
+            .collect();
+        format!(
+            "<html><body><div class=\"reading-content\"><script>(function(){{var c=document.getElementById('{container_id}');var d={};s='{payload}';var b=atob(s);var o='';for(var i=0;i<b.length;i++){{o+=String.fromCharCode(b.charCodeAt(i)^i)}}JSON.parse(o)}})();</script></div></body></html>",
+            parts.join("+")
+        )
+    }
+
+    /// Round-trips variant 1 (the `comic-app` chapters, verified against
+    /// tap-61 live 2026-10-01): `{{"images":["url", …]}}`.
+    #[test]
+    fn encrypted_reader_images_decodes_the_images_list_shape() {
+        let json = format!(
+            "{{\"images\":[{}]}}",
+            (0..6)
+                .map(|index| format!("\"https://img.resourcehub.shop/p{index}.jpg\""))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let document = Html::parse_document(&reader_script(&json, "cc"));
+        let images = encrypted_reader_images(&document).expect("the payload must decode");
+        assert_eq!(images.len(), 6);
+        assert_eq!(images[0], "https://img.resourcehub.shop/p0.jpg");
+        assert_eq!(images[5], "https://img.resourcehub.shop/p5.jpg");
+    }
+
+    /// Variant 2 (the `c-w` chapters, verified against tap-56 live
+    /// 2026-10-01): `{{"i":[{{"u":"url","w":…,"h":…}}, …]}}`.
+    #[test]
+    fn encrypted_reader_images_decodes_the_object_list_shape() {
+        let items = (0..6)
+            .map(|index| {
+                format!(
+                    "{{\"u\":\"https://truyentuoitho.anooymi.workers.dev/img?d=AAA{index}\",\"w\":800,\"h\":1200}}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!("{{\"i\":[{items}]}}");
+        let document = Html::parse_document(&reader_script(&json, "c-w"));
+        let images = encrypted_reader_images(&document).expect("the payload must decode");
+        assert_eq!(images.len(), 6);
+        assert!(images[0].starts_with("https://truyentuoitho.anooymi.workers.dev/"));
+    }
+
+    #[test]
+    fn encrypted_reader_images_ignores_pages_without_the_js_reader() {
+        let document = Html::parse_document(
+            r#"<html><body><div class="reading-content"><img src="/a.jpg"/></div></body></html>"#,
+        );
+        assert!(encrypted_reader_images(&document).is_none());
+    }
+
+    /// Live proof of the decrypt path on the chapters that were failing.
+    #[tokio::test]
+    #[ignore = "live probe: TTT's script-rendered chapters decode to real pages"]
+    async fn live_builtin_ttt_encrypted_chapter_parses() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        for chapter in ["tap-56", "tap-61", "tap-65"] {
+            let manifest = adapter
+                .page_manifest("ninja-loan-thi", chapter)
+                .await
+                .unwrap_or_else(|error| panic!("{chapter} still fails: {}", error.code()));
+            println!("ENCRYPTED {chapter} pages={}", manifest.pages.len());
+            assert!(manifest.pages.len() > 100, "a chapter is ~200+ pages");
+            assert!(manifest
+                .pages
+                .iter()
+                .all(|page| page.url.starts_with("https://")));
+            // A decrypted URL list is only useful if the worker really serves
+            // the image through the app's own host policy.
+            let first = &manifest.pages[0].url;
+            let bytes = adapter
+                .fetch_image(first)
+                .await
+                .unwrap_or_else(|error| panic!("{chapter} image fetch failed: {}", error.code()));
+            println!(
+                "ENCRYPTED {chapter} page1 bytes={} host={}",
+                bytes.len(),
+                first.split('/').nth(2).unwrap_or("-")
+            );
+            assert!(bytes.len() > 5_000, "a manga page is far bigger than that");
+        }
+    }
+
+    /// TTT serves some newer chapters with a JS reader: `.reading-content`
+    /// holds only `<div id="comic-app"><div id="cc">` plus a script that
+    /// assembles the image URLs from `atob(...)` chunks, so the plain HTML has
+    /// ZERO `<img>`. Before writing a decoder, find out whether the theme also
+    /// answers one of its own plain-page / ajax routes for the same chapter —
+    /// that is a far more stable seam than reverse-engineering the script.
+    #[tokio::test]
+    #[ignore = "live probe: does TTT expose a non-JS route for its obfuscated chapters"]
+    async fn live_builtin_ttt_js_reader_endpoints() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        let base = "https://truyentuoitho.com/manga/ninja-loan-thi/tap-61/";
+        for url in [
+            base.to_string(),
+            format!("{base}?style=list"),
+            format!("{base}?mode=list"),
+            format!("{base}?page-chap=1"),
+            format!("{base}?chapter_id=6762"),
+            format!("{base}01/"),
+            format!("{}?p=6762", adapter.base),
+            format!("{}wp-json/wp/v2/posts/6762", adapter.base),
+        ] {
+            match adapter.http.get_text(&url).await {
+                Ok(html) => {
+                    let document = Html::parse_document(&html);
+                    let imgs = Selector::parse(".reading-content img").unwrap();
+                    let any = Selector::parse("img").unwrap();
+                    let script_only = html.contains("id=\"comic-app\"");
+                    println!(
+                        "READER {} -> bytes={} reading_imgs={} all_imgs={} js_reader={script_only}",
+                        url.replace("https://truyentuoitho.com", ""),
+                        html.len(),
+                        document.select(&imgs).count(),
+                        document.select(&any).count(),
+                    );
+                }
+                Err(error) => println!(
+                    "READER {} -> err {}",
+                    url.replace("https://truyentuoitho.com", ""),
+                    error.code()
+                ),
+            }
+        }
+        for action in [
+            "madara_get_content",
+            "manga_get_chapters",
+            "get_reader_images",
+        ] {
+            let result = adapter
+                .http
+                .post_form_text(
+                    &format!("{}wp-admin/admin-ajax.php", adapter.base),
+                    &[
+                        ("action", action),
+                        ("post", "6762"),
+                        ("chapter", "tap-61"),
+                        ("chapter_id", "6762"),
+                    ],
+                )
+                .await;
+            match result {
+                Ok(body) => println!(
+                    "READER ajax {action} -> bytes={} head={}",
+                    body.len(),
+                    body.chars().take(160).collect::<String>().trim()
+                ),
+                Err(error) => println!("READER ajax {action} -> err {}", error.code()),
+            }
+        }
     }
 
     const CHAPTER_FIXTURE: &str = r#"<html><body>

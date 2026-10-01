@@ -99,7 +99,27 @@ Sửa: `Coordinator::observe_network_failure` (gọi sau mỗi worker kết thú
 
 Test: `network_breaker_stops_the_queue_and_returns_the_chapters_it_cost` (2 → chưa dừng, 3 → dừng + 5 row queued, 0 failed) và `network_breaker_only_counts_unreachable_source_failures` (xen một lỗi nội dung là chuỗi tính lại).
 
-### 2c. Hàng đợi tải chạy lộn xộn — 2026-10-01
+### 2c. TTT giấu ảnh trong script (chương mới) — 2026-10-01
+
+`SOURCE_PARSE_ERROR` còn lại KHÔNG phải host allowlist cũng không phải quảng cáo. Probe live chỉ ra ranh giới rõ: tap-16…51 parse bình thường (205–243 trang), tap-56/61/64/65 thì `.reading-content` **không có `<img>` nào** — nguồn chuyển sang render trình đọc bằng JavaScript với payload mã hoá.
+
+Đã loại trừ trước khi decrypt: `?style=list`, `?mode=list`, `?page-chap=1`, `?chapter_id=`, phân trang `/01/`, `wp-json/wp/v2/posts`, và 3 `admin-ajax` action — không route nào trả ảnh.
+
+Thuật toán (đọc từ chính page, hai biến thể đang sống):
+* `comic-app` (tap-61/65): `const d=atob('..')+atob('..')+…,s='<payload>'` → `{"images":["url",…]}`
+* `c-w` (tap-56): `var k1='..',…,k4='..',d='<payload>'` với `gk(){atob(k1)+…}` → `{"i":[{"u":"url","w","h"},…]}`
+
+Cả hai: `JSON.parse(XOR(base64(reverse(payload)), key))`. `encrypted_reader_images` vì thế KHÔNG hardcode gì: key = các literal `atob('..')`, nếu không có thì lấy `k1='..'…k4='..'`; payload = chuỗi base64 dài nhất trong script; đọc cả hai shape JSON. Biến thể mới không khớp → trả `None` → chương fail loudly `Parse`, không bao giờ tải nhầm.
+
+Hai thứ bắt buộc phải sửa kèm, nếu không decrypt vẫn vô dụng:
+1. Ảnh nằm ở Cloudflare Worker `truyentuoitho.anooymi.workers.dev` → phải có trong `TTT_IMAGE_HOSTS` (giờ là CSV hai host; `live()` validate TỪNG host nên probe phải tách CSV bằng `ttt_image_hosts()`).
+2. Worker trả **403** nếu thiếu `Referer` → `SiteProfile::Madara` cũng được đặt referer = chính origin của nguồn (Dilib vẫn không, vì ảnh nằm ngay base host).
+
+Bằng chứng live sau khi sửa: tap-56 = 243 trang, tap-61 = 242, tap-65 = 242, và trang đầu tải thật 300–356 KB (`live_builtin_ttt_encrypted_chapter_parses`). Test fixture: `reader_script` dựng lại đúng phép XOR/reverse/base64 cho cả hai shape.
+
+**Rủi ro đã biết:** đây là lớp chống scraping do họ chủ ý thêm. Key, shape JSON, tên worker và quy tắc 403 đều có thể đổi; khi đó các chương mới sẽ lại `SOURCE_PARSE_ERROR` trong khi chương cũ vẫn chạy — đó là dấu hiệu cần probe lại trang, không phải lỗi DB hay host.
+
+### 2d. Hàng đợi tải chạy lộn xộn — 2026-10-01
 
 User: "trong hàng đợi không download theo thứ tự chapter mà download random". `claim_next` xếp `priority DESC, created_at ASC, id ASC`, nhưng `queue_batch` ghi **cùng một `created_at`** cho cả batch (DB user: 64 chương đều `2026-10-01T05:53:55.471Z`) → tiebreak rơi xuống `id` là UUID → thứ tự đúng nghĩa ngẫu nhiên. Sửa: nối `chapters` và tiebreak theo **đúng biểu thức `manga_repo::list_chapters`** (`number IS NULL, number, created_at, id`) để hàng đợi chạy giống danh sách chương user nhìn thấy; `retryable_failed_ids` cũng đổi theo cho khớp. Test `t06_claim_order_follows_chapter_number_within_one_submission` seed chương theo thứ tự 3-1-2 và chốt claim ra 1-2-3. Không cần migration — thứ tự tính lúc claim, nên hàng đợi 64 chương đang chờ của user tự vào lại đúng trật tự.
 
