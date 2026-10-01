@@ -316,3 +316,117 @@ async fn live_paste_link_onto_running_app() {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
+
+/// End-to-end proof of the encrypted-reader fix through the app's OWN
+/// construction: the built-in adapter is built by `SourceRegistry::from_rows`
+/// from a row whose `image_hosts` is NULL (exactly what a merely-toggled source
+/// looks like), then the real Coordinator downloads one whole script-rendered
+/// chapter and exports a verified CBZ.
+#[tokio::test]
+#[ignore = "live probe: download a TTT script-rendered chapter end to end"]
+async fn live_ttt_encrypted_chapter_downloads() {
+    let dir = std::env::var("MANGA_LIVE_APP_DATA").unwrap_or_else(|_| {
+        let path = std::env::temp_dir().join("manga1989-ttt-js");
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path.to_string_lossy().to_string()
+    });
+    let app_data = PathBuf::from(dir);
+    let pool = init_pool(&app_data).await.expect("init_pool");
+    let rows = vec![crate::db::repositories::source_repo::SourceRow {
+        id: "madara-truyentuoitho-com".to_string(),
+        display_name: crate::sources::registry::TTT_DISPLAY_NAME.to_string(),
+        adapter: "madara".to_string(),
+        base_url: None,
+        image_hosts: None,
+        enabled: true,
+    }];
+    let registry = SourceRegistry::from_rows(&rows);
+    let saved = discovery_service::save(
+        &registry,
+        &pool,
+        "madara-truyentuoitho-com",
+        "ninja-loan-thi",
+    )
+    .await
+    .expect("save through the built-in registry");
+    println!(
+        "JS-Journey saved manga {} ({} chapters)",
+        saved.manga_id, saved.saved_chapter_count
+    );
+    let (chapter_id,): (String,) = sqlx::query_as(
+        "SELECT id FROM chapters WHERE manga_id = ?1 AND source_chapter_id = 'tap-56'",
+    )
+    .bind(&saved.manga_id)
+    .fetch_one(&pool)
+    .await
+    .expect("tap-56 must be saved");
+    let outcome = download_repo::queue_batch(&pool, &[chapter_id], "cbz", 0)
+        .await
+        .expect("queue");
+    assert!(
+        outcome.errors.is_empty(),
+        "queue rejected: {:?}",
+        outcome.errors
+    );
+    let task_id = outcome.created.first().expect("a task").id.clone();
+
+    let events = Arc::new(ProgressEmitter::new(Arc::new(CollectingSink::default())));
+    let coordinator = Coordinator::new(
+        pool.clone(),
+        Arc::new(Mutex::new(registry)),
+        app_data.clone(),
+        Arc::clone(&events),
+    );
+    coordinator.start();
+    coordinator.notify_new_work();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20 * 60);
+    let mut final_dto = None;
+    let mut last = String::new();
+    while std::time::Instant::now() < deadline {
+        let row = download_repo::get_task(&pool, &task_id)
+            .await
+            .unwrap()
+            .expect("task exists");
+        let dto = task_repo::to_dto(row);
+        let line = format!(
+            "{} {}/{} attempts={}",
+            dto.status, dto.completed_pages, dto.total_pages, dto.attempts
+        );
+        if line != last {
+            println!("JS-Journey {line}");
+            last = line;
+        }
+        if matches!(dto.status.as_str(), "completed" | "failed" | "cancelled") {
+            final_dto = Some(dto);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+    coordinator.shutdown().await;
+
+    let dto = final_dto.expect("the chapter never reached a terminal state");
+    println!(
+        "JS-Journey final: status={} pages={}/{} error={:?} relpath={:?}",
+        dto.status, dto.completed_pages, dto.total_pages, dto.error_message, dto.output_relpath
+    );
+    assert_eq!(
+        dto.status, "completed",
+        "a JS-rendered chapter must download"
+    );
+    let relpath = dto.output_relpath.expect("completed task has a path");
+    let artifact = storage::library_root(&app_data).join(&relpath);
+    let size = std::fs::metadata(&artifact)
+        .expect("artifact missing")
+        .len();
+    let archive = cbz::open(&artifact).expect("exported artifact must parse");
+    let first_page = cbz::read_entry(&artifact, &archive.entries[0]).expect("page 1 readable");
+    println!(
+        "JS-Journey artifact: {size} bytes, {} pages, page0 {} bytes",
+        archive.entries.len(),
+        first_page.len()
+    );
+    assert_eq!(archive.entries.len() as i64, dto.total_pages);
+    assert!(first_page.len() > 20, "page0 too small to be an image");
+}
