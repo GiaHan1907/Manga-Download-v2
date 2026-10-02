@@ -430,3 +430,51 @@ async fn live_ttt_encrypted_chapter_downloads() {
     assert_eq!(archive.entries.len() as i64, dto.total_pages);
     assert!(first_page.len() > 20, "page0 too small to be an image");
 }
+
+/// LIVE triage (opt-in, network): does TTT dual-serve the SAME image path on
+/// both registered image hosts? Builds the tap-5 manifest, prints every page
+/// URL host, then for the first page re-fetches with each image host spliced
+/// in. Proves (or disproves) that a host failover can rescue a dead CDN shard.
+#[tokio::test]
+#[ignore = "live image-host dual-serve triage for TTT"]
+async fn live_ttt_image_host_dual_serve_probe() {
+    use url::Url;
+    let rows = vec![source_repo::SourceRow {
+        id: "madara-truyentuoitho-com".to_string(),
+        display_name: crate::sources::registry::TTT_DISPLAY_NAME.to_string(),
+        adapter: "madara".to_string(),
+        base_url: None,
+        image_hosts: None,
+        enabled: true,
+    }];
+    let registry = SourceRegistry::from_rows(&rows);
+    let adapter = registry.get("madara-truyentuoitho-com").unwrap();
+    let manifest = adapter
+        .page_manifest("ninja-loan-thi", "tap-5")
+        .await
+        .expect("tap-5 manifest");
+    assert!(!manifest.pages.is_empty(), "tap-5 has no pages");
+    let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+    for page in &manifest.pages {
+        if let Ok(u) = Url::parse(&page.url) {
+            *hosts
+                .entry(u.host_str().unwrap_or("?").to_string())
+                .or_default() += 1;
+        }
+    }
+    println!(
+        "DUAL manifest hosts: {hosts:?} ({} pages)",
+        manifest.pages.len()
+    );
+
+    let first = Url::parse(&manifest.pages[0].url).expect("page0 url");
+    let candidates = ["img.resourcehub.shop", "truyentuoitho.anooymi.workers.dev"];
+    for host in candidates {
+        let mut swapped = first.clone();
+        let _ = swapped.set_host(Some(host));
+        match adapter.fetch_image(swapped.as_str()).await {
+            Ok(bytes) => println!("DUAL {host}: OK {} bytes", bytes.len()),
+            Err(error) => println!("DUAL {host}: ERR {}", error.code()),
+        }
+    }
+}
