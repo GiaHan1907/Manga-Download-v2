@@ -1589,6 +1589,13 @@ impl SourceAdapter for MadaraGeneric {
                 .filter(|chapter| chapter.number.is_none()),
         );
         chapters = numbered;
+        if chapters.is_empty() {
+            // A story page that yields NO chapter at all is a maintenance or
+            // interstitial shell (HTTP 200, live Dilib 2026-10-02 served
+            // "Hệ Thống Đang Bảo Trì" for every URL) — reporting it as a
+            // genuine empty catalog makes a dead source look alive.
+            return Err(SourceError::Upstream);
+        }
         for (index, chapter) in chapters.iter_mut().enumerate() {
             chapter.order = index as i64;
         }
@@ -2052,6 +2059,24 @@ mod tests {
         assert_eq!(chapter_number_from_slug("one-piece-chap-590"), Some(590.0));
         assert_eq!(chapter_number_from_slug("tap-3-75"), Some(3.75));
         assert_eq!(chapter_number_from_slug("chap-10-2"), Some(10.2));
+    }
+
+    /// A 200 page with story markup but zero chapter anchors is a maintenance
+    /// shell (live Dilib, 2026-10-02) — it must fail as an upstream problem,
+    /// never surface as a real "0 chapters" catalog.
+    #[tokio::test]
+    async fn detail_of_a_chapterless_shell_page_is_upstream_error() {
+        let (provider, _) = adapter(vec![Ok(
+            "<html><body><h1>Hệ Thống Đang Bảo Trì</h1></body></html>",
+        )]);
+        let error = provider
+            .manga_detail("dao-hai-tac-one-piece-14728")
+            .await
+            .expect_err("a shell page is not a catalog");
+        assert!(
+            matches!(error, SourceError::Upstream),
+            "shell pages must read as source trouble: {error:?}"
+        );
     }
 
     #[test]
@@ -4101,6 +4126,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "live network probe: built-in Dilib URL import -> detail -> pages over the app transport (wreq)"]
     async fn live_builtin_dilib_probe() {
+        // SITE STATUS 2026-10-02: dilib.vn serves a "Hệ Thống Đang Bảo Trì"
+        // maintenance shell (HTTP 200, no content) for EVERY story/chapter
+        // URL — this probe then fails at "live detail" with SOURCE_UPSTREAM
+        // (the deliberate empty-catalog guard below). Re-run it to learn when
+        // the source serves content again; nothing in the adapter changed.
         let adapter = MadaraGeneric::built_in(
             "dilib",
             "Dilib",
