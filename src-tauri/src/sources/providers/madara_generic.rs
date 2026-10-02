@@ -845,20 +845,21 @@ fn dilib_story_slug(slug: &str) -> bool {
 
 fn chapter_number_from_slug(slug: &str) -> Option<f64> {
     // TruyenQQ-family slugs write fractional chapters with a dash:
-    // "-chap-2-1" means chapter 2.1. Read that pair as a decimal BEFORE the
-    // plain trailing-number rule, which would otherwise collapse every "X.1"
-    // to 1 (live bug 2026-10-02: chapter 2.1 saved as chapter-1.cbz).
-    if let Ok(re) = Regex::new(r"(\d+)-(\d+)$") {
-        if let Some(caps) = re.captures(slug) {
-            let joined = format!("{}.{}", caps.get(1)?.as_str(), caps.get(2)?.as_str());
-            if let Ok(value) = joined.parse::<f64>() {
-                return Some(value);
-            }
-        }
+    // "-chap-2-1" means chapter 2.1 (live bug 2026-10-02: reading only the
+    // trailing digit run collapsed every "X.1" to number 1 and exported
+    // chapter 2.1 onto chapter-1.cbz). Take the WHOLE trailing numeric block
+    // (groups joined by '.', ',' or '-'): exactly one separator is a decimal;
+    // no separator is an integer; two or more ("1-2-3", "1.2.3") are ambiguous
+    // — a missing number only sorts the chapter as unnumbered, a wrong one
+    // corrupts the export filename, so refuse to guess.
+    let re = Regex::new(r"(\d+(?:[.,-]\d+)*)$").ok()?;
+    let block = re.captures(slug)?.get(1)?.as_str().to_string();
+    let separators = block.matches(['.', ',', '-']).count();
+    match separators {
+        0 => block.parse::<f64>().ok(),
+        1 => Some(block.replace(['-', ','], ".").parse::<f64>().ok()?),
+        _ => None,
     }
-    let re = Regex::new(r"(\d+(?:[.,]\d+)?)$").ok()?;
-    let cap = re.captures(slug)?.get(1)?.as_str().to_string();
-    cap.replace(',', ".").parse::<f64>().ok()
 }
 
 #[async_trait]
@@ -2059,6 +2060,12 @@ mod tests {
         assert_eq!(chapter_number_from_slug("one-piece-chap-590"), Some(590.0));
         assert_eq!(chapter_number_from_slug("tap-3-75"), Some(3.75));
         assert_eq!(chapter_number_from_slug("chap-10-2"), Some(10.2));
+        // Three or more numeric groups are ambiguous ("1.2.3"? "12" part 3?) —
+        // a missing number only sorts the chapter as unnumbered, a WRONG one
+        // corrupts the export filename, so refuse to guess.
+        assert_eq!(chapter_number_from_slug("chap-1-2-3"), None);
+        assert_eq!(chapter_number_from_slug("chapter-1.2.3"), None);
+        assert_eq!(chapter_number_from_slug("chap-1-2.3"), None);
     }
 
     /// A 200 page with story markup but zero chapter anchors is a maintenance
