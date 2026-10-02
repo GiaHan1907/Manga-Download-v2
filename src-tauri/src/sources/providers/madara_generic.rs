@@ -58,10 +58,13 @@ const DILIB_RESERVED: &[&str] = &[
     "ung-ho-donate",
 ];
 
-/// TruyenQQ serves chapter images from rotating shards of this CDN domain.
-/// A domain (not exact-host) allowlist is only ever set by built-in code —
-/// user-registered sources keep the exact-host fail-closed policy.
-const TRUYENQQ_IMAGE_DOMAIN: &str = "truyenvua.com";
+/// TruyenQQ serves chapter images from a small family of fixed CDN domains
+/// that rotate per series (observed: `*.truyenvua.com` shards, and since
+/// 2026-10-02 `hinhtruyen.com` with a `tintruyen.com` alternate carried in
+/// `data-cdn`). A domain (not exact-host) allowlist is only ever set by
+/// built-in code — user-registered sources keep the exact-host fail-closed
+/// policy.
+const TRUYENQQ_IMAGE_DOMAINS: &[&str] = &["truyenvua.com", "hinhtruyen.com", "tintruyen.com"];
 /// TruyenQQ covers are not hosted by the site itself either; they ship from
 /// this second CDN. File names carry an upload timestamp, so unlike NetTruyen
 /// the key must keep the source's own path — it is validated as a bare
@@ -234,6 +237,11 @@ impl MadaraGeneric {
                 allowed_domains: TRUYENQQ_COVER_DOMAINS
                     .iter()
                     .map(|(_, domain)| domain.to_string())
+                    .chain(
+                        TRUYENQQ_IMAGE_DOMAINS
+                            .iter()
+                            .map(|domain| domain.to_string()),
+                    )
                     .collect(),
                 referer,
             },
@@ -1287,9 +1295,9 @@ impl SourceAdapter for MadaraGeneric {
         // TruyenQQ prints them in plain `src`, NetTruyen in `data-src`, so both
         // attributes are tried and the CDN host test is what rejects ads,
         // avatars and placeholders. Dilib (and Madara) serve pages from base.
-        let lazy_cdn = match self.profile {
-            SiteProfile::TruyenQQ => Some(TRUYENQQ_IMAGE_DOMAIN),
-            SiteProfile::Nettruyen => Some(NETTRUYEN_IMAGE_DOMAIN),
+        let lazy_cdn: Option<&'static [&'static str]> = match self.profile {
+            SiteProfile::TruyenQQ => Some(TRUYENQQ_IMAGE_DOMAINS),
+            SiteProfile::Nettruyen => Some(std::slice::from_ref(&NETTRUYEN_IMAGE_DOMAIN)),
             SiteProfile::Madara | SiteProfile::Dilib => None,
         };
         if let Some(cdn) = lazy_cdn {
@@ -1312,9 +1320,10 @@ impl SourceAdapter for MadaraGeneric {
                     continue;
                 };
                 if joined.scheme() != "https"
-                    || !joined
-                        .host_str()
-                        .is_some_and(|host| host == cdn || host.ends_with(&format!(".{cdn}")))
+                    || !joined.host_str().is_some_and(|host| {
+                        cdn.iter()
+                            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+                    })
                 {
                     continue;
                 }
@@ -2954,6 +2963,30 @@ mod tests {
         assert!(manifest.pages[0]
             .url
             .starts_with("https://i178.truyenvua.com/"));
+    }
+
+    // Live-observed 2026-10-02: "bản đẹp" series rotate their page CDN to
+    // hinhtruyen.com (data-cdn names the tintruyen.com alternate) while
+    // other series stay on truyenvua shards. Both shapes must parse.
+    const QQ_PAGES_ROTATED: &str = r#"<html><body>
+      <div id="page_0" class="page-chapter"><img class="lazy" src="https://hinhtruyen.com/8777/1.1/0.jpg?pt=sdffsd" data-original="https://hinhtruyen.com/8777/1.1/0.jpg?pt=sdffsd" data-cdn="https://tintruyen.com/8777/1.1/0.jpg"></div>
+      <div id="page_1" class="page-chapter"><img class="lazy" src="https://hinhtruyen.com/8777/1.1/1.jpg?pt=sdffsd" data-original="https://hinhtruyen.com/8777/1.1/1.jpg?pt=sdffsd" data-cdn="https://tintruyen.com/8777/1.1/1.jpg"></div>
+      <img src="https://av.truyenvua.com/160x160/avatar_1.jpg">
+      <img src="https://ads.example.invalid/banner.gif">
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn qq_pages_accept_the_rotated_hinhtruyen_cdn() {
+        let (provider, _) = qq(vec![Ok(QQ_PAGES_ROTATED)]);
+        let manifest = provider
+            .page_manifest(
+                "ninja-loan-thi-ban-dep-8777",
+                "ninja-loan-thi-ban-dep-8777-chap-1-1",
+            )
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2, "avatar and ad hosts stay excluded");
+        assert!(manifest.pages[0].url.starts_with("https://hinhtruyen.com/"));
     }
 
     #[tokio::test]
