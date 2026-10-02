@@ -692,11 +692,12 @@ pub fn find_chapter_link(registry: &SourceRegistry, url: &str) -> Result<Chapter
     }
 }
 
-/// Ensure the manga exists locally (saving it through the normal discovery
-/// path on first sight — live validation included) and return the DB row id
-/// of the chapter the link points at. If the manga was already saved but the
-/// chapter is missing from the local catalog (source published it after the
-/// last save), ONE refresh-save runs before giving up.
+/// Ensure the manga exists locally and return the DB row id of the chapter
+/// the link points at. EVERY paste refresh-saves the catalog first (one live
+/// `manga_detail`): a paste is an explicit manual act, and the refresh heals
+/// rows a previous buggy parser stored with wrong numbers/titles — otherwise
+/// the download would export under the stale name (live bug 2026-10-02:
+/// chapter 2.1 stored as number 1 exported onto chapter-1.cbz).
 pub async fn ensure_chapter_row(
     registry: &SourceRegistry,
     pool: &SqlitePool,
@@ -715,33 +716,8 @@ pub async fn ensure_chapter_row(
         .map(|(id,)| id)
     }
 
-    let manga_id: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM mangas WHERE source_id = ?1 AND source_manga_id = ?2")
-            .bind(&link.source_id)
-            .bind(&link.manga_slug)
-            .fetch_optional(pool)
-            .await?;
-    let fresh_save = manga_id.is_none();
-    let manga_id = match manga_id {
-        Some((id,)) => id,
-        None => {
-            save(registry, pool, &link.source_id, &link.manga_slug)
-                .await?
-                .manga_id
-        }
-    };
-    if let Some(id) = lookup(pool, &manga_id, link).await {
-        return Ok(id);
-    }
-    if fresh_save {
-        // Just saved from the live catalog and still absent → the link's
-        // chapter genuinely is not on the source.
-        return Err(AppError::not_found(
-            "chương tương ứng với link — nguồn có thể đã đổi slug",
-        ));
-    }
-    save(registry, pool, &link.source_id, &link.manga_slug).await?;
-    lookup(pool, &manga_id, link)
+    let saved = save(registry, pool, &link.source_id, &link.manga_slug).await?;
+    lookup(pool, &saved.manga_id, link)
         .await
         .ok_or_else(|| AppError::not_found("chương tương ứng với link — nguồn có thể đã đổi slug"))
 }
@@ -1220,7 +1196,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        // Second call is pure lookup — no duplicate manga.
+        // Second call refresh-saves and resolves the SAME row — no duplicate manga.
         let again = ensure_chapter_row(&registry, &pool, &link).await.unwrap();
         assert_eq!(again, chapter_id);
         assert_eq!(count(&pool, "mangas").await, 1);
@@ -1266,5 +1242,42 @@ mod tests {
             "http://fixture.manga1989.invalid/manga/fx-01/fx-01-c1/"
         )
         .is_err());
+    }
+
+    /// A pasted link is an explicit, manual act on ONE chapter — refresh the
+    /// saved catalog even when the row already exists. Without this, rows
+    /// stored by an older (buggy) parser keep their wrong number forever and
+    /// the download exports under the stale name (live bug 2026-10-02:
+    /// chapter 2.1 stored as number 1 → exported onto chapter-1.cbz).
+    #[tokio::test]
+    async fn chapter_link_refreshes_stale_numbers_of_existing_rows() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+        let link = find_chapter_link(
+            &registry,
+            "https://fixture.manga1989.invalid/manga/fx-01/fx-01-c1/",
+        )
+        .unwrap();
+        let chapter_id = ensure_chapter_row(&registry, &pool, &link).await.unwrap();
+        sqlx::query("UPDATE chapters SET number = 99.0 WHERE id = ?1")
+            .bind(&chapter_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let again = ensure_chapter_row(&registry, &pool, &link)
+            .await
+            .expect("existing row must still resolve");
+        assert_eq!(again, chapter_id, "same row, not a re-insert");
+        let number: Option<f64> = sqlx::query_scalar("SELECT number FROM chapters WHERE id = ?1")
+            .bind(&chapter_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            number,
+            Some(1.0),
+            "the refresh-save must heal the stale number"
+        );
     }
 }
