@@ -555,3 +555,47 @@ async fn live_nettruyen_journey_probe() {
         }
     }
 }
+
+/// LIVE self-heal of the fractional-chapter numbering fix: run the real watch
+/// tick (the same path as the "Kiểm tra chương mới" button) against a COPY of
+/// the app data, then check that the TruyenQQ "X.Y" chapters got their decimal
+/// numbers back. Proves the stale rows are repaired by re-saving alone, without
+/// touching the live database.
+///   MANGA_LIVE_APP_DATA="<copy dir>" cargo test --lib -- --ignored --nocapture live_fractional_selfheal
+#[tokio::test]
+#[ignore = "live self-heal probe for dash-fractional chapter numbers"]
+async fn live_fractional_selfheal_probe() {
+    use crate::services::watch_service;
+    let dir = std::env::var("MANGA_LIVE_APP_DATA").expect("MANGA_LIVE_APP_DATA = COPY of app data");
+    let app_data = PathBuf::from(dir);
+    let pool = init_pool(&app_data).await.expect("init_pool");
+    let rows = source_repo::list_sources(&pool)
+        .await
+        .expect("list_sources");
+    let registry = SourceRegistry::from_rows(&rows);
+    let report = watch_service::run_tick(&pool, &registry, true, 50, true)
+        .await
+        .expect("forced tick");
+    println!(
+        "HEAL tick: checked={} alerted={} failed={}",
+        report.checked, report.alerted_chapters, report.failed
+    );
+    let numbers: Vec<(String, Option<f64>)> = sqlx::query_as(
+        "SELECT c.title, c.number FROM chapters c \
+         JOIN mangas m ON m.id = c.manga_id \
+         WHERE c.source_chapter_id LIKE '%chap-2-1' OR c.source_chapter_id LIKE '%chap-10-1' \
+         ORDER BY c.title",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    for (title, number) in &numbers {
+        println!("HEAL {title} => {number:?}");
+    }
+    assert!(
+        numbers
+            .iter()
+            .any(|(_, n)| *n == Some(2.1) || *n == Some(10.1)),
+        "fractional numbers must be restored by the tick"
+    );
+}
