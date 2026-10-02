@@ -1,28 +1,20 @@
-//! Feature plan F2 — download-history purge. Non-destructive to anything the
-//! library still references: a completed task whose verified artifact is
-//! present on disk keeps its row (that row is the proof behind the card's
-//! "đã xác minh" line and the `has_missing` signal — deleting it would turn
-//! a healthy chapter into an unprovable one). Never touches files.
-
-use std::path::Path;
+//! Feature plan F2 — download-history purge. Deletes history ROWS only and
+//! never touches a file: a purged completed chapter keeps its artifact on
+//! disk, and the Library's own proof (`chapters.local_path`) survives, so
+//! the chapter stays readable and counted as downloaded.
 
 use sqlx::SqlitePool;
 
 use crate::db::repositories::download_repo;
 use crate::domain::ClearHistoryDto;
+#[cfg(test)]
 use crate::downloader::storage;
 use crate::error::AppError;
 
 /// Remove ONE settled task row, for a per-card "gỡ khỏi danh sách". Same
-/// non-destructive rule as the bulk purge: a completed task whose verified
-/// artifact is still on disk keeps its row — that row is the proof behind the
-/// card's "đã xác minh" line, so removing it would turn a healthy chapter into
-/// an unprovable one. Never touches files.
-pub async fn remove_one(
-    pool: &SqlitePool,
-    app_data_dir: &Path,
-    task_id: &str,
-) -> Result<bool, AppError> {
+/// rule as the bulk purge: the row goes, the file and the chapter's own
+/// library record never do.
+pub async fn remove_one(pool: &SqlitePool, task_id: &str) -> Result<bool, AppError> {
     crate::domain::validate_id(task_id, "taskId")?;
     let row = download_repo::get_task(pool, task_id)
         .await?
@@ -32,22 +24,11 @@ pub async fn remove_one(
             "Chỉ gỡ được tác vụ đã kết thúc (hoàn thành, lỗi hoặc đã hủy).",
         ));
     }
-    let artifact_present = row.status == "completed"
-        && row.output_relpath.as_deref().is_some_and(|relpath| {
-            storage::validate_relpath(relpath).is_ok()
-                && storage::library_root(app_data_dir).join(relpath).exists()
-        });
-    if artifact_present {
-        return Err(AppError::validation(
-            "Chương này còn file đã tải — xóa trong Thư viện để gỡ cả bản ghi.",
-        ));
-    }
     download_repo::delete_terminal_task(pool, task_id).await
 }
 
 pub async fn clear(
     pool: &SqlitePool,
-    app_data_dir: &Path,
     statuses: Option<Vec<String>>,
     older_than_days: Option<i64>,
 ) -> Result<ClearHistoryDto, AppError> {
@@ -83,19 +64,9 @@ pub async fn clear(
     };
 
     let candidates = download_repo::history_candidates(pool, &requested, cutoff.as_deref()).await?;
-    let library_root = storage::library_root(app_data_dir);
     let mut deleted = 0i64;
-    let mut skipped_artifact = 0i64;
     let mut skipped_other = 0i64;
     for row in candidates {
-        let artifact_present = row.status == "completed"
-            && row.output_relpath.as_deref().is_some_and(|relpath| {
-                storage::validate_relpath(relpath).is_ok() && library_root.join(relpath).exists()
-            });
-        if artifact_present {
-            skipped_artifact += 1;
-            continue;
-        }
         if download_repo::delete_terminal_task(pool, &row.id).await? {
             deleted += 1;
         } else {
@@ -105,7 +76,6 @@ pub async fn clear(
     }
     Ok(ClearHistoryDto {
         deleted,
-        skipped_artifact,
         skipped_other,
     })
 }
@@ -193,9 +163,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t11_purge_keeps_completed_with_artifact_deletes_rest_cascade_pages() {
+    async fn t11_purge_deletes_every_terminal_row_but_never_files() {
         let fx = fixture().await;
-        // completed + artifact ON DISK → kept; completed + gone → deleted.
+        // completed + artifact ON DISK → the ROW is deleted, the FILE stays.
         task_in_status_with(
             &fx.pool,
             "tk-kept",
@@ -225,13 +195,12 @@ mod tests {
                 .bind(id).execute(&fx.pool).await.unwrap();
         }
 
-        let outcome = clear(&fx.pool, fx.data.path(), None, None).await.unwrap();
-        assert_eq!(outcome.deleted, 3);
-        assert_eq!(outcome.skipped_artifact, 1);
+        let outcome = clear(&fx.pool, None, None).await.unwrap();
+        assert_eq!(outcome.deleted, 4);
         assert_eq!(outcome.skipped_other, 0);
         let left = statuses(&fx.pool).await;
         let ids: Vec<&str> = left.iter().map(|(id, _)| id.as_str()).collect();
-        assert_eq!(ids, vec!["tk-kept", "tk-queued"]);
+        assert_eq!(ids, vec!["tk-queued"]);
         let pages: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM download_pages")
             .fetch_one(&fx.pool)
             .await
@@ -243,6 +212,48 @@ mod tests {
                 .exists(),
             "purge must never delete artifacts"
         );
+    }
+
+    #[tokio::test]
+    async fn t11_purging_a_completed_row_leaves_the_library_proof_untouched() {
+        let fx = fixture().await;
+        task_in_status_with(
+            &fx.pool,
+            "tk-done",
+            &fx.chapters[0],
+            "completed",
+            Some("title-ma1/ch-proof.cbz"),
+        )
+        .await;
+        let dir = storage::library_root(fx.data.path()).join("title-ma1");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ch-proof.cbz"), b"real").unwrap();
+        sqlx::query("UPDATE chapters SET local_path = 'title-ma1/ch-proof.cbz' WHERE id = ?1")
+            .bind(&fx.chapters[0])
+            .execute(&fx.pool)
+            .await
+            .unwrap();
+
+        let outcome = clear(&fx.pool, Some(vec!["completed".to_string()]), None)
+            .await
+            .unwrap();
+        assert_eq!(outcome.deleted, 1);
+        assert!(download_repo::get_task(&fx.pool, "tk-done")
+            .await
+            .unwrap()
+            .is_none());
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT local_path FROM chapters WHERE id = ?1")
+                .bind(&fx.chapters[0])
+                .fetch_one(&fx.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some("title-ma1/ch-proof.cbz"),
+            "the chapter's own library record must survive its history row"
+        );
+        assert!(dir.join("ch-proof.cbz").exists());
     }
 
     #[tokio::test]
@@ -258,14 +269,9 @@ mod tests {
         task_in_status(&fx.pool, "tk-new", &fx.chapters[1], "failed").await;
         task_in_status(&fx.pool, "tk-cancelled", &fx.chapters[2], "cancelled").await;
 
-        let outcome = clear(
-            &fx.pool,
-            fx.data.path(),
-            Some(vec!["failed".to_string()]),
-            Some(30),
-        )
-        .await
-        .unwrap();
+        let outcome = clear(&fx.pool, Some(vec!["failed".to_string()]), Some(30))
+            .await
+            .unwrap();
         assert_eq!(outcome.deleted, 1);
         let left = statuses(&fx.pool).await;
         let ids: Vec<&str> = left.iter().map(|(id, _)| id.as_str()).collect();
@@ -280,21 +286,15 @@ mod tests {
     async fn t11_rejects_non_terminal_or_empty_status_sets() {
         let fx = fixture().await;
         assert!(matches!(
-            clear(
-                &fx.pool,
-                fx.data.path(),
-                Some(vec!["downloading".to_string()]),
-                None
-            )
-            .await,
+            clear(&fx.pool, Some(vec!["downloading".to_string()]), None).await,
             Err(AppError::Validation(_))
         ));
         assert!(matches!(
-            clear(&fx.pool, fx.data.path(), Some(vec![]), None).await,
+            clear(&fx.pool, Some(vec![]), None).await,
             Err(AppError::Validation(_))
         ));
         assert!(matches!(
-            clear(&fx.pool, fx.data.path(), None, Some(-1)).await,
+            clear(&fx.pool, None, Some(-1)).await,
             Err(AppError::Validation(_))
         ));
     }
@@ -306,7 +306,7 @@ mod tests {
         sqlx::query("INSERT INTO download_pages (task_id, page_index, status, created_at, updated_at) VALUES (?1, 0, 'pending', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
             .bind("tk-f").execute(&fx.pool).await.unwrap();
 
-        assert!(remove_one(&fx.pool, fx.data.path(), "tk-f").await.unwrap());
+        assert!(remove_one(&fx.pool, "tk-f").await.unwrap());
         assert!(download_repo::get_task(&fx.pool, "tk-f")
             .await
             .unwrap()
@@ -314,11 +314,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t11_remove_one_refuses_running_tasks_and_artifact_backed_rows() {
+    async fn t11_remove_one_refuses_running_tasks_and_deletes_artifact_backed_rows() {
         let fx = fixture().await;
         task_in_status(&fx.pool, "tk-run", &fx.chapters[0], "downloading").await;
         assert!(matches!(
-            remove_one(&fx.pool, fx.data.path(), "tk-run").await,
+            remove_one(&fx.pool, "tk-run").await,
             Err(AppError::Validation(_))
         ));
 
@@ -333,20 +333,21 @@ mod tests {
         let dir = storage::library_root(fx.data.path()).join("title-ma1");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("ch-keep.cbz"), b"real").unwrap();
-        assert!(matches!(
-            remove_one(&fx.pool, fx.data.path(), "tk-kept").await,
-            Err(AppError::Validation(_))
-        ));
         assert!(
-            download_repo::get_task(&fx.pool, "tk-kept")
-                .await
-                .unwrap()
-                .is_some(),
-            "the proof row must survive a refused removal"
+            remove_one(&fx.pool, "tk-kept").await.unwrap(),
+            "a settled row is removable even while its file stays on disk"
+        );
+        assert!(download_repo::get_task(&fx.pool, "tk-kept")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(
+            dir.join("ch-keep.cbz").exists(),
+            "removing history must never delete the file"
         );
 
         assert!(matches!(
-            remove_one(&fx.pool, fx.data.path(), "tk-ghost").await,
+            remove_one(&fx.pool, "tk-ghost").await,
             Err(AppError::NotFound(_))
         ));
     }

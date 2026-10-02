@@ -33,11 +33,9 @@ export type QueueResultDto = {
 };
 
 /// Feature plan F2 — purge result mirror (camelCase via serde).
-/// `skippedArtifact`: completed rows whose artifact is still on disk (kept on
-/// purpose); `skippedOther`: rows a concurrent action moved out of scope.
+/// `skippedOther`: rows a concurrent action moved out of scope mid-purge.
 export type ClearHistoryDto = {
   deleted: number;
-  skippedArtifact: number;
   skippedOther: number;
 };
 
@@ -93,8 +91,8 @@ export function allowedDownloadActions(status: DownloadTaskDto["status"]): ("pau
 }
 
 /// Rows the "Gỡ khỏi danh sách" action may remove: exactly the states Rust
-/// treats as settled. A `completed` row whose file is still on disk is refused
-/// server-side, so the button can still report an error for that one case.
+/// treats as settled. Removing a row never deletes its file — the chapter
+/// stays in the Library through its own record.
 export function canRemoveTask(status: DownloadTaskDto["status"]): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }

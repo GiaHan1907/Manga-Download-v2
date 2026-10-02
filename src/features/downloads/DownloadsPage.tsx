@@ -160,17 +160,12 @@ export default function DownloadsPage() {
       .then((outcome) => {
         const limit =
           purgeOlderThanDays === null ? "" : ` chỉ mục cũ hơn ${purgeOlderThanDays} ngày`;
-        if (outcome.deleted === 0 && outcome.skippedArtifact === 0) {
+        if (outcome.deleted === 0) {
           pushToast(
             `Không có mục nào khớp${limit === "" ? " bộ lọc" : limit} — lịch sử vẫn nguyên.`,
           );
         } else {
-          pushToast(
-            `Đã xóa ${outcome.deleted} mục lịch sử${limit}` +
-              (outcome.skippedArtifact > 0
-                ? ` · giữ ${outcome.skippedArtifact} mục còn file.`
-                : "."),
-          );
+          pushToast(`Đã xóa ${outcome.deleted} mục lịch sử${limit}. File truyện không bị xóa.`);
         }
         setPurgeOpen(false);
       })
@@ -412,7 +407,7 @@ export default function DownloadsPage() {
       <Dialog
         open={purgeOpen}
         title="Dọn lịch sử tải"
-        description="Chỉ xóa dòng lịch sử trong DB — không bao giờ xóa file truyện đã tải. Các mục hoàn tất còn artifact trên đĩa được GIỮ LẠI (chúng là bằng chứng offline)."
+        description="Chỉ xóa dòng lịch sử trong DB — không bao giờ xóa file truyện đã tải. Mục hoàn tất vẫn còn nguyên trong Thư viện."
         onClose={() => setPurgeOpen(false)}
         footer={
           <>

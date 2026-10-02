@@ -276,25 +276,25 @@ pub async fn set_download_priority(
 }
 
 /// Feature plan F2 — purge download-history rows (terminal states only).
-/// Completed tasks whose verified artifact still exists on disk are skipped
-/// by design; no file is ever deleted here (that is Library's job).
+/// Rows are deleted even when the chapter's file is still on disk; no file
+/// is ever deleted here (that is Library's job).
 #[tauri::command]
 pub async fn clear_download_history(
     statuses: Option<Vec<String>>,
     older_than_days: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ClearHistoryDto, AppError> {
-    download_history_service::clear(&state.db, &state.app_data_dir, statuses, older_than_days).await
+    download_history_service::clear(&state.db, statuses, older_than_days).await
 }
 
-/// Remove a single settled task row from the list (`failed` / `cancelled`, or
-/// `completed` once its artifact is gone). Never deletes a file.
+/// Remove a single settled task row from the list. Never deletes a file —
+/// a purged `completed` row's chapter stays in the Library via its own record.
 #[tauri::command]
 pub async fn remove_download_task(
     task_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, AppError> {
-    download_history_service::remove_one(&state.db, &state.app_data_dir, &task_id).await
+    download_history_service::remove_one(&state.db, &task_id).await
 }
 
 /// Feature plan F5 — bulk-requeue every `failed` task (FIFO, capped).

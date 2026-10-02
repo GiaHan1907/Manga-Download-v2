@@ -26,7 +26,7 @@ beforeEach(() => {
 
 describe("F2/F5 IPC wrappers", () => {
   it("clear_download_history forwards statuses + olderThanDays only", async () => {
-    vi.mocked(invoke).mockResolvedValue({ deleted: 2, skippedArtifact: 1, skippedOther: 0 });
+    vi.mocked(invoke).mockResolvedValue({ deleted: 2, skippedOther: 0 });
     const outcome = await clearDownloadHistory({
       statuses: ["failed"],
       olderThanDays: 30,
@@ -35,7 +35,7 @@ describe("F2/F5 IPC wrappers", () => {
       statuses: ["failed"],
       olderThanDays: 30,
     });
-    expect(outcome).toEqual({ deleted: 2, skippedArtifact: 1, skippedOther: 0 });
+    expect(outcome).toEqual({ deleted: 2, skippedOther: 0 });
   });
 
   it("remove_download_task forwards only the task id", async () => {

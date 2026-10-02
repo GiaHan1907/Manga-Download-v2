@@ -58,7 +58,7 @@ function mockQueue(tasks: ReturnType<typeof baseTask>[]) {
     }
     if (cmd === "remove_download_task") return Promise.resolve(true);
     if (cmd === "clear_download_history") {
-      return Promise.resolve({ deleted: 2, skippedArtifact: 0, skippedOther: 0 });
+      return Promise.resolve({ deleted: 2, skippedOther: 0 });
     }
     if (cmd === "app_get_info") return Promise.resolve({ name: "x", version: "0.1.0", platform: "windows" });
     if (cmd === "app_health_check") return Promise.resolve({ status: "ok", database: "ready", schemaVersion: 4 });
