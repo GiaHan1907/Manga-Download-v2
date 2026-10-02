@@ -478,3 +478,80 @@ async fn live_ttt_image_host_dual_serve_probe() {
         }
     }
 }
+
+/// LIVE triage of the built-in NetTruyen journey: search → detail → chapter
+/// manifest → image fetch → cover fetch, all through the shipped adapter and
+/// its guarded transport. Optional overrides:
+///   MANGA_LIVE_NT_SLUG / MANGA_LIVE_NT_CHAPTER
+#[tokio::test]
+#[ignore = "live journey probe for the built-in NetTruyen source"]
+async fn live_nettruyen_journey_probe() {
+    use url::Url;
+    let registry = SourceRegistry::from_rows(&[]);
+    let adapter = registry.get("nettruyen").expect("nettruyen is built in");
+
+    let search = adapter
+        .search("naruto", 1)
+        .await
+        .expect("NT search must succeed");
+    println!(
+        "NT search: {} items, has_more={}",
+        search.items.len(),
+        search.has_more
+    );
+    for item in search.items.iter().take(3) {
+        println!(
+            "NT item: {} | id={} | cover={:?}",
+            item.title, item.source_manga_id, item.cover_key
+        );
+    }
+    assert!(!search.items.is_empty(), "NT search returned nothing");
+
+    let slug = std::env::var("MANGA_LIVE_NT_SLUG")
+        .unwrap_or_else(|_| search.items[0].source_manga_id.clone());
+    let detail = adapter
+        .manga_detail(&slug)
+        .await
+        .expect("NT detail must succeed");
+    println!(
+        "NT detail {slug}: {} chapters, cover={:?}",
+        detail.chapters.len(),
+        detail.summary.cover_key
+    );
+    assert!(!detail.chapters.is_empty(), "NT detail has no chapters");
+
+    let chapter = std::env::var("MANGA_LIVE_NT_CHAPTER")
+        .unwrap_or_else(|_| detail.chapters[0].source_chapter_id.clone());
+    let manifest = adapter
+        .page_manifest(&slug, &chapter)
+        .await
+        .expect("NT manifest must succeed");
+    let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+    for page in &manifest.pages {
+        if let Ok(u) = Url::parse(&page.url) {
+            *hosts
+                .entry(u.host_str().unwrap_or("?").to_string())
+                .or_default() += 1;
+        }
+    }
+    println!(
+        "NT manifest {chapter}: hosts={:?} ({} pages)",
+        hosts,
+        manifest.pages.len()
+    );
+    assert!(!manifest.pages.is_empty(), "NT manifest has no pages");
+
+    let bytes = adapter
+        .fetch_image(&manifest.pages[0].url)
+        .await
+        .expect("NT first page must fetch");
+    println!("NT image fetch: {} bytes", bytes.len());
+    assert!(bytes.len() > 2_000, "page image too small");
+
+    if let Some(key) = detail.summary.cover_key.clone() {
+        match adapter.fetch_cover(&slug, &key).await {
+            Ok(bytes) => println!("NT cover fetch: {} bytes", bytes.len()),
+            Err(error) => println!("NT cover fetch: ERR {}", error.code()),
+        }
+    }
+}
