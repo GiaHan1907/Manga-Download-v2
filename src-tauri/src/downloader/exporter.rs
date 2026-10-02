@@ -233,12 +233,27 @@ pub fn publish_artifact(
     if final_path.exists() {
         // Adopt only after full verification — an unverified pre-existing
         // file (possibly user content) is never silently replaced.
-        verify_cbz(final_path, pages).map_err(|_| AppError::Conflict)?;
+        verify_cbz(final_path, pages).map_err(|_| name_conflict_error(final_path))?;
         let _ = std::fs::remove_file(part_path);
         return Ok(());
     }
     std::fs::rename(part_path, final_path)?;
     Ok(())
+}
+
+/// The destination holds a DIFFERENT verified-shaped archive. In practice the
+/// only way a task lands here is a stale chapter number in the catalog (e.g.
+/// saved by an old parser) resolving onto another chapter's file — say so,
+/// and point at the action that heals the row.
+fn name_conflict_error(final_path: &Path) -> AppError {
+    let name = final_path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file tải".to_string());
+    AppError::Validation(format!(
+        "Xung đột tên file: \"{name}\" đã thuộc chương khác (số chương trong danh mục có thể cũ). \
+         Mở truyện bấm \"Kiểm tra chương mới\" hoặc dán lại link chương rồi tải."
+    ))
 }
 
 /// Image-folder export: copy ordered, validated pages into `<name>.part-dir/`
@@ -256,7 +271,7 @@ pub fn export_folder(
 ) -> Result<bool, AppError> {
     if final_dir.exists() {
         // Idempotent adoption only when content matches exactly.
-        verify_folder(final_dir, pages, staging_dir).map_err(|_| AppError::Conflict)?;
+        verify_folder(final_dir, pages, staging_dir).map_err(|_| name_conflict_error(final_dir))?;
         let _ = std::fs::remove_dir_all(part_dir);
         return Ok(false);
     }
@@ -358,7 +373,11 @@ mod tests {
         std::fs::write(other_dir.path().join("chapter.cbz"), b"someone else's file").unwrap();
         let error =
             publish_artifact(&part, &other_dir.path().join("chapter.cbz"), &pages).unwrap_err();
-        assert!(matches!(error, AppError::Conflict));
+        assert!(
+            matches!(&error, AppError::Validation(m) if m.contains("chapter.cbz")
+                && m.contains("Kiểm tra chương mới")),
+            "the message must name the colliding file and the healing action: {error:?}"
+        );
         assert_eq!(
             std::fs::read(other_dir.path().join("chapter.cbz")).unwrap(),
             b"someone else's file"
