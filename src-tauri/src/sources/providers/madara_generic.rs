@@ -844,6 +844,18 @@ fn dilib_story_slug(slug: &str) -> bool {
 }
 
 fn chapter_number_from_slug(slug: &str) -> Option<f64> {
+    // TruyenQQ-family slugs write fractional chapters with a dash:
+    // "-chap-2-1" means chapter 2.1. Read that pair as a decimal BEFORE the
+    // plain trailing-number rule, which would otherwise collapse every "X.1"
+    // to 1 (live bug 2026-10-02: chapter 2.1 saved as chapter-1.cbz).
+    if let Ok(re) = Regex::new(r"(\d+)-(\d+)$") {
+        if let Some(caps) = re.captures(slug) {
+            let joined = format!("{}.{}", caps.get(1)?.as_str(), caps.get(2)?.as_str());
+            if let Ok(value) = joined.parse::<f64>() {
+                return Some(value);
+            }
+        }
+    }
     let re = Regex::new(r"(\d+(?:[.,]\d+)?)$").ok()?;
     let cap = re.captures(slug)?.get(1)?.as_str().to_string();
     cap.replace(',', ".").parse::<f64>().ok()
@@ -2019,6 +2031,27 @@ mod tests {
             detail.canonical_url.as_deref(),
             Some("https://truyentuoitho.com/manga/ninja-loan-thi/")
         );
+    }
+
+    /// A fractional chapter written with hyphen-separated digits in the slug
+    /// ("chap-2-1" = chapter 2.1) must NOT collapse to the trailing part —
+    /// that made every "X.1" chapter number 1 and saved chapter 2.1 as
+    /// chapter-1.cbz over chapter 1.1's file (live bug, 2026-10-02).
+    #[test]
+    fn chapter_number_parses_hyphen_decimals_not_last_segment() {
+        assert_eq!(
+            chapter_number_from_slug("ninja-loan-thi-ban-dep-8777-chap-2-1"),
+            Some(2.1)
+        );
+        assert_eq!(
+            chapter_number_from_slug("ninja-loan-thi-ban-dep-8777-chap-1-1"),
+            Some(1.1)
+        );
+        assert_eq!(chapter_number_from_slug("tap-56"), Some(56.0));
+        assert_eq!(chapter_number_from_slug("chapter-12-5"), Some(12.5));
+        assert_eq!(chapter_number_from_slug("one-piece-chap-590"), Some(590.0));
+        assert_eq!(chapter_number_from_slug("tap-3-75"), Some(3.75));
+        assert_eq!(chapter_number_from_slug("chap-10-2"), Some(10.2));
     }
 
     #[test]
