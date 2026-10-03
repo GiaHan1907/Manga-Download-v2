@@ -175,11 +175,20 @@ export default function LocalMangaPage() {
   const downloadedIds = new Set(
     downloaded.state === "success" ? downloaded.data.map((chapter) => chapter.id) : [],
   );
+  // "Downloaded" for QUEUE purposes means the file is actually on disk. A
+  // chapter with local_path set but artifactOk=false (deleted in Explorer,
+  // lost drive) must return to the actionable list — its own badge promises
+  // "cần tải lại".
+  const healthyIds = new Set(
+    downloaded.state === "success"
+      ? downloaded.data.filter((chapter) => chapter.artifactOk).map((chapter) => chapter.id)
+      : [],
+  );
   const progressChapter =
-    progress.state === "success" && progress.data && downloadedIds.has(progress.data.chapterId)
+    progress.state === "success" && progress.data && healthyIds.has(progress.data.chapterId)
       ? progress.data
       : null;
-  const actionable = detail.chapters.filter((chapter) => !downloadedIds.has(chapter.id));
+  const actionable = detail.chapters.filter((chapter) => !healthyIds.has(chapter.id));
   const visibleActionable = queueQuery.trim()
     ? actionable.filter((chapter) => matchesQuery(`${chapter.title} ${chapter.number ?? ""}`, queueQuery))
     : actionable;
@@ -355,7 +364,7 @@ export default function LocalMangaPage() {
             <h1>{detail.title}</h1>
             <p className="muted">
               {detail.author ?? "Không rõ tác giả"} · {detail.chapterCount} chương ·{" "}
-              {downloadedIds.size} đã tải
+              {healthyIds.size} đã tải
             </p>
           </div>
           <div className="row-actions">
@@ -613,7 +622,7 @@ export default function LocalMangaPage() {
           <MangaDeleteDialog
             mangaId={detail.id}
             mangaTitle={detail.title}
-            downloadedChapters={downloadedIds.size}
+            downloadedChapters={healthyIds.size}
             onClose={() => setEraseOpen(false)}
             onDeleted={eraseOutcomeToast}
           />
