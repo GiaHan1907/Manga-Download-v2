@@ -1460,31 +1460,32 @@ impl SourceAdapter for MadaraGeneric {
         }
         // TruyenQQ covers keep the source's own `/ebook/…` path (the file name
         // embeds an upload timestamp), but the host is always this fixed,
-        // compile-time vetted one — never anything the page supplied.
+        // compile-time vetted one — never anything the page supplied. Keys that
+        // are NOT `/cdn/…` are base-host paths (the site also proxies covers
+        // under `/img/…`) and fall through to the base-host guard below.
         if self.profile == SiteProfile::TruyenQQ {
-            let rest = cover_key
-                .strip_prefix("/cdn/")
-                .ok_or(SourceError::MalformedUrl)?;
-            let (shard, path) = rest.split_once('/').ok_or(SourceError::MalformedUrl)?;
-            let (label, token) = shard.split_once('.').ok_or(SourceError::MalformedUrl)?;
-            let domain = TRUYENQQ_COVER_DOMAINS
-                .iter()
-                .find(|(t, _)| *t == token)
-                .map(|(_, d)| *d)
-                .ok_or(SourceError::MalformedUrl)?;
-            let safe = !label.is_empty()
-                && label.len() <= 16
-                && label
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                && path.starts_with("ebook/")
-                && !path.contains("//")
-                && !path.split('/').any(|seg| seg == ".." || seg == ".");
-            if !safe {
-                return Err(SourceError::MalformedUrl);
+            if let Some(rest) = cover_key.strip_prefix("/cdn/") {
+                let (shard, path) = rest.split_once('/').ok_or(SourceError::MalformedUrl)?;
+                let (label, token) = shard.split_once('.').ok_or(SourceError::MalformedUrl)?;
+                let domain = TRUYENQQ_COVER_DOMAINS
+                    .iter()
+                    .find(|(t, _)| *t == token)
+                    .map(|(_, d)| *d)
+                    .ok_or(SourceError::MalformedUrl)?;
+                let safe = !label.is_empty()
+                    && label.len() <= 16
+                    && label
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                    && path.starts_with("ebook/")
+                    && !path.contains("//")
+                    && !path.split('/').any(|seg| seg == ".." || seg == ".");
+                if !safe {
+                    return Err(SourceError::MalformedUrl);
+                }
+                let url = format!("https://{label}.{domain}/{path}");
+                return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
             }
-            let url = format!("https://{label}.{domain}/{path}");
-            return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
         }
         let url = self.cover_url_from_key(cover_key)?;
         self.http.get_bytes(&url, COVER_MAX_BYTES).await
@@ -3056,7 +3057,7 @@ mod tests {
 
     #[tokio::test]
     async fn qq_covers_fetch_from_the_vetted_cover_host() {
-        let (provider, transport) = qq(vec![Ok("cover-bytes")]);
+        let (provider, transport) = qq(vec![Ok("cover-bytes"), Ok("base-bytes")]);
         let bytes = provider
             .fetch_cover(
                 "dai-quan-gia-la-ma-hoang-7015",
@@ -3069,19 +3070,34 @@ mod tests {
             transport.requested.lock().unwrap()[0].1,
             "https://i.hinhhinh.com/ebook/190x247/dai-quan-gia-la-ma-hoang_1555489297.jpg"
         );
-        for key in [
-            "/wp-content/x.jpg",
-            "//evil.com/a.jpg",
-            "/ebook/../secret.jpg",
-        ] {
+        for key in ["//evil.com/a.jpg", "/ebook/../secret.jpg"] {
             assert!(
                 provider
                     .fetch_cover("dai-quan-gia-la-ma-hoang-7015", key)
                     .await
                     .is_err(),
-                "{key} must never reach the CDN"
+                "{key} must never reach any host"
             );
         }
+    }
+
+    /// Live shape (2026-10-03): truyenqqko.com serves some story covers from
+    /// its OWN host through an image proxy (`/img/<sig>/rs:fit:…/<b64>`). The
+    /// key minter accepts base-host paths, so fetch must not reject them —
+    /// they go through the same base-host guard every other profile uses.
+    #[tokio::test]
+    async fn qq_covers_on_the_base_host_fetch_from_the_base_host() {
+        let (provider, transport) = qq(vec![Ok("base-bytes")]);
+        let key = "/img/zYPf48xn-LOim1OwjM6xUKVKTHwB3Hy8diWDSUkAAZI/rs:fit:600:800/aHR0cDovL25naW54L2Nkbi9lYm9vay9vcmlnbmFsL25pbmphLWxvYW4tdGhpLWJhbi1kZXBfMTU3ODAyNjk3NC5qcGc_Z3Q9aGRmZ2RmZyZtb2JpbGU9Mg";
+        let bytes = provider
+            .fetch_cover("ninja-loan-thi-ban-dep-8777", key)
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"base-bytes".to_vec());
+        assert_eq!(
+            transport.requested.lock().unwrap()[0].1,
+            format!("https://truyenqqko.com{key}")
+        );
     }
 
     #[test]
