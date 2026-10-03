@@ -392,13 +392,17 @@ pub async fn remove_chapter_files(
         std::fs::remove_file(&artifact)
     };
     if let Err(error) = delete_result {
-        // Filesystem still authoritative: keep DB flags intact. Log only the
-        // error KIND — io::Error Display can embed the absolute path.
-        eprintln!(
-            "chapter artifact delete failed for {chapter_id}: {:?}",
-            error.kind()
-        );
-        return Err(LibraryError::DeleteFailed.into());
+        if error.kind() != std::io::ErrorKind::NotFound {
+            // Filesystem still authoritative: keep DB flags intact. Log only the
+            // error KIND — io::Error Display can embed the absolute path.
+            eprintln!(
+                "chapter artifact delete failed for {chapter_id}: {:?}",
+                error.kind()
+            );
+            return Err(LibraryError::DeleteFailed.into());
+        }
+        // The file was already lost externally (Explorer delete): clearing the
+        // stale row is exactly what this call is for.
     }
     sqlx::query(
         "UPDATE chapters SET local_path = NULL, output_format = NULL, local_size_bytes = NULL, \
@@ -793,6 +797,26 @@ mod tests {
         ));
     }
 
+    /// A file the user deleted in Explorer leaves a stale `local_path` row
+    /// that the UI shows as "Thiếu file — cần tải lại". Removing THAT row
+    /// must succeed (nothing left on disk to delete) and clear the flag —
+    /// otherwise the stale entry can never leave the "Đã có file" panel.
+    #[tokio::test]
+    async fn t07_removing_a_chapter_whose_file_is_already_gone_clears_the_row() {
+        let (lib, _, chapters) = seeded().await;
+        // chapters[1]: local_path recorded, file absent (the seeded case).
+        remove_chapter_files(&lib.pool, lib.data.path(), &chapters[1])
+            .await
+            .expect("an already-gone file must not block clearing the row");
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT local_path FROM chapters WHERE id = ?1")
+                .bind(&chapters[1])
+                .fetch_one(&lib.pool)
+                .await
+                .unwrap();
+        assert!(stored.is_none(), "stale flag cleared");
+    }
+
     #[tokio::test]
     async fn t07_remove_rejects_traversal_without_touching_disk() {
         let (lib, _, _) = seeded().await;
@@ -937,14 +961,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t07_remove_manga_files_reports_partial_failure_honestly() {
-        let (lib, manga_a, _) = seeded().await;
+    async fn t07_remove_manga_files_clears_stale_rows_of_externally_lost_files() {
+        let (lib, manga_a, chapters) = seeded().await;
         let result = remove_manga_files(&lib.pool, lib.data.path(), &manga_a)
             .await
             .unwrap();
-        // c1 removed (real file); c2 fails (recorded file already missing).
-        assert_eq!(result.removed.len(), 1);
-        assert_eq!(result.failed.len(), 1);
+        // c1: real file deleted; c2: file was already lost externally, so the
+        // stale row is simply cleared — a wipe never fails on nothing-to-delete
+        // (2026-10-03 change; it used to strand c2 in the list forever).
+        assert_eq!(result.removed.len(), 2);
+        assert!(result.failed.is_empty());
+        for chapter in &chapters[..2] {
+            let stale: Option<String> =
+                sqlx::query_scalar("SELECT local_path FROM chapters WHERE id = ?1")
+                    .bind(chapter)
+                    .fetch_one(&lib.pool)
+                    .await
+                    .unwrap();
+            assert!(stale.is_none(), "row {chapter} cleared");
+        }
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@
 /// "Đã có file" with "Thiếu file — cần tải lại", but it MUST also reappear
 /// in the download queue list — the badge promises a re-download.
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -110,5 +110,23 @@ describe("missing artifacts return to the download list", () => {
     expect(await screen.findByText("Thiếu file — cần tải lại")).toBeDefined();
     // c2 (missing file) + c3 (never downloaded) — c1 stays out.
     expect(await screen.findByText(/Tải tất cả \(2\)/)).toBeDefined();
+  });
+
+  it("a missing-file row can be removed from the list", async () => {
+    render(
+      <MemoryRouter initialEntries={["/library/m1"]}>
+        <Routes>
+          <Route path="/library/:mangaId" element={<LocalMangaPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const remove = await screen.findByRole("button", {
+      name: "Gỡ chương Chương 2 khỏi danh sách",
+    });
+    fireEvent.click(remove);
+    fireEvent.click(await screen.findByRole("button", { name: /Xác nhận gỡ khỏi danh sách/ }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("library_remove_chapter", { chapterId: "c2" }),
+    );
   });
 });

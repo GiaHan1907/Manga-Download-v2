@@ -1,4 +1,4 @@
-import { Download, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
+import { Download, Eraser, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Button from "../../components/ui/Button";
@@ -583,7 +583,31 @@ export default function LocalMangaPage() {
                       )}
                     </>
                   ) : (
-                    <StatusBadge tone="error">Thiếu file — cần tải lại</StatusBadge>
+                    <>
+                      <StatusBadge tone="error">Thiếu file — cần tải lại</StatusBadge>
+                      {confirmDelete === chapter.id ? (
+                        <span className="row-actions" role="group" aria-label="Xác nhận gỡ">
+                          <Button
+                            variant="primary"
+                            onClick={() => void removeChapter(chapter.id)}
+                          >
+                            Xác nhận gỡ khỏi danh sách
+                          </Button>
+                          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+                            Hủy
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          onClick={() => setConfirmDelete(chapter.id)}
+                          aria-label={`Gỡ chương ${chapter.title} khỏi danh sách`}
+                        >
+                          <Eraser size={14} aria-hidden="true" />
+                          Gỡ khỏi danh sách
+                        </Button>
+                      )}
+                    </>
                   )}
                 </li>
               ))}
