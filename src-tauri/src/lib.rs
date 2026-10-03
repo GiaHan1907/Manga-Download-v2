@@ -174,6 +174,7 @@ pub fn run() {
             commands::library::library_reconcile,
             commands::library::library_remove_chapter,
             commands::library::library_remove_manga_files,
+            commands::library::library_remove_manga,
             commands::import::library_import_cbz,
             commands::import::library_import_cbz_path,
             commands::reader::reader_open_chapter,

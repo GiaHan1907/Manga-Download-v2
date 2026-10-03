@@ -18,6 +18,7 @@ import {
   removeDownloadTask,
   retryAllFailedDownloads,
   cancelDownloadsForManga,
+  libraryRemoveManga,
 } from "../src/shared/api/desktop";
 
 beforeEach(() => {
@@ -42,6 +43,16 @@ describe("F2/F5 IPC wrappers", () => {
     vi.mocked(invoke).mockResolvedValue(true);
     await expect(removeDownloadTask("t-1")).resolves.toBe(true);
     expect(invoke).toHaveBeenCalledWith("remove_download_task", { taskId: "t-1" });
+  });
+
+  it("library_remove_manga forwards mangaId + deleteFiles only", async () => {
+    vi.mocked(invoke).mockResolvedValue({ chaptersRemoved: 4, filesRemoved: 1 });
+    const outcome = await libraryRemoveManga({ mangaId: "m1", deleteFiles: true });
+    expect(invoke).toHaveBeenCalledWith("library_remove_manga", {
+      mangaId: "m1",
+      deleteFiles: true,
+    });
+    expect(outcome).toEqual({ chaptersRemoved: 4, filesRemoved: 1 });
   });
 
   it("retry_all_failed_downloads takes no arguments", async () => {    vi.mocked(invoke).mockResolvedValue(3);

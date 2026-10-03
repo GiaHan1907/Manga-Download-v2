@@ -23,6 +23,7 @@ import type {
   LibraryMangaDto,
   ReconcileReportDto,
   ReaderManifestDto,
+  RemoveMangaDto,
   RemoveMangaFilesDto,
   ImportResultDto,
 } from "../../types/library";
@@ -396,6 +397,17 @@ export async function libraryRemoveChapter(chapterId: string): Promise<void> {
 
 export async function libraryRemoveMangaFiles(mangaId: string): Promise<RemoveMangaFilesDto> {
   return invoke<RemoveMangaFilesDto>("library_remove_manga_files", { mangaId });
+}
+
+/// Erase a manga from the Library; `deleteFiles` also removes downloads.
+export async function libraryRemoveManga(args: {
+  mangaId: string;
+  deleteFiles: boolean;
+}): Promise<RemoveMangaDto> {
+  return invoke<RemoveMangaDto>("library_remove_manga", {
+    mangaId: args.mangaId,
+    deleteFiles: args.deleteFiles,
+  });
 }
 
 /// Feature plan F3b — Rust opens the native picker (the renderer never sees a

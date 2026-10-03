@@ -10,7 +10,7 @@ use sqlx::SqlitePool;
 
 use crate::domain::{
     now_iso, LibraryGenreDto, LibraryMangaDto, LibraryProgressDto, LibraryStatsDto,
-    ReconcileReportDto, RemoveMangaFilesDto,
+    ReconcileReportDto, RemoveMangaDto, RemoveMangaFilesDto,
 };
 use crate::downloader::storage;
 use crate::error::{AppError, LibraryError};
@@ -442,6 +442,110 @@ pub async fn remove_manga_files(
         }
     }
     Ok(RemoveMangaFilesDto { removed, failed })
+}
+
+/// Erase a manga from the Library entirely. `delete_files` also removes the
+/// downloaded artifacts; in keep-files mode nothing on disk is touched.
+/// Everything that still references the manga or its chapters goes in ONE
+/// transaction: the RESTRICT children first (progress, favorites, tasks —
+/// checkpoint pages cascade with them), then chapters (alerts, history
+/// cascade), then the manga row (genres cascade). A queued/in-flight/failed
+/// download blocks the erase: the dispatcher must never lose the row a claim
+/// points at, and a "failed" row is still a retry the user owns.
+pub async fn remove_manga(
+    pool: &SqlitePool,
+    app_data_dir: &Path,
+    manga_id: &str,
+    delete_files: bool,
+) -> Result<RemoveMangaDto, AppError> {
+    crate::domain::validate_id(manga_id, "mangaId")?;
+    let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM mangas WHERE id = ?1")
+        .bind(manga_id)
+        .fetch_optional(pool)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::not_found("truyện trong thư viện"));
+    }
+    let unsettled: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM download_tasks t JOIN chapters c ON c.id = t.chapter_id \
+         WHERE c.manga_id = ?1 AND t.status NOT IN ('completed', 'cancelled')",
+    )
+    .bind(manga_id)
+    .fetch_one(pool)
+    .await?;
+    if unsettled > 0 {
+        return Err(AppError::validation(format!(
+            "Còn {unsettled} tác vụ tải chưa kết thúc của truyện — hãy hủy hoặc tải xong rồi xóa."
+        )));
+    }
+    let chapters_removed: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE manga_id = ?1")
+            .bind(manga_id)
+            .fetch_one(pool)
+            .await?;
+
+    let mut files_removed = 0i64;
+    // The catalog is what the user asked to erase; a file that refuses to go
+    // (locked by another process) must not block the whole operation —
+    // mirror remove_manga_files' per-item tolerance and keep counting.
+    let mut failed_files = 0i64;
+    if delete_files {
+        let rows = sqlx::query_as::<_, (String, Option<String>, String)>(
+            "SELECT local_path, output_format, id FROM chapters \
+             WHERE manga_id = ?1 AND local_path IS NOT NULL ORDER BY id",
+        )
+        .bind(manga_id)
+        .fetch_all(pool)
+        .await?;
+        let library_root = storage::library_root(app_data_dir);
+        for (path, format, chapter_id) in rows {
+            if storage::validate_relpath(&path).is_err() {
+                continue; // unparseable stored path: nothing safe to remove
+            }
+            let Ok(artifact) = storage::ensure_under_root(&library_root, &library_root.join(&path))
+            else {
+                eprintln!("manga erase: path escapes library root for chapter {chapter_id}");
+                failed_files += 1;
+                continue;
+            };
+            let is_folder = format.as_deref() == Some("folder") || artifact.is_dir();
+            let outcome = if is_folder {
+                std::fs::remove_dir_all(&artifact)
+            } else {
+                std::fs::remove_file(&artifact)
+            };
+            match outcome {
+                Ok(()) => files_removed += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    eprintln!(
+                        "manga erase: artifact delete failed for chapter {chapter_id}: {:?}",
+                        error.kind()
+                    );
+                    failed_files += 1;
+                }
+            }
+        }
+    }
+
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    for sql in [
+        "DELETE FROM reading_progress WHERE manga_id = ?1",
+        "DELETE FROM favorites WHERE manga_id = ?1",
+        "DELETE FROM download_tasks WHERE chapter_id IN (SELECT id FROM chapters WHERE manga_id = ?1)",
+        "DELETE FROM chapters WHERE manga_id = ?1",
+        "DELETE FROM mangas WHERE id = ?1",
+    ] {
+        sqlx::query(sql).bind(manga_id).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    if delete_files && failed_files > 0 {
+        eprintln!("manga erase: {failed_files} file(s) could not be deleted for manga {manga_id}");
+    }
+    Ok(RemoveMangaDto {
+        chapters_removed,
+        files_removed,
+    })
 }
 
 #[cfg(test)]
@@ -878,5 +982,171 @@ mod tests {
         let all = list_all(&lib, "all").await;
         let a = all.iter().find(|m| m.id == manga_a).unwrap();
         assert_eq!(a.progress.as_ref().map(|p| p.page_index), Some(5));
+    }
+
+    /// Seed every remaining dependent table for one chapter so the erase path
+    /// is proven against the FULL FK graph (RESTRICT rows must go in order).
+    async fn seed_dependents(lib: &Lib, manga_id: &str, chapter_id: &str) {
+        let ts = now_iso();
+        sqlx::query(
+            "INSERT INTO chapter_alerts (manga_id, chapter_id, detected_at) VALUES (?1, ?2, ?3)",
+        )
+        .bind(manga_id)
+        .bind(chapter_id)
+        .bind(&ts)
+        .execute(&lib.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO read_history (manga_id, chapter_id, read_at) VALUES (?1, ?2, ?3)")
+            .bind(manga_id)
+            .bind(chapter_id)
+            .bind(&ts)
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO manga_genres (manga_id, genre) VALUES (?1, ?2)")
+            .bind(manga_id)
+            .bind("Hành động")
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO download_pages (task_id, page_index, status, created_at, updated_at) VALUES (?1, 0, 'pending', ?2, ?2)")
+            .bind(format!("tk-{chapter_id}")).bind(&ts).execute(&lib.pool).await.unwrap();
+    }
+
+    async fn table_count(pool: &SqlitePool, table: &str, manga_id: &str) -> i64 {
+        let column = if table == "download_tasks" {
+            "chapter_id"
+        } else {
+            "manga_id"
+        };
+        let sql = if table == "download_tasks" {
+            format!("SELECT COUNT(*) FROM {table} WHERE {column} IN (SELECT id FROM chapters WHERE manga_id = ?1)")
+        } else {
+            format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?1")
+        };
+        sqlx::query_scalar::<_, i64>(&sql)
+            .bind(manga_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn t12_erase_manga_removes_whole_record_tree_and_keeps_files_when_asked() {
+        let (lib, manga_a, chapters_a) = seeded().await;
+        seed_dependents(&lib, &manga_a, &chapters_a[1]).await;
+
+        let outcome = remove_manga(&lib.pool, lib.data.path(), &manga_a, false)
+            .await
+            .unwrap();
+        assert_eq!(outcome.chapters_removed, 4);
+        assert_eq!(
+            outcome.files_removed, 0,
+            "keep-files mode touches nothing on disk"
+        );
+        for table in [
+            "chapters",
+            "download_tasks",
+            "reading_progress",
+            "favorites",
+            "chapter_alerts",
+            "read_history",
+            "manga_genres",
+        ] {
+            assert_eq!(
+                table_count(&lib.pool, table, &manga_a).await,
+                0,
+                "{table} must be gone with the manga"
+            );
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mangas WHERE id = ?1")
+                .bind(&manga_a)
+                .fetch_one(&lib.pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            lib.library().join("ma/c1.cbz").exists(),
+            "keep-files mode leaves downloads on disk"
+        );
+        let cascade: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM download_pages WHERE task_id = ?1")
+                .bind(format!("tk-{}", chapters_a[1]))
+                .fetch_one(&lib.pool)
+                .await
+                .unwrap();
+        assert_eq!(cascade, 0, "checkpoint pages cascade with their task");
+        // The other manga is untouched by the erase.
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM chapters c JOIN mangas m ON m.id = c.manga_id WHERE m.source_manga_id = 'mb'"
+            )
+            .fetch_one(&lib.pool)
+            .await
+            .unwrap(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn t12_erase_manga_with_files_deletes_artifacts_too() {
+        let (lib, manga_a, _chapters_a) = seeded().await;
+        let outcome = remove_manga(&lib.pool, lib.data.path(), &manga_a, true)
+            .await
+            .unwrap();
+        assert_eq!(outcome.files_removed, 1, "only the one artifact on disk");
+        assert!(
+            !lib.library().join("ma/c1.cbz").exists(),
+            "delete-files mode removes the artifact"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mangas WHERE id = ?1")
+                .bind(&manga_a)
+                .fetch_one(&lib.pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn t12_erase_manga_refuses_active_tasks_and_unknown_ids() {
+        let (lib, manga_a, chapters_a) = seeded().await;
+        let ts = now_iso();
+        sqlx::query(
+            "INSERT INTO download_tasks (id, chapter_id, status, target_format, priority, completed_pages, total_pages, attempts, revision, created_at, updated_at) VALUES ('tk-live', ?1, 'queued', 'cbz', 0, 0, 3, 0, 1, ?2, ?2)",
+        )
+        .bind(&chapters_a[3])
+        .bind(&ts)
+        .execute(&lib.pool)
+        .await
+        .unwrap();
+        let error = remove_manga(&lib.pool, lib.data.path(), &manga_a, true)
+            .await
+            .expect_err("an active download blocks the erase");
+        assert!(
+            matches!(error, AppError::Validation(_)),
+            "must ask the user to stop the queue first: {error:?}"
+        );
+        assert!(
+            lib.library().join("ma/c1.cbz").exists(),
+            "refused erase must not have touched files"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mangas WHERE id = ?1")
+                .bind(&manga_a)
+                .fetch_one(&lib.pool)
+                .await
+                .unwrap(),
+            1
+        );
+
+        let unknown = remove_manga(&lib.pool, lib.data.path(), "no-such-manga", false)
+            .await
+            .expect_err("unknown id is not success");
+        assert!(matches!(unknown, AppError::NotFound(_)));
     }
 }

@@ -80,6 +80,13 @@ export type RemoveMangaFilesDto = {
   failed: string[];
 };
 
+/// "Xóa truyện khỏi Thư viện" — erase counts (chapters removed from the
+/// catalog, artifacts removed from disk; 0 in keep-files mode).
+export type RemoveMangaDto = {
+  chaptersRemoved: number;
+  filesRemoved: number;
+};
+
 export type ReaderPageDto = {
   index: number;
   width: number | null;

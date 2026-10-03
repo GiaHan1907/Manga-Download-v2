@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   SortDesc,
   Star,
+  Trash2,
   Trophy,
 } from "lucide-react";
 import { useState } from "react";
@@ -30,6 +31,7 @@ import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
 import { localServices } from "../../services/provider";
+import MangaDeleteDialog from "./MangaDeleteDialog";
 import { formatBytes } from "../../types/downloads";
 import { relativeAge } from "../../shared/lib/time";
 import type {
@@ -151,9 +153,11 @@ function ContinueCard({ manga }: { manga: LibraryMangaDto }) {
 function MangaTile({
   manga,
   onToggleFavorite,
+  onErase,
 }: {
   manga: LibraryMangaDto;
   onToggleFavorite: (manga: LibraryMangaDto) => void;
+  onErase: (manga: LibraryMangaDto) => void;
 }) {
   const offline = manga.downloadedChapters > 0;
   return (
@@ -197,6 +201,14 @@ function MangaTile({
           >
             <Heart size={15} aria-hidden="true" />
           </Button>
+          <Button
+            variant="ghost"
+            iconOnly
+            aria-label={`Xóa ${manga.title} khỏi Thư viện`}
+            onClick={() => onErase(manga)}
+          >
+            <Trash2 size={15} aria-hidden="true" />
+          </Button>
         </div>
       </div>
     </article>
@@ -234,6 +246,7 @@ export default function LibraryPage() {
   const [view, setView] = useState<"grid" | "list">(readViewMode);
   const [retryNonce, setRetryNonce] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [eraseTarget, setEraseTarget] = useState<LibraryMangaDto | null>(null);
   const [reconcileNote, setReconcileNote] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(query, 300);
   const libraryVersion = useDomainVersion("library");
@@ -304,6 +317,18 @@ export default function LibraryPage() {
     } catch (error) {
       setActionError(`${manga.title}: ${normalizeIpcError(error).message}`);
     }
+  }
+
+  function onEraseResult(outcome: { chaptersRemoved: number; filesRemoved: number }) {
+    pushToast(
+      `Đã gỡ truyện khỏi Thư viện (${outcome.chaptersRemoved} chương)` +
+        (outcome.filesRemoved > 0 ? ` · xóa ${outcome.filesRemoved} file.` : " · file giữ nguyên."),
+    );
+    bumpDomain("library");
+    bumpDomain("home");
+    bumpDomain("favorites");
+    bumpDomain("downloads");
+    setEraseTarget(null);
   }
 
   async function runReconcile() {
@@ -553,7 +578,12 @@ export default function LibraryPage() {
                 <div className={view === "grid" ? "lib-tile-row" : "library-list"}>
                   {view === "grid"
                     ? items.map((manga) => (
-                        <MangaTile key={manga.id} manga={manga} onToggleFavorite={(m) => void toggleFavorite(m)} />
+                        <MangaTile
+                          key={manga.id}
+                          manga={manga}
+                          onToggleFavorite={(m) => void toggleFavorite(m)}
+                          onErase={setEraseTarget}
+                        />
                       ))
                     : items.map((manga) => (
                         <div key={manga.id} className="library-row">
@@ -613,7 +643,12 @@ export default function LibraryPage() {
               </div>
               <div className="lib-tile-row">
                 {newest.map((manga) => (
-                  <MangaTile key={manga.id} manga={manga} onToggleFavorite={(m) => void toggleFavorite(m)} />
+                  <MangaTile
+                    key={manga.id}
+                    manga={manga}
+                    onToggleFavorite={(m) => void toggleFavorite(m)}
+                    onErase={setEraseTarget}
+                  />
                 ))}
               </div>
             </section>
@@ -748,8 +783,7 @@ export default function LibraryPage() {
             </h2>
             {activity.length === 0 ? (
               <p className="muted">Chưa có hoạt động nào được ghi lại.</p>
-            ) : (
-              <ul className="lib-activity">
+            ) : (              <ul className="lib-activity">
                 {activity.slice(0, 5).map((entry, index) => (
                   <li key={`${entry.text}-${index}`}>
                     <span className="lib-activity__icon" aria-hidden="true">
@@ -769,6 +803,15 @@ export default function LibraryPage() {
         <p className="queue-error" role="alert">
           {actionError}
         </p>
+      )}
+      {eraseTarget && (
+        <MangaDeleteDialog
+          mangaId={eraseTarget.id}
+          mangaTitle={eraseTarget.title}
+          downloadedChapters={eraseTarget.downloadedChapters}
+          onClose={() => setEraseTarget(null)}
+          onDeleted={onEraseResult}
+        />
       )}
     </div>
   );

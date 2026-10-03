@@ -1,7 +1,8 @@
 import { Download, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import Button from "../../components/ui/Button";
+import MangaDeleteDialog from "./MangaDeleteDialog";
 import Input from "../../components/ui/Input";
 import EmptyState from "../../components/ui/EmptyState";
 import ErrorState from "../../components/ui/ErrorState";
@@ -43,6 +44,8 @@ export default function LocalMangaPage() {
   const [queueQuery, setQueueQuery] = useState("");
   const [chapterLimit, setChapterLimit] = useState(CHAPTER_PAGE);
   const [dropActive, setDropActive] = useState(false);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const navigate = useNavigate();
   const importBusyRef = useRef(false);
 
   const importCbzPath = async (path: string) => {
@@ -293,6 +296,17 @@ export default function LocalMangaPage() {
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Không xóa được.");
     }
+  }
+
+  function eraseOutcomeToast(outcome: { chaptersRemoved: number; filesRemoved: number }) {
+    pushToast(
+      `Đã gỡ truyện khỏi Thư viện (${outcome.chaptersRemoved} chương)` +
+        (outcome.filesRemoved > 0 ? ` · xóa ${outcome.filesRemoved} file.` : " · file giữ nguyên."),
+    );
+    bumpDomain("library");
+    bumpDomain("home");
+    bumpDomain("downloads");
+    navigate("/library");
   }
 
   // Feature plan F3b — the native picker + validation run entirely in Rust;
@@ -584,6 +598,25 @@ export default function LocalMangaPage() {
               Metadata, favorites và tiến độ đọc được giữ nguyên; chỉ file offline bị xóa.
             </p>
           </>
+        )}
+        <div className="lib-actions">
+          <Button
+            variant="ghost"
+            onClick={() => setEraseOpen(true)}
+            aria-label={`Xóa ${detail.title} khỏi Thư viện`}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            Xóa truyện khỏi Thư viện
+          </Button>
+        </div>
+        {eraseOpen && (
+          <MangaDeleteDialog
+            mangaId={detail.id}
+            mangaTitle={detail.title}
+            downloadedChapters={downloadedIds.size}
+            onClose={() => setEraseOpen(false)}
+            onDeleted={eraseOutcomeToast}
+          />
         )}
       </section>
 

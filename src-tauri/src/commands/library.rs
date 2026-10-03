@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::domain::{
     LibraryGenreDto, LibraryMangaDto, LibraryStatsDto, PagedResult, ReconcileReportDto,
-    RemoveMangaFilesDto,
+    RemoveMangaDto, RemoveMangaFilesDto,
 };
 use crate::error::AppError;
 use crate::services::library_service;
@@ -80,4 +80,15 @@ pub async fn library_remove_manga_files(
     state: tauri::State<'_, AppState>,
 ) -> Result<RemoveMangaFilesDto, AppError> {
     library_service::remove_manga_files(&state.db, &state.app_data_dir, &manga_id).await
+}
+
+/// "Xóa truyện khỏi Thư viện" — erases the manga's whole record tree.
+/// `deleteFiles = true` also removes the downloaded artifacts.
+#[tauri::command]
+pub async fn library_remove_manga(
+    manga_id: String,
+    delete_files: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<RemoveMangaDto, AppError> {
+    library_service::remove_manga(&state.db, &state.app_data_dir, &manga_id, delete_files).await
 }

@@ -5,6 +5,7 @@ import type {
   LibraryGenreDto,
   LibraryMangaDto,
   ReconcileReportDto,
+  RemoveMangaDto,
   RemoveMangaFilesDto,
   ImportResultDto,
 } from "../types/library";
@@ -25,6 +26,7 @@ export interface LibraryApi {
   reconcile(): Promise<ReconcileReportDto>;
   removeChapter(chapterId: string): Promise<void>;
   removeMangaFiles(mangaId: string): Promise<RemoveMangaFilesDto>;
+  removeManga(args: { mangaId: string; deleteFiles: boolean }): Promise<RemoveMangaDto>;
   importCbz(args: {
     mangaId: string;
     chapterNumber?: number;
@@ -55,6 +57,7 @@ export const libraryApi: LibraryApi = {
   reconcile: () => desktop.libraryReconcile().catch(rethrow),
   removeChapter: (chapterId) => desktop.libraryRemoveChapter(chapterId).catch(rethrow),
   removeMangaFiles: (mangaId) => desktop.libraryRemoveMangaFiles(mangaId).catch(rethrow),
+  removeManga: (args) => desktop.libraryRemoveManga(args).catch(rethrow),
   importCbz: (args) => desktop.libraryImportCbz(args).catch(rethrow),
   importCbzPath: (args) => desktop.libraryImportCbzPath(args).catch(rethrow),
   getWatch: (mangaId) => desktop.libraryGetWatch(mangaId).catch(rethrow),

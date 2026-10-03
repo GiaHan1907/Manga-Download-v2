@@ -308,6 +308,15 @@ pub struct RemoveMangaFilesDto {
     pub failed: Vec<String>,
 }
 
+/// "Xóa truyện khỏi Thư viện" — the erase path (vs "delete downloads" which
+/// keeps the catalog rows). Counts of what the call actually removed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveMangaDto {
+    pub chapters_removed: i64,
+    pub files_removed: i64,
+}
+
 /// Input for settings patch — unknown keys are rejected, values validated in service.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
