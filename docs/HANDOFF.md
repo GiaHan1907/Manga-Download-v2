@@ -123,6 +123,16 @@ Bằng chứng live sau khi sửa: tap-56 = 243 trang, tap-61 = 242, tap-65 = 24
 
 User: "trong hàng đợi không download theo thứ tự chapter mà download random". `claim_next` xếp `priority DESC, created_at ASC, id ASC`, nhưng `queue_batch` ghi **cùng một `created_at`** cho cả batch (DB user: 64 chương đều `2026-10-01T05:53:55.471Z`) → tiebreak rơi xuống `id` là UUID → thứ tự đúng nghĩa ngẫu nhiên. Sửa: nối `chapters` và tiebreak theo **đúng biểu thức `manga_repo::list_chapters`** (`number IS NULL, number, created_at, id`) để hàng đợi chạy giống danh sách chương user nhìn thấy; `retryable_failed_ids` cũng đổi theo cho khớp. Test `t06_claim_order_follows_chapter_number_within_one_submission` seed chương theo thứ tự 3-1-2 và chốt claim ra 1-2-3. Không cần migration — thứ tự tính lúc claim, nên hàng đợi 64 chương đang chờ của user tự vào lại đúng trật tự.
 
+### 2e. Ngân sách retry dài hơn — 2026-10-05 (user: "Cho backoff dài hơn")
+
+User bị `SOURCE_NETWORK` ("Không kết nối được nguồn (mạng/chặn theo khu vực)") đúng lúc hàng đợi chạy, nên mỗi chương chỉ có 3 lần thử cách nhau 5s/20s/80s — một lần DPI reset kéo dài vài phút là cả truyện chết `failed` trước khi mạng hồi.
+
+Sửa trong `src-tauri/src/downloader/mod.rs`: `MAX_ATTEMPTS` 3 → **6**, `BACKOFF_CAP` 15 phút → **30 phút**, thang delay 5s → **15s** cơ sở (`base = 15 * 4^(attempt-1)`), được **15s / 1 phút / 4 phút / 16 phút / 30 phút**, tổng chờ ≈ **51 phút** cho một chương. Task id vẫn cộng jitter nhỏ để cả batch không retry cùng thời điểm.
+
+Không đổi luật nào khác: chỉ lỗi *transient* mới được requeue, lỗi nội dung (parse/permission/validation) vẫn fail ngay, và cầu dao mạng §2b vẫn dừng hàng đợi sau 3 lần `SOURCE_NETWORK` liên tiếp — tức backoff dài không biến một nguồn chết thành một giờ retry âm thầm.
+
+Test: `retry_budget_spans_about_an_hour` chốt hình thang (attempt 1 trong 15–17s, 2 = 60s, 4 = 960s, 5 = cap) và tổng tiền trong `[25 phút, 60 phút]`; `engine_tests` tham số theo `MAX_ATTEMPTS` nên vẫn xanh.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

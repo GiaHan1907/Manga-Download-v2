@@ -20,21 +20,24 @@ mod engine_tests;
 
 use std::time::Duration;
 
-/// Automatic retry budget per task before it is surfaced as `failed`.
-pub const MAX_ATTEMPTS: i64 = 3;
+/// Automatic retry budget per task before it is surfaced as `failed`. A
+/// DPI/CDN block on these sources lasts minutes, not seconds, so the budget
+/// has to outlast one: 6 tries spread over roughly an hour.
+pub const MAX_ATTEMPTS: i64 = 6;
 /// Hard cap of one backoff sleep (tests shrink via explicit next_retry_at).
-pub const BACKOFF_CAP: Duration = Duration::from_secs(15 * 60);
+pub const BACKOFF_CAP: Duration = Duration::from_secs(30 * 60);
 /// Total downloaded bytes allowed per chapter (sum of staged pages).
 pub const CHAPTER_MAX_BYTES: u64 = 400 * 1024 * 1024;
 /// Upper bound on simultaneously tracked worker handles (queue metadata cap).
 pub const MAX_TRACKED_TASKS: usize = 512;
 
 /// Exponential backoff with deterministic jitter (no rand dependency):
-/// attempt 1 ≈ 5s, 2 ≈ 20s, 3 ≈ 80s, capped. The task id contributes a
+/// attempt 1 ≈ 15s, 2 ≈ 1 phút, 3 ≈ 4 phút, 4 ≈ 16 phút, rồi cách 30 phút
+/// một lần cho tới hết ngân sách, tổng ≈ 1 giờ. The task id contributes a
 /// small stable offset so a batch does not retry in lockstep.
 pub fn backoff_duration(attempt: i64, task_id: &str) -> Duration {
     let attempt = attempt.clamp(1, 6) as u32;
-    let base = 5u64.saturating_mul(1u64 << (2 * (attempt - 1).min(5)));
+    let base = 15u64.saturating_mul(1u64 << (2 * (attempt - 1).min(5)));
     let jitter = {
         let mut hash: u64 = 0;
         for byte in task_id.bytes() {
@@ -57,5 +60,24 @@ mod tests {
         assert!(backoff_duration(10, "t1") <= BACKOFF_CAP);
         // Deterministic: same inputs, same delay (no Math.random rule).
         assert_eq!(backoff_duration(2, "abc"), backoff_duration(2, "abc"));
+    }
+
+    /// The budget exists to outlast a real block, so pin the shape of the
+    /// ladder rather than only its monotonicity.
+    #[test]
+    fn retry_budget_spans_about_an_hour() {
+        assert!(backoff_duration(1, "t1") >= Duration::from_secs(15));
+        assert!(backoff_duration(1, "t1") <= Duration::from_secs(17));
+        assert_eq!(backoff_duration(2, "t1"), Duration::from_secs(60));
+        assert_eq!(backoff_duration(4, "t1"), Duration::from_secs(960));
+        assert_eq!(backoff_duration(5, "t1"), BACKOFF_CAP);
+
+        let total: u64 = (1..MAX_ATTEMPTS)
+            .map(|attempt| backoff_duration(attempt, "t1").as_secs())
+            .sum();
+        assert!(
+            (25 * 60..=60 * 60).contains(&total),
+            "a task must survive a multi-minute source block, got {total}s"
+        );
     }
 }
