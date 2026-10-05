@@ -14,7 +14,9 @@ pub const COVER_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// Cap for a single page image (legitimately larger than HTML/JSON bodies).
 pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// Upper bound on pages per chapter manifest (malformed listings guard).
-pub const MAX_PAGE_COUNT: usize = 300;
+/// Sized on live data: a TTT "(Full)" chapter is one scanned volume served as
+/// 346 images (probe 2026-10-05), so a 300 cap rejected real chapters.
+pub const MAX_PAGE_COUNT: usize = 600;
 pub const MAX_REDIRECTS: u32 = 3;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Politeness floor between requests to the same host. Owners of user-added

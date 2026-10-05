@@ -152,6 +152,24 @@ Test (Windows-only module, junction thật): `broken_link_relinks_the_folder_tha
 
 **Bài học:** mọi tính năng "tự chữa" phải được thử ở đúng trạng thái hỏng mà nó nhân danh. Ở đây driver của lỗi là `?` trên một phép `canonicalize` — một io error không tên tuổi lọt thẳng tới user dưới chữ "nội bộ".
 
+### 2g. TTT sang shard ảnh thứ ba — và luật "subdomain thì thừa" — 2026-10-05
+
+User báo `[SOURCE_PARSE_ERROR]`. DB: 7 chương của "Mankichi Đại Tướng Nhóc Con (Full)" fail, `total_pages = 0` cả bảy.
+
+Probe live `live_builtin_ttt_zero_page_chapter_probe` (dựng qua `SourceRegistry::from_rows` với row NULL-host, đúng bài học 2026-10-01) cho thấy trang KHÔNG hề đổi markup kiểu mới: `.reading-content` có sẵn **324–346 `<img>`**, không class Madara, không script mã hóa — tất cả nằm trên **`img.truyentuoitho.com`**. Madara so khớp host **chính xác**, nên mọi trang bị xem là ảnh lạ → nhánh loose bỏ hết → manifest rỗng → `Parse`.
+
+**Thủ phạm thật không phải danh sách host shipped.** `with_profile()` lọc mọi host trùng với base: `normalized == host || normalized.ends_with(".{host}")`, với lý luận "subdomain của base thì thừa, bỏ cho an toàn". Điều đó chỉ đúng ở nhánh TruyenQQ/Nettruyen (match theo domain), SAI ở nhánh Madara (match exact). Hệ quả: thêm `img.truyentuoitho.com` vào `TTT_IMAGE_HOSTS` vẫn vô dụng — nó bị loại trước khi kịp vào allowlist. Chính dòng probe in `allowed=[...]` thiếu host đã chỉ ra việc này; nếu chỉ đọc code sẽ tưởng danh sách shipped là nguồn sự thật.
+
+Bốn sửa đổi, tất cả đều cần thiết:
+1. Bỏ luật drop subdomain — chỉ còn loại host trùng tên base và trùng lặp trong danh sách.
+2. `TTT_IMAGE_HOSTS` += `img.truyentuoitho.com` (giờ là 3 shard).
+3. `MAX_PAGE_COUNT` 300 → **600**: bảy chương thật này dài 324–346 trang, tức **trần cũ tự tay từ chối cả bảy** — hai lỗi chồng lên nhau, sửa host mà không nâng trần thì vẫn nguyên triệu chứng.
+4. Ba chỗ `if urls.len() >= MAX_PAGE_COUNT { break }` → `>`, để manifest có thể vượt trần một phần tử và đúng cái guard `urls.len() > MAX_PAGE_COUNT` (von trước tới giờ không bao giờ fire) mới chạy. Trước đó một chương quá dài bị **cắt cụt trong im lặng** và báo "Hoàn thành" với thiếu trang.
+
+Bằng chứng live sau khi sửa: 7/7 chương trả 324–346 trang và ảnh đầu tiên của mỗi chương tải thật 56–157 KB (shard mới KHÔNG đòi Referer). Test đơn vị: `a_registered_subdomain_of_the_base_host_stays_allowed` (chốt đúng cái luật vừa gỡ), `page_box_images_on_the_truyentuoitho_shard_are_accepted`, `a_chapter_over_the_page_cap_fails_instead_of_being_cropped`.
+
+**Bài học:** khi một adapter có HAI cách so khớp host (exact vs domain suffix), mọi luật "cái này thừa nên bỏ" phải được xét riêng cho từng cách. Và: một hằng số cấu hình bị lọc im lặng trên đường tới chỗ dùng — hãy in giá trị cuối cùng mà đối tượng thực sự mang, đừng tin danh sách khai báo.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

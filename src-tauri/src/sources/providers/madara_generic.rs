@@ -200,12 +200,12 @@ impl MadaraGeneric {
         let mut extras: Vec<String> = Vec::new();
         for extra in image_hosts {
             let normalized = normalize_image_host(extra).ok_or(SourceError::MalformedUrl)?;
-            if normalized == host
-                || normalized.ends_with(&format!(".{host}"))
-                || extras.contains(&normalized)
-            {
-                // Subdomains of the base are already pointless-but-safe to
-                // drop; duplicates and the base itself never need an entry.
+            if normalized == host || extras.contains(&normalized) {
+                // The base host is already allowed, and a repeated entry adds
+                // nothing. A SUBDOMAIN of the base is NOT redundant: Madara
+                // pages are matched by exact host, so dropping it here silently
+                // un-registered a real CDN (live bug 2026-10-05, TTT moved its
+                // "(Full)" chapters to `img.truyentuoitho.com`).
                 continue;
             }
             extras.push(normalized);
@@ -1343,7 +1343,10 @@ impl SourceAdapter for MadaraGeneric {
                 if seen.insert(joined.clone()) {
                     urls.push(joined.to_string());
                 }
-                if urls.len() >= MAX_PAGE_COUNT {
+                // Stop one PAST the cap so the caller's `> MAX_PAGE_COUNT`
+                // guard fires: breaking exactly AT it would silently ship a
+                // cropped chapter that later reports "completed".
+                if urls.len() > MAX_PAGE_COUNT {
                     break;
                 }
             }
@@ -1375,7 +1378,7 @@ impl SourceAdapter for MadaraGeneric {
                     return Err(SourceError::Parse);
                 }
                 urls.push(joined.to_string());
-                if urls.len() >= MAX_PAGE_COUNT {
+                if urls.len() > MAX_PAGE_COUNT {
                     break;
                 }
             }
@@ -1415,7 +1418,7 @@ impl SourceAdapter for MadaraGeneric {
                     {
                         continue;
                     }
-                    if urls.len() >= MAX_PAGE_COUNT {
+                    if urls.len() > MAX_PAGE_COUNT {
                         break;
                     }
                     urls.push(joined.to_string());
@@ -2506,6 +2509,148 @@ mod tests {
         }
     }
 
+    /// What does a Mankichi chapter page actually contain? The user's whole
+    /// queue of this title fails with `total_pages = 0`, so distinguish the
+    /// three live possibilities: the JS reader changed shape, the images moved
+    /// to a host the built-in never registered, or the page is not a reader at
+    /// all. Built through the registry like the app does.
+    #[tokio::test]
+    #[ignore = "live probe: why a TTT chapter yields zero pages"]
+    async fn live_builtin_ttt_zero_page_chapter_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "madara-truyentuoitho-com".to_string(),
+            display_name: "Truyen Tuoi Tho".to_string(),
+            adapter: "madara".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry
+            .get("madara-truyentuoitho-com")
+            .expect("TTT is a built-in");
+        let raw = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+
+        for chapter in [
+            "tap-1-dai-tuong-ra-doi",
+            "tap-2-ba-trum-mito",
+            "tap-3-mankichi-bi-giao-huan",
+            "tap-4-mat-troi-khong-bao-gio-lan",
+            "tap-5-binh-minh-dai-bi-kich",
+            "tap-6-thuc-luc-cua-than-chet",
+            "tap-7-chuong-phu-si-thieng-lieng",
+        ] {
+            match adapter
+                .page_manifest("mankichi-dai-tuong-nhoc-con-full", chapter)
+                .await
+            {
+                Ok(manifest) => {
+                    // A manifest is only half the proof: the shard must
+                    // actually serve bytes to this client (Referer/hotlink
+                    // rules).
+                    let first = &manifest.pages[0].url;
+                    let fetched = raw.fetch_image(first).await.map(|b| b.len());
+                    println!(
+                        "ZP {chapter} pages={} first={first} fetched={fetched:?}",
+                        manifest.pages.len()
+                    );
+                }
+                Err(error) => println!("ZP {chapter} ERR {}", error.code()),
+            }
+            let url = format!(
+                "https://truyentuoitho.com/manga/mankichi-dai-tuong-nhoc-con-full/{chapter}/"
+            );
+            let html = match raw.http.get_text(&url).await {
+                Ok(html) => html,
+                Err(error) => {
+                    println!("ZP {chapter} raw fetch err {error:?}");
+                    continue;
+                }
+            };
+            let document = Html::parse_document(&html);
+            let title = Selector::parse("title").unwrap();
+            println!(
+                "ZP {chapter} bytes={} title={:?}",
+                html.len(),
+                document.select(&title).next().map(|n| n
+                    .text()
+                    .collect::<String>()
+                    .trim()
+                    .to_string())
+            );
+            for sel in [
+                ".reading-content",
+                ".reading-content img",
+                "img.wp-manga-chapter-img",
+                ".page-break",
+                ".container-chapter-reader",
+                "script",
+                "iframe",
+            ] {
+                println!(
+                    "ZP {chapter} sel {sel} = {}",
+                    document.select(&Selector::parse(sel).unwrap()).count()
+                );
+            }
+            // Where the page's own <img> tags point, and what the decoder finds.
+            let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+            let imgs = Selector::parse("img").unwrap();
+            for node in document.select(&imgs) {
+                let Some(value) = ["src", "data-src", "data-lazy-src", "data-original"]
+                    .iter()
+                    .filter_map(|attr| node.value().attr(attr))
+                    .map(str::trim)
+                    .find(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                if let Ok(joined) = raw.base.join(value) {
+                    *hosts
+                        .entry(joined.host_str().unwrap_or("-").to_string())
+                        .or_default() += 1;
+                }
+            }
+            println!("ZP {chapter} img hosts={hosts:?}");
+            match encrypted_reader_images(&document) {
+                Some(urls) => {
+                    let decoded: std::collections::BTreeMap<String, usize> = urls
+                        .iter()
+                        .filter_map(|u| Url::parse(u).ok())
+                        .fold(std::collections::BTreeMap::new(), |mut acc, u| {
+                            *acc.entry(u.host_str().unwrap_or("-").to_string())
+                                .or_default() += 1;
+                            acc
+                        });
+                    println!(
+                        "ZP {chapter} DECODED {} urls, hosts={decoded:?}, first={:?}",
+                        urls.len(),
+                        urls.first()
+                    );
+                }
+                None => println!("ZP {chapter} DECODED none"),
+            }
+            println!("ZP {chapter} allowed={:?}", raw.allowed_image_hosts());
+            let container_imgs = document
+                .select(&Selector::parse(".reading-content img").unwrap())
+                .count();
+            println!("ZP {chapter} container imgs={container_imgs}");
+            if container_imgs == 0 {
+                if let Some(node) = document
+                    .select(&Selector::parse(".reading-content").unwrap())
+                    .next()
+                {
+                    let snippet: String = node.html().chars().take(2000).collect();
+                    println!("ZP {chapter} container html = {snippet}");
+                }
+            }
+        }
+    }
+
     /// Dump the obfuscated reader script of a real chapter to disk so the
     /// decoding scheme can be studied offline instead of guessed from a
     /// truncated log line.
@@ -2811,6 +2956,94 @@ mod tests {
             provider.page_manifest("m", "tap-1").await,
             Err(SourceError::Parse)
         ));
+    }
+
+    /// 2026-10-05: TTT serves its "(Full)" titles from a third shard,
+    /// `img.truyentuoitho.com`, wrapped in `.page-box` with no Madara image
+    /// class. A subdomain of the base host is not an exact-host match, so
+    /// before the shard was registered every one of the 346 pages looked
+    /// foreign and the chapter died as SOURCE_PARSE_ERROR.
+    #[tokio::test]
+    async fn page_box_images_on_the_truyentuoitho_shard_are_accepted() {
+        let provider = built_in_ttt(vec![Ok(r#"<div class="reading-content">
+             <div class="page-box"><img src="https://img.truyentuoitho.com/mankichi/01.%20Tap/01-001.webp"/></div>
+             <div class="page-box"><img src="https://img.truyentuoitho.com/mankichi/01.%20Tap/01-002.webp"/></div>
+           </div>"#)]);
+        let manifest = provider.page_manifest("m", "tap-1").await.unwrap();
+        assert_eq!(manifest.pages.len(), 2);
+        assert!(manifest
+            .pages
+            .iter()
+            .all(|page| page.url.starts_with("https://img.truyentuoitho.com/")));
+    }
+
+    /// The rule that hid the outage: a registered subdomain used to be dropped
+    /// as "already covered by the base host", but Madara pages are matched by
+    /// EXACT host — so the drop silently un-registered TTT's real image shard.
+    #[test]
+    fn a_registered_subdomain_of_the_base_host_stays_allowed() {
+        let provider = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &[
+                "img.truyentuoitho.com".to_string(),
+                "truyentuoitho.com".to_string(),
+            ],
+        )
+        .unwrap();
+        let allowed = provider.allowed_image_hosts();
+        assert!(
+            allowed.iter().any(|h| h == "img.truyentuoitho.com"),
+            "an explicitly registered shard must survive, got {allowed:?}"
+        );
+        assert_eq!(
+            allowed
+                .iter()
+                .filter(|host| host.as_str() == "truyentuoitho.com")
+                .count(),
+            1,
+            "the base host is allowed once, never duplicated by an entry"
+        );
+    }
+
+    /// The page cap is a guard, not a crop. Collecting exactly up to the limit
+    /// and returning it would export a truncated CBZ that later reports
+    /// "completed" — the user must instead see the chapter fail.
+    #[tokio::test]
+    async fn a_chapter_over_the_page_cap_fails_instead_of_being_cropped() {
+        let pages: String = (0..=MAX_PAGE_COUNT)
+            .map(|index| format!(r#"<img src="https://img.truyentuoitho.com/p{index}.webp"/>"#))
+            .collect();
+        let html = format!(r#"<div class="reading-content">{pages}</div>"#);
+        let provider = built_in_ttt_owned(html);
+        assert!(matches!(
+            provider.page_manifest("m", "tap-1").await,
+            Err(SourceError::Parse)
+        ));
+    }
+
+    /// A Madara adapter carrying the built-in's SHIPPED image-host list, which
+    /// is what the app actually runs — `adapter()` deliberately has none.
+    fn built_in_ttt(replies: Vec<Result<&'static str, &'static str>>) -> MadaraGeneric {
+        let transport = Arc::new(MockTransport::with(replies));
+        MadaraGeneric::with_transport_and_image_hosts(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            transport,
+            &ttt_image_hosts(),
+        )
+        .unwrap()
+    }
+
+    fn built_in_ttt_owned(html: String) -> MadaraGeneric {
+        let transport = Arc::new(MockTransport::with(vec![Ok(html.as_str())]));
+        MadaraGeneric::with_transport_and_image_hosts(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            transport,
+            &ttt_image_hosts(),
+        )
+        .unwrap()
     }
 
     /// The exact state the live failure had: TTT serves every page from

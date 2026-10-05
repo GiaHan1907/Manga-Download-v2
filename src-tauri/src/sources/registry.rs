@@ -19,7 +19,11 @@ pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
 /// Cloudflare Worker TTT serves its script-rendered (newer) chapters from,
 /// read off the live page 2026-10-01 — the images are no longer on the base
 /// host or `img.resourcehub.shop` for those chapters.
-pub const TTT_IMAGE_HOSTS: &str = "img.resourcehub.shop,truyentuoitho.anooymi.workers.dev";
+/// `img.truyentuoitho.com` is a third shard, seen 2026-10-05 serving the
+/// `.page-box` reader of the "(Full)" titles; it is a SUBDOMAIN of the base
+/// host and Madara matches image hosts exactly, so it has to be listed.
+pub const TTT_IMAGE_HOSTS: &str =
+    "img.resourcehub.shop,truyentuoitho.anooymi.workers.dev,img.truyentuoitho.com";
 pub const QQ_BASE_URL: &str = "https://truyenqqko.com/";
 pub const QQ_DISPLAY_NAME: &str = "TruyenQQ";
 pub const NT_BASE_URL: &str = "https://nettruyen.gg/";
