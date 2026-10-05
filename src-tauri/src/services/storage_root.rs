@@ -56,6 +56,32 @@ async fn stored_custom_root(pool: &SqlitePool) -> Option<PathBuf> {
     serde_json::from_str::<String>(&raw).ok().map(PathBuf::from)
 }
 
+/// Where the verified files physically live right now: the app-data `library`
+/// directory itself, or the folder the junction points at. `None` means the
+/// junction dangles — the folder was moved or renamed outside the app, which
+/// is exactly the state Settings asks the user to repair by re-choosing it.
+fn reachable_source(lib_slot: &Path) -> Option<PathBuf> {
+    if is_reparse_dir(lib_slot) {
+        lib_slot.canonicalize().ok()
+    } else {
+        Some(lib_slot.to_path_buf())
+    }
+}
+
+fn has_contents(path: &Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
+async fn downloaded_chapters(pool: &SqlitePool) -> Result<i64, AppError> {
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE local_path IS NOT NULL")
+            .fetch_one(pool)
+            .await?;
+    Ok(count)
+}
+
 pub async fn current(pool: &SqlitePool, app_data_dir: &Path) -> Result<RootInfoDto, AppError> {
     let custom = stored_custom_root(pool).await;
     let lib = default_library(app_data_dir);
@@ -273,9 +299,25 @@ fn create_junction(_target: &Path, _junction: &Path) -> Result<(), AppError> {
 }
 
 /// Windows: remove a junction without touching its target contents.
+///
+/// `junction::delete` silently no-ops on a DANGLING link (it cannot stat the
+/// target), which leaves the reparse point in place so the next create fails
+/// with "entity already exists" — precisely the repair needed after the user
+/// moved the folder in Explorer. RemoveDirectory does drop a dangling
+/// junction, so fall back to it.
 #[cfg(windows)]
 fn remove_junction(junction: &Path) -> Result<(), AppError> {
-    junction::delete(junction).map_err(AppError::Io)
+    if std::fs::symlink_metadata(junction).is_err() {
+        return Ok(()); // nothing to detach
+    }
+    if junction::delete(junction).is_ok() && std::fs::symlink_metadata(junction).is_err() {
+        return Ok(());
+    }
+    match std::fs::remove_dir(junction) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(AppError::Io(error)),
+    }
 }
 
 #[cfg(not(windows))]
@@ -307,19 +349,33 @@ pub async fn relocate(
     let lib_slot = default_library(app_data_dir);
     let dst = new_base.join("library");
 
-    // Source of truth today: either the real app-data dir or the junction's
-    // current target (root switch A → B).
-    let src = if is_reparse_dir(&lib_slot) {
-        lib_slot.canonicalize()?
-    } else {
-        lib_slot.clone()
-    };
-    if src == dst.canonicalize().unwrap_or_else(|_| dst.clone()) {
-        return Err(AppError::validation("Thư viện đã ở đúng nơi này."));
+    // Source of truth today: the real app-data dir, or the junction's target
+    // (root switch A → B). A dangling junction has nothing readable to copy —
+    // the tree already lives under the folder the user is now pointing at.
+    let src = reachable_source(&lib_slot);
+    match &src {
+        Some(current) => {
+            if *current == dst.canonicalize().unwrap_or_else(|_| dst.clone()) {
+                return Err(AppError::validation("Thư viện đã ở đúng nơi này."));
+            }
+        }
+        None => {
+            let claimed = downloaded_chapters(pool).await?;
+            if claimed > 0 && !has_contents(&dst) {
+                return Err(AppError::validation(format!(
+                    "Liên kết cũ đang hỏng và `{}` không có truyện nào, trong khi app vẫn ghi nhận \
+                     {claimed} chương đã tải. Hãy chọn đúng thư mục ĐANG chứa thư mục `library` \
+                     (VD: file ở `D:\\Manga\\library` thì chọn `D:\\Manga`).",
+                    dst.display()
+                )));
+            }
+        }
     }
 
     std::fs::create_dir_all(&dst)?;
-    copy_tree_verified(&src, &dst)?;
+    if let Some(current) = &src {
+        copy_tree_verified(current, &dst)?;
+    }
 
     // Detach the old slot, attach the junction; roll back on link failure.
     let rollback_dir: Option<PathBuf> = if is_reparse_dir(&lib_slot) {
@@ -371,7 +427,18 @@ pub async fn reset_to_default(
             link_ok: true,
         });
     }
-    let target = lib_slot.canonicalize()?;
+    let target = match lib_slot.canonicalize() {
+        Ok(target) => target,
+        // Nothing is readable, so there is nothing to copy back. Say so
+        // instead of an opaque io failure, and leave the link alone.
+        Err(_) => {
+            return Err(AppError::validation(
+                "Không đọc được thư viện ở nơi lưu hiện tại (ngắt ổ đĩa hay đổi tên thư mục?) — \
+                 không có gì để copy về. Hãy bấm \"Chọn thư mục lưu…\" và trỏ tới thư mục đang chứa \
+                 `library` trước.",
+            ))
+        }
+    };
     let stamp = now_iso().replace([':', '.', '-'], "");
     let staged_back = lib_slot.with_file_name(format!("library.in-{stamp}"));
     std::fs::create_dir_all(&staged_back)?;
@@ -530,5 +597,88 @@ mod tests {
             !status.root_available,
             "broken link is never available-empty"
         );
+    }
+
+    /// The user dragged `library` out of the chosen folder in Explorer, so the
+    /// junction dangles. Settings tells them to re-choose the folder — that
+    /// repair must work without trying to read the tree that is no longer
+    /// reachable, and without copying anything.
+    #[tokio::test]
+    async fn broken_link_relinks_the_folder_that_still_holds_the_library() {
+        let (_dbdir, pool) = crate::db::test_pool().await;
+        let base = tempfile::tempdir().unwrap();
+        let app_data = base.path().join("appdata4");
+        std::fs::create_dir_all(storage::library_root(&app_data)).unwrap();
+        let old = base.path().join("store4");
+        relocate(&pool, &app_data, &old).await.unwrap();
+        std::fs::write(old.join("library/keep.cbz"), b"cbz-bytes").unwrap();
+
+        let moved = base.path().join("moved4");
+        std::fs::create_dir_all(&moved).unwrap();
+        std::fs::rename(old.join("library"), moved.join("library")).unwrap();
+        assert!(!storage::library_root(&app_data).exists());
+
+        let info = relocate(&pool, &app_data, &moved).await.unwrap();
+        assert!(info.is_custom && info.link_ok);
+        assert_eq!(
+            std::fs::read(storage::library_root(&app_data).join("keep.cbz")).unwrap(),
+            b"cbz-bytes",
+            "the existing tree is re-linked in place, not duplicated"
+        );
+        assert!(moved.join("library/keep.cbz").exists());
+    }
+
+    /// The same repair must not silently point the app at an empty folder
+    /// while the database still claims chapters are on disk — that would read
+    /// as "library lost" instead of "you picked the wrong folder".
+    #[tokio::test]
+    async fn broken_link_refuses_a_folder_holding_no_library() {
+        let (_dbdir, pool) = crate::db::test_pool().await;
+        let base = tempfile::tempdir().unwrap();
+        let app_data = base.path().join("appdata5");
+        std::fs::create_dir_all(storage::library_root(&app_data)).unwrap();
+        let old = base.path().join("store5");
+        relocate(&pool, &app_data, &old).await.unwrap();
+        let (_manga, chapters) = crate::reader::testkit::seed_manga(&pool, "st5", 1).await;
+        crate::reader::testkit::mark_downloaded(&pool, &chapters[0], "st5/chapter-1.cbz", "cbz")
+            .await;
+        std::fs::write(old.join("library/keep.cbz"), b"cbz-bytes").unwrap();
+        let moved = base.path().join("moved5");
+        std::fs::create_dir_all(&moved).unwrap();
+        std::fs::rename(old.join("library"), moved.join("library")).unwrap();
+
+        let wrong = base.path().join("somewhere-else");
+        let error = relocate(&pool, &app_data, &wrong).await.unwrap_err();
+        assert!(matches!(error, AppError::Validation(_)), "got {error:?}");
+        assert!(is_reparse_dir(&storage::library_root(&app_data)));
+        assert!(
+            !wrong.join("library").exists(),
+            "a refused repair must not leave an empty library behind"
+        );
+
+        // Picking the folder that really holds the tree still works.
+        let recovered = relocate(&pool, &app_data, &moved).await.unwrap();
+        assert!(recovered.link_ok);
+    }
+
+    /// "Về mặc định" cannot copy from a tree it cannot read; it must say so
+    /// rather than surface an io failure.
+    #[tokio::test]
+    async fn reset_with_a_broken_link_reports_the_real_problem() {
+        let (_dbdir, pool) = crate::db::test_pool().await;
+        let base = tempfile::tempdir().unwrap();
+        let app_data = base.path().join("appdata6");
+        std::fs::create_dir_all(storage::library_root(&app_data)).unwrap();
+        let chosen = base.path().join("store6");
+        relocate(&pool, &app_data, &chosen).await.unwrap();
+        std::fs::remove_dir_all(chosen.join("library")).unwrap();
+
+        let error = reset_to_default(&pool, &app_data).await.unwrap_err();
+        assert!(matches!(error, AppError::Validation(_)), "got {error:?}");
+        assert!(is_reparse_dir(&storage::library_root(&app_data)));
+        assert!(settings_repo::get_json(&pool, SETTINGS_KEY)
+            .await
+            .unwrap()
+            .is_some());
     }
 }

@@ -133,6 +133,25 @@ Không đổi luật nào khác: chỉ lỗi *transient* mới được requeue,
 
 Test: `retry_budget_spans_about_an_hour` chốt hình thang (attempt 1 trong 15–17s, 2 = 60s, 4 = 960s, 5 = cap) và tổng tiền trong `[25 phút, 60 phút]`; `engine_tests` tham số theo `MAX_ATTEMPTS` nên vẫn xanh.
 
+### 2f. "Lỗi chọn chỗ lưu" — tái liên kết khi junction hỏng — 2026-10-05
+
+User kéo thư mục `library` ra khỏi `H:\My Drive\Truyện Tranh` (thư mục đã chọn làm nơi lưu) bằng Explorer. Hệ quả: `appdata\library` vẫn là junction trỏ vào `…\Truyện Tranh\library` **không còn tồn tại** → Settings báo đúng hai dòng "Không đọc được thư mục library" + "Link tới thư mục tùy chọn đang hỏng". Truyện không mất: toàn bộ 2 GB vẫn ở `H:\My Drive\library`.
+
+Bug thật: chính thẻ Settings đó hướng user bấm "Chọn thư mục lưu…" để tái liên kết, và nút ấy trả **"Lỗi nội bộ không xác định."** Vì `relocate()` mở đầu bằng `lib_slot.canonicalize()?` — với junction treo, `canonicalize` lỗi → `AppError::Io` → wire `INTERNAL_ERROR`. Tức là con đường cứu dữ liệu duy nhất trong UI bị chết đúng lúc cần nó.
+
+Sửa trong `services/storage_root.rs`:
+1. `reachable_source()` trả `Option` — junction treo nghĩa là "không có gì để copy", không phải "lỗi không xác định".
+2. Nguồn không khả dụng → **tái liên kết tại chỗ** vào `<thư mục chọn>\library` đang có dữ liệu (không copy, không nhân bản bản 2 GB).
+3. Chốt an toàn: link hỏng mà nơi chọn **không có `library` nào** trong khi DB còn ghi nhận N chương đã tải → `VALIDATION_ERROR` nói rõ phải chọn thư mục ĐANG chứa `library` (VD: file ở `D:\Manga\library` thì chọn `D:\Manga`). Không chốt này thì một cú chọn sai sẽ biến thư viện thành "trống" ngay trước mắt user dù dữ liệu vẫn còn.
+4. `reset_to_default()` cũng không còn `canonicalize()?`: không đọc được nguồn thì báo thẳng "không có gì để copy về, hãy tái liên kết trước" và **giữ nguyên** junction + settings.
+5. UI: đổi câu hướng dẫn sang "chọn đúng thư mục ĐANG chứa thư mục `library`" (câu cũ "trỏ lại đúng thư mục cũ" sai khi user đã chủ ý di chuyển).
+
+Test (Windows-only module, junction thật): `broken_link_relinks_the_folder_that_still_holds_the_library`, `broken_link_refuses_a_folder_holding_no_library` (kèm khẳng định không để lại `library` rỗng và junction cũ còn nguyên), `reset_with_a_broken_link_reports_the_real_problem`.
+
+**Chi phí thật của bản sửa nằm ở một chi tiết không ai đoán trước:** bài test đầu tiên vẫn fail với *"Không tạo được liên kết thư mục: entity already exists"*. Hóa ra `junction::delete()` **im lặng trả Ok mà không xóa gì** khi junction treo (nó không stat được target), nên liên kết cũ vẫn nằm đó chặn `junction::create()`. Đã kiểm chứng bằng `cmd /c rmdir` trên một junction treo trong `.scratch`: RemoveDirectory xóa sạch link mà không đụng target. `remove_junction()` vì thế giờ thử `junction::delete` trước, còn nếu reparse point vẫn tồn tại thì fallback `std::fs::remove_dir` (và coi `NotFound` là thành công). **Bài học phụ:** thư viện tiện ích có thể "thành công giả" ở đúng trạng thái lỗi — luôn kiểm tra lại hiện trường sau khi nó trả `Ok`.
+
+**Bài học:** mọi tính năng "tự chữa" phải được thử ở đúng trạng thái hỏng mà nó nhân danh. Ở đây driver của lỗi là `?` trên một phép `canonicalize` — một io error không tên tuổi lọt thẳng tới user dưới chữ "nội bộ".
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

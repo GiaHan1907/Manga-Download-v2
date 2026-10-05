@@ -283,8 +283,9 @@ function StoragePanel() {
           )}
           {root.state === "success" && root.data && !root.data.linkOk && (
             <p className="queue-error" role="alert">
-              Link tới thư mục tùy chọn đang hỏng (ngắt ổ đĩa / xóa thư mục?). Truyện KHÔNG bị mất — bấm
-              &quot;Chọn thư mục lưu…&quot; và trỏ lại đúng thư mục cũ để tái liên kết.
+              Link tới thư mục tùy chọn đang hỏng (đổi tên hay di chuyển thư mục `library`?). Truyện
+              KHÔNG bị mất — bấm &quot;Chọn thư mục lưu…&quot; rồi chọn đúng thư mục ĐANG chứa thư mục
+              <strong> library </strong> để tái liên kết.
             </p>
           )}
           {rootError && (
