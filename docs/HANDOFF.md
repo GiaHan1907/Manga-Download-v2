@@ -201,6 +201,18 @@ Header đếm theo `visible.length/total` để không nói "47 tác vụ" khi �
 
 Test: `list_tasks_orders_by_chapter_number` (seed 3-1-2-khôngsố, chốt 1-2-3-∅) và `tests/downloadsQueueOrder.test.tsx` (3 cái: thứ tự tăng dần dù server trả lộn xộn; completed bị ẩn nhưng chip Hoàn thành vẫn thấy; completed qua event thì rời danh sách ngay).
 
+### 2j. Chương `tap-<số>-<tên>` không có số → Thư viện lộn thứ tự — 2026-10-07
+
+User gửi ảnh trang truyện trong Thư viện: "Đã có file (7)" xếp Tập 1, 6, 2, 7, 4, 3, 5. `list_chapters` vẫn xếp `number IS NULL, number, created_at, id` đúng — vấn đề là **cả 12 chương của truyện đó có `number = NULL`**, nên thứ tự thực tế là thứ tự ghi vào DB.
+
+Nguyên nhân: `chapter_number_from_slug` chỉ nhìn **cụm số CUỐI slug** (đúng cho `…-chap-2-1` = 2.1). Slug của TTT là `tap-1-dai-tuong-ra-doi` — kết thúc bằng một từ, không bao giờ khớp luật đó. DB user: 12/168 chương NULL, tất cả thuộc đúng một truyện `mankichi-dai-tuong-nhoc-con-full`.
+
+Sửa hai phần:
+1. **Luật tiền tố** trong cùng hàm: `^(tap|chap|chapter|episode|program|part)[-_ .]*(\d+(?:[.,]\d+)?)(?:$|[-_ .])`. Chỉ chạy khi **không có** cụm số ở cuối, nên họ `chap-2-1` giữ nguyên kết quả; và khi slug kết thúc bằng số nhưng mơ hồ (≥2 nhóm) thì vẫn trả `None` — không đoán chồng lên một slug nguồn đã viết không nhất quán.
+2. **Chữa row cũ**: `library_service::backfill_chapter_numbers(pool)` gọi một lần trong `setup()` (sau `reconcile_startup`). `UPDATE … WHERE id = ?1 AND number IS NULL` — chỉ điền chỗ trống, không bao giờ ghi đè số mà một lần refresh đã lưu, và bỏ qua slug không đọc được số. Chạy mỗi lần khởi động nên idempotent; log số row đã chữa.
+
+Test: `chapter_number_reads_a_leading_number_when_the_slug_starts_with_it` (kèm 3 case "không có số thì đừng bịa") và `backfill_fills_only_unnumbered_chapters_and_orders_the_list` (seed lộn xộn 3-1-2 + 1 row đã có số + 1 row không đọc được → đúng 3 row được điền, chạy lần hai = 0, danh sách ra 1-2-3-9-∅).
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

@@ -22,6 +22,26 @@ pub const RECONCILE_SCAN_LIMIT: i64 = 5000;
 /// The listing SQL spells the same byte as `char(31)`.
 const GENRE_SEPARATOR: char = '\u{1f}';
 
+/// Heal chapter rows that were saved without a number because the source slug
+/// carries it in FRONT of the title (`tap-1-dai-tuong-ra-doi`): with no number
+/// the Library cannot order them, so the list read as shuffled (user report
+/// 2026-10-07). Runs on every start, fills only NULLs, and only from an
+/// unambiguous parse — a row whose number a refresh already stored is never
+/// touched, and a slug that does not clearly name a chapter is left alone.
+pub async fn backfill_chapter_numbers(pool: &SqlitePool) -> Result<u64, AppError> {
+    use crate::sources::providers::madara_generic::chapter_number_from_slug;
+    let rows = crate::db::repositories::manga_repo::chapters_missing_number(pool).await?;
+    let mut filled = 0_u64;
+    for (chapter_id, slug) in rows {
+        if let Some(number) = chapter_number_from_slug(&slug) {
+            filled +=
+                crate::db::repositories::manga_repo::fill_chapter_number(pool, &chapter_id, number)
+                    .await?;
+        }
+    }
+    Ok(filled)
+}
+
 pub async fn list_mangas(
     pool: &SqlitePool,
     query: Option<&str>,
@@ -582,6 +602,54 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    /// The repair for chapters saved without a number because the source writes
+    /// it at the START of the slug: it must fill exactly those rows, never
+    /// overwrite a number that exists, and never invent one it cannot read.
+    #[tokio::test]
+    async fn backfill_fills_only_unnumbered_chapters_and_orders_the_list() {
+        use crate::db::repositories::manga_repo::{
+            ensure_source, list_chapters, upsert_chapter, upsert_manga,
+        };
+        let (_db, pool) = test_pool().await;
+        ensure_source(&pool, "src-ttt", "TTT").await.unwrap();
+        let (manga_id, _) = upsert_manga(&pool, "src-ttt", "mankichi", "T", None, None, "ongoing")
+            .await
+            .unwrap();
+        // Stored in the order the source listed them (newest first).
+        let mut shuffled = Vec::new();
+        for slug in [
+            "tap-3-mua-tien",
+            "tap-1-dai-tuong-ra-doi",
+            "tap-2-ba-trum-mito",
+        ] {
+            let (id, _) = upsert_chapter(&pool, &manga_id, slug, slug, None, None)
+                .await
+                .unwrap();
+            shuffled.push(id);
+        }
+        let (kept, _) = upsert_chapter(&pool, &manga_id, "tap-9-ham-doi", "kept", Some(9.0), None)
+            .await
+            .unwrap();
+        let (no_number, _) = upsert_chapter(&pool, &manga_id, "extra-chapter", "none", None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(backfill_chapter_numbers(&pool).await.unwrap(), 3);
+        // Idempotent: a second start heals nothing further.
+        assert_eq!(backfill_chapter_numbers(&pool).await.unwrap(), 0);
+
+        let list = list_chapters(&pool, &manga_id).await.unwrap();
+        let numbers: Vec<Option<f64>> = list.iter().map(|chapter| chapter.number).collect();
+        assert_eq!(
+            numbers,
+            vec![Some(1.0), Some(2.0), Some(3.0), Some(9.0), None],
+            "chapter order restored, the unreadable slug last and untouched"
+        );
+        assert_eq!(shuffled.len(), 3);
+        assert!(list.iter().any(|chapter| chapter.id == kept));
+        assert!(list.iter().any(|chapter| chapter.id == no_number));
     }
 
     /// manga A: 4 chapters, c1 cbz present, c2 recorded but file absent

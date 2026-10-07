@@ -73,6 +73,20 @@ pub fn run() {
                 }
                 Err(error) => eprintln!("download recovery skipped: {}", error.wire_pair().0),
             }
+            // Chapters saved before the parser knew that some sites put the
+            // number FIRST in the slug have none at all, which is why their
+            // Library list looked shuffled. Idempotent: NULL rows only.
+            match tauri::async_runtime::block_on(services::library_service::backfill_chapter_numbers(
+                &pool,
+            )) {
+                Ok(filled) if filled > 0 => {
+                    eprintln!("chapter numbers: {filled} rows healed from their slug")
+                }
+                Err(error) => {
+                    eprintln!("chapter number backfill skipped: {}", error.wire_pair().0)
+                }
+                _ => {}
+            }
             // Phase 08: drop staging dirs left by terminal/unknown tasks.
             match tauri::async_runtime::block_on(services::storage_service::clear_regenerable_cache(
                 &pool,

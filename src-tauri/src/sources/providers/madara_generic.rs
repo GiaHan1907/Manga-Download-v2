@@ -1018,7 +1018,7 @@ fn dilib_story_slug(slug: &str) -> bool {
     )
 }
 
-fn chapter_number_from_slug(slug: &str) -> Option<f64> {
+pub(crate) fn chapter_number_from_slug(slug: &str) -> Option<f64> {
     // TruyenQQ-family slugs write fractional chapters with a dash:
     // "-chap-2-1" means chapter 2.1 (live bug 2026-10-02: reading only the
     // trailing digit run collapsed every "X.1" to number 1 and exported
@@ -1028,13 +1028,34 @@ fn chapter_number_from_slug(slug: &str) -> Option<f64> {
     // — a missing number only sorts the chapter as unnumbered, a wrong one
     // corrupts the export filename, so refuse to guess.
     let re = Regex::new(r"(\d+(?:[.,-]\d+)*)$").ok()?;
-    let block = re.captures(slug)?.get(1)?.as_str().to_string();
-    let separators = block.matches(['.', ',', '-']).count();
-    match separators {
-        0 => block.parse::<f64>().ok(),
-        1 => Some(block.replace(['-', ','], ".").parse::<f64>().ok()?),
-        _ => None,
+    if let Some(block) = re.captures(slug).and_then(|cap| cap.get(1)) {
+        let separators = block.as_str().matches(['.', ',', '-']).count();
+        return match separators {
+            0 => block.as_str().parse::<f64>().ok(),
+            1 => Some(
+                block
+                    .as_str()
+                    .replace(['-', ','], ".")
+                    .parse::<f64>()
+                    .ok()?,
+            ),
+            // Ambiguous ends the attempt: a leading word would be a second
+            // guess on top of a slug the source already wrote inconsistently.
+            _ => None,
+        };
     }
+    // TTT-family slugs put the number FIRST and the title after it:
+    // `tap-1-dai-tuong-ra-doi`. The trailing rule can never match those (the
+    // slug ends in a word), which left every chapter of such a story unnumbered
+    // and therefore unsortable in the Library (user report 2026-10-07). Only
+    // consulted when there is no trailing number, so the dash-decimal rule
+    // above keeps priority.
+    let lead = Regex::new(
+        r"^(?:tap|chap|chapter|episode|program|part)[-_ .]*(\d+(?:[.,]\d+)?)(?:$|[-_ .])",
+    )
+    .ok()?;
+    let raw = lead.captures(slug)?.get(1)?.as_str();
+    raw.replace(',', ".").parse::<f64>().ok()
 }
 
 #[async_trait]
@@ -2354,6 +2375,30 @@ mod tests {
         assert_eq!(chapter_number_from_slug("chap-1-2-3"), None);
         assert_eq!(chapter_number_from_slug("chapter-1.2.3"), None);
         assert_eq!(chapter_number_from_slug("chap-1-2.3"), None);
+    }
+
+    /// TTT writes the number FIRST and the title after it (`tap-1-dai-tuong-ra-doi`).
+    /// Such a slug ends in a word, so the trailing rule can never match and
+    /// every chapter of that story was stored unnumbered — which is why its
+    /// Library list had nothing to order by (user report 2026-10-07).
+    #[test]
+    fn chapter_number_reads_a_leading_number_when_the_slug_starts_with_it() {
+        assert_eq!(
+            chapter_number_from_slug("tap-1-dai-tuong-ra-doi"),
+            Some(1.0)
+        );
+        assert_eq!(chapter_number_from_slug("tap-12-mua-tien"), Some(12.0));
+        assert_eq!(
+            chapter_number_from_slug("tap-5-binh-minh-dai-bi-kich"),
+            Some(5.0)
+        );
+        assert_eq!(chapter_number_from_slug("chapter-7-our-story"), Some(7.0));
+        // No digits at all stays unnumbered instead of grabbing some other run.
+        assert_eq!(chapter_number_from_slug("one-shot-dau-tien"), None);
+        assert_eq!(chapter_number_from_slug("tap-khong-ro"), None);
+        assert_eq!(chapter_number_from_slug("extra-chapter"), None);
+        // A trailing number still wins, so the dash-decimal family is untouched.
+        assert_eq!(chapter_number_from_slug("chap-2-1"), Some(2.1));
     }
 
     /// A 200 page with story markup but zero chapter anchors is a maintenance

@@ -261,6 +261,32 @@ pub async fn list_mangas(
         .map(|items| (items, total.0))
 }
 
+/// Chapters that still have no number, with the slug a parser can read.
+pub async fn chapters_missing_number(pool: &SqlitePool) -> Result<Vec<(String, String)>, AppError> {
+    sqlx::query_as(
+        "SELECT id, source_chapter_id FROM chapters WHERE number IS NULL ORDER BY manga_id, id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::from)
+}
+
+/// Fill a chapter number that was never derived. The `number IS NULL` guard
+/// means this can never rewrite a number a catalog refresh already stored, so
+/// the repair is safe to run on every start.
+pub async fn fill_chapter_number(
+    pool: &SqlitePool,
+    chapter_id: &str,
+    number: f64,
+) -> Result<u64, AppError> {
+    let result = sqlx::query("UPDATE chapters SET number = ?2 WHERE id = ?1 AND number IS NULL")
+        .bind(chapter_id)
+        .bind(number)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn list_chapters(pool: &SqlitePool, manga_id: &str) -> Result<Vec<ChapterDto>, AppError> {
     let rows = sqlx::query(
         "SELECT id, manga_id, source_chapter_id, title, number, page_count, local_path, output_format \
