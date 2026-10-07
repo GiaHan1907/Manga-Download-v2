@@ -89,6 +89,9 @@ export type DownloadTaskDto = {
   outputRelpath: string | null;
   chapterTitle: string | null;
   mangaTitle: string | null;
+  /// Chapter number, joined server-side so the queue can be read in chapter
+  /// order. Optional because test fixtures and the demo service predate it.
+  chapterNumber?: number | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -190,6 +190,17 @@ Bằng chứng live của chính con đường user báo lỗi: `live_builtin_d3
 
 Bằng chứng live (`live_builtin_d3q_journey_probe`, dựng qua registry + row y như app): search "naruto" → 2 card; detail → **707 chương**, 6 thể loại, cover key chuẩn; chương `chapter-700.9.2472187` → 24 trang, trang đầu tải thật 341 KB từ `s11.anhvip.xyz`; cover tải thật 21.976 KB→22 KB. Test đơn vị: 8 cái (`d3q_*` + `fold_search_query_*`), gồm cả fixture dựng đúng card thật.
 
+### 2i. Danh sách Tải xuống: theo thứ tự chương, mục đã xong rời khỏi hàng đợi — 2026-10-07
+
+User: "List tải xuống xếp theo thứ tự chapter từ bé đến lớn, chapter nào hoàn thành tự động xoá khỏi list tải xuống".
+
+**(1) Thứ tự.** `list_tasks` xếp `priority DESC, created_at ASC, id ASC` — tức đúng cái lỗi mà `claim_next` đã sửa hôm 01/10 (`queue_batch` đóng một `created_at` cho cả batch, nên tiebreak rơi xuống UUID). Nay `TaskRow`/`TASK_SELECT`/`DownloadTaskDto` mang thêm `chapter_number` (`c.number`, `#[sqlx(default)]` vì không phải query nào cũng join `chapters`), và cả hai nhánh của `list_tasks` dùng đúng biểu thức của `claim_next`: `priority DESC, c.number IS NULL, c.number, c.created_at, t.id`. Frontend sort lại trong `visible` bằng `byQueueOrder` cùng khóa — để một event tới sau (`unshift`) không chen lệch thứ tự.
+
+**(2) "Tự xoá" — hiểu là rời khỏi danh sách, KHÔNG phải xoá row.** Row `completed` là bằng chứng offline (chính nó nói chương này có file trong Thư viện), và dialog "Dọn lịch sử" tồn tại để người dùng quyết định xoá. Nên cách làm là mặc định của trang đổi từ "Tất cả" sang chip MỚI **"Hàng đợi"** = mọi trạng thái trừ `completed`: chương vừa xong biến mất ngay khi event về, không cần tải lại, còn lịch sử vẫn xem được bằng chip "Hoàn thành". Không có thao tác xóa dữ liệu nào trong bản này.
+Header đếm theo `visible.length/total` để không nói "47 tác vụ" khi đang xem 5.
+
+Test: `list_tasks_orders_by_chapter_number` (seed 3-1-2-khôngsố, chốt 1-2-3-∅) và `tests/downloadsQueueOrder.test.tsx` (3 cái: thứ tự tăng dần dù server trả lộn xộn; completed bị ẩn nhưng chip Hoàn thành vẫn thấy; completed qua event thì rời danh sách ngay).
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

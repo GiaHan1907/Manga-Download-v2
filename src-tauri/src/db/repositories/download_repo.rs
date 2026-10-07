@@ -54,6 +54,11 @@ pub struct TaskRow {
     pub chapter_title: Option<String>,
     #[sqlx(default)]
     pub manga_title: Option<String>,
+    /// The chapter's own number, so the UI can list work in reading order
+    /// instead of submission order. `#[sqlx(default)]` because not every query
+    /// that reads a task joins `chapters`.
+    #[sqlx(default)]
+    pub chapter_number: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -98,6 +103,7 @@ const TASK_SELECT: &str =
     "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
      t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
      t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
+     c.number AS chapter_number, \
      t.created_at, t.updated_at \
      FROM download_tasks t \
      JOIN chapters c ON c.id = t.chapter_id \

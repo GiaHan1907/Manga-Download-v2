@@ -84,13 +84,18 @@ describe("T06 Downloads manager (real backend)", () => {
   it("renders real tasks with status and per-status actions", async () => {
     mockQueue([baseTask("t1", "downloading", 3), baseTask("t2", "completed", 5)]);
     renderDownloads();
-    expect(await screen.findByText(/Hàng đợi tải — 2\/2 tác vụ/)).toBeDefined();
+    // Default view is the queue: the finished chapter has left it, but its row
+    // is not deleted — it is one chip away under "Hoàn thành".
+    expect(await screen.findByText(/Hàng đợi tải — 1\/2 tác vụ/)).toBeDefined();
     expect(screen.getByText("Truyện t1")).toBeDefined();
+    expect(screen.queryByText("Truyện t2")).toBeNull();
     const activeCard = screen.getByText("Truyện t1").closest("article") as HTMLElement;
-    const doneCard = screen.getByText("Truyện t2").closest("article") as HTMLElement;
     expect(within(activeCard).getByText("Đang tải")).toBeDefined();
     expect(within(activeCard).getByRole("button", { name: /Tạm dừng/ })).toBeDefined();
     expect(within(activeCard).getByRole("button", { name: /Hủy/ })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /Hoàn thành/ }));
+    const doneCard = (await screen.findByText("Truyện t2")).closest("article") as HTMLElement;
     expect(within(doneCard).queryByRole("button", { name: /Tạm dừng/ })).toBeNull();
     expect(within(doneCard).queryByText(/Đã xác minh/)).toBeNull(); // outputRelpath null in fixture
   });

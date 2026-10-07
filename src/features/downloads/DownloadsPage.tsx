@@ -25,9 +25,13 @@ import {
 } from "../../types/downloads";
 import { useDownloadQueue } from "./useDownloadQueue";
 
-type FilterId = "all" | "active" | "paused" | "completed" | "failed" | "cancelled";
+type FilterId = "queue" | "all" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 const FILTERS: { id: FilterId; label: string; match: (s: DownloadTaskDto["status"]) => boolean }[] = [
+  // Default view: the work that is still work. A finished chapter leaves the
+  // queue the moment it completes, but its row stays in the database (it is the
+  // offline proof) and under "Hoàn thành".
+  { id: "queue", label: "Hàng đợi", match: (s) => s !== "completed" },
   { id: "all", label: "Tất cả", match: () => true },
   { id: "active", label: "Đang chạy", match: (s) => isActiveStatus(s) },
   { id: "paused", label: "Tạm dừng", match: (s) => s === "paused" || s === "pausing" },
@@ -35,6 +39,22 @@ const FILTERS: { id: FilterId; label: string; match: (s: DownloadTaskDto["status
   { id: "failed", label: "Lỗi", match: (s) => s === "failed" },
   { id: "cancelled", label: "Đã hủy", match: (s) => s === "cancelled" },
 ];
+
+/// The order the queue actually runs in, mirrored from `list_tasks`: a raised
+/// priority first, then chapter number small→large, unnumbered chapters last,
+/// then submission time. Re-sorting here also keeps the view stable when an
+/// event arrives for a task that was not on the loaded page.
+function byQueueOrder(a: DownloadTaskDto, b: DownloadTaskDto): number {
+  if (a.priority !== b.priority) return b.priority - a.priority;
+  const left = a.chapterNumber ?? null;
+  const right = b.chapterNumber ?? null;
+  if (left === null || right === null) {
+    if (left !== right) return left === null ? 1 : -1;
+  } else if (left !== right) {
+    return left - right;
+  }
+  return a.createdAt.localeCompare(b.createdAt);
+}
 
 const statusLabel = DOWNLOAD_STATUS_LABEL;
 
@@ -104,7 +124,7 @@ export default function DownloadsPage() {
     offset,
     goPage,
   } = useDownloadQueue();
-  const [filter, setFilter] = useState<FilterId>("all");
+  const [filter, setFilter] = useState<FilterId>("queue");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeStatuses, setPurgeStatuses] = useState<string[]>(["failed", "cancelled"]);
@@ -117,7 +137,7 @@ export default function DownloadsPage() {
 
   const visible = useMemo(() => {
     const matcher = FILTERS.find((item) => item.id === filter) ?? FILTERS[0];
-    return tasks.filter((task) => matcher.match(task.status));
+    return tasks.filter((task) => matcher.match(task.status)).sort(byQueueOrder);
   }, [tasks, filter]);
 
   const counts = useMemo(
@@ -226,7 +246,7 @@ export default function DownloadsPage() {
     <div className="page-stack">
       <section className="panel" aria-label="Tổng quan hàng đợi tải">
         <h2 className="panel__title">
-          Hàng đợi tải — {tasks.length}/{total} tác vụ (trang {Math.floor(offset / 100) + 1})
+          Hàng đợi tải — {visible.length}/{total} tác vụ (trang {Math.floor(offset / 100) + 1})
         </h2>
         <div className="chip-row">
           {FILTERS.map((item) => (

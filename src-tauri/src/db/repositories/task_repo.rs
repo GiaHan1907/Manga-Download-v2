@@ -38,12 +38,14 @@ pub async fn list_tasks(
                 "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
                         t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
                         t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
+                        c.number AS chapter_number, \
                         t.created_at, t.updated_at \
                  FROM download_tasks t \
                  JOIN chapters c ON c.id = t.chapter_id \
                  JOIN mangas m ON m.id = c.manga_id \
                  WHERE t.status = ?1 \
-                 ORDER BY t.priority DESC, t.created_at ASC, t.id ASC LIMIT ?2 OFFSET ?3",
+                 ORDER BY t.priority DESC, c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+                 LIMIT ?2 OFFSET ?3",
             )
             .bind(value)
             .bind(limit)
@@ -56,11 +58,13 @@ pub async fn list_tasks(
                 "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
                         t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
                         t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
+                        c.number AS chapter_number, \
                         t.created_at, t.updated_at \
                  FROM download_tasks t \
                  JOIN chapters c ON c.id = t.chapter_id \
                  JOIN mangas m ON m.id = c.manga_id \
-                 ORDER BY t.priority DESC, t.created_at ASC, t.id ASC LIMIT ?1 OFFSET ?2",
+                 ORDER BY t.priority DESC, c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+                 LIMIT ?1 OFFSET ?2",
             )
             .bind(limit)
             .bind(offset)
@@ -90,6 +94,7 @@ pub fn to_dto(row: TaskRow) -> DownloadTaskDto {
         output_relpath: row.output_relpath,
         chapter_title: row.chapter_title,
         manga_title: row.manga_title,
+        chapter_number: row.chapter_number,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -115,6 +120,61 @@ mod tests {
             .await
             .unwrap();
         chapter_id
+    }
+
+    /// The Downloads list is READ in chapter order, not submission order:
+    /// `queue_batch` stamps one created_at on the whole batch, so ordering by
+    /// created_at/id showed a bulk queue in effectively random order (the same
+    /// defect the claim query had). A chapter with no number sorts last.
+    #[tokio::test]
+    async fn list_tasks_orders_by_chapter_number() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        ensure_source(&pool, "src-a", "Source A").await.unwrap();
+        let (manga_id, _) = upsert_manga(&pool, "src-a", "m-order", "T", None, None, "ongoing")
+            .await
+            .unwrap();
+        let mut chapters = Vec::new();
+        for number in [3.0, 1.0, 2.0] {
+            let (chapter_id, _) = upsert_chapter(
+                &pool,
+                &manga_id,
+                &format!("c-{number}"),
+                "C",
+                Some(number),
+                None,
+            )
+            .await
+            .unwrap();
+            chapters.push(chapter_id);
+        }
+        let (unknown, _) = upsert_chapter(&pool, &manga_id, "c-unknown", "C", None, None)
+            .await
+            .unwrap();
+        chapters.push(unknown);
+
+        let ts = crate::domain::now_iso();
+        for chapter_id in chapters {
+            sqlx::query(
+                "INSERT INTO download_tasks (id, chapter_id, status, target_format, priority, \
+                 completed_pages, total_pages, attempts, revision, created_at, updated_at) \
+                 VALUES (?1, ?2, 'queued', 'cbz', 0, 0, 10, 0, 1, ?3, ?3)",
+            )
+            .bind(crate::domain::new_id())
+            .bind(chapter_id)
+            .bind(&ts)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let (items, total) = list_tasks(&pool, None, 20, 0).await.unwrap();
+        assert_eq!(total, 4);
+        let numbers: Vec<Option<f64>> = items.iter().map(|task| task.chapter_number).collect();
+        assert_eq!(
+            numbers,
+            vec![Some(1.0), Some(2.0), Some(3.0), None],
+            "chapter order, unnumbered last"
+        );
     }
 
     #[tokio::test]
