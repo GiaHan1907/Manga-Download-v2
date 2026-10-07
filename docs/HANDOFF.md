@@ -170,7 +170,7 @@ Bằng chứng live sau khi sửa: 7/7 chương trả 324–346 trang và ảnh 
 
 **Bài học:** khi một adapter có HAI cách so khớp host (exact vs domain suffix), mọi luật "cái này thừa nên bỏ" phải được xét riêng cho từng cách. Và: một hằng số cấu hình bị lọc im lặng trên đường tới chỗ dùng — hãy in giá trị cuối cùng mà đối tượng thực sự mang, đừng tin danh sách khai báo.
 
-### 2h. Built-in thứ năm: DocTruyen3Q (doctruyen3qhub.fit) — 2026-10-05
+### 2h. Built-in thứ năm: DocTruyen3Q (doctruyen3qhub.fit) — 2026-10-07
 
 User: "Thêm trang build in : https://doctruyen3qhub.fit/". Đây là engine TỰ VIẾT (không WordPress, không Madara), nên nhận một `SiteProfile` riêng trong `madara_generic` — cùng pipeline đã kiểm chứng, chỉ khác grammar.
 

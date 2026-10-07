@@ -50,7 +50,7 @@ pub enum SiteProfile {
 }
 
 /// DocTruyen3Q serves chapter pages from numbered shards of these domains
-/// (recon 2026-10-05: s15.anhvip.xyz, s8.topcdnv1.art) — the shard differs
+/// (recon 2026-10-07: s15.anhvip.xyz, s8.topcdnv1.art) — the shard differs
 /// per story, so the family is vetted, not one host.
 const DOCTRUYEN3Q_IMAGE_DOMAINS: &[&str] = &["anhvip.xyz", "topcdnv1.art"];
 /// Cover shards, same shape as TruyenQQ's: `/comics/<slug>-<id>.jpg`.
