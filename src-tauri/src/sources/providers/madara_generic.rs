@@ -37,6 +37,61 @@ pub enum SiteProfile {
     /// list inline (/truyen-tranh/<story>-chap-<n>.html), reader images under
     /// /img/comic/ on the base host. No server-rendered search.
     Dilib,
+    /// DocTruyen3Q's own engine (not WordPress): story at
+    /// /truyen-tranh/<slug>/<numericId> and chapters at
+    /// /truyen-tranh/<slug>/chapter-<n>/<numericChapterId> — the numeric ids
+    /// are REQUIRED (without them the site answers a soft-404 or redirects to
+    /// /error/404-manga), so both ids are carried in the stored slugs, joined
+    /// with `.` (valid_slug allows dots and the ids are pure digits). Search is
+    /// GET /tim-truyen?keyword= and matches the DIACRITIC-FREE slug, so queries
+    /// are folded. Reader images live on rotating shards of vetted image
+    /// domains and 403 without a Referer.
+    Doctruyen3q,
+}
+
+/// DocTruyen3Q serves chapter pages from numbered shards of these domains
+/// (recon 2026-10-05: s15.anhvip.xyz, s8.topcdnv1.art) — the shard differs
+/// per story, so the family is vetted, not one host.
+const DOCTRUYEN3Q_IMAGE_DOMAINS: &[&str] = &["anhvip.xyz", "topcdnv1.art"];
+/// Cover shards, same shape as TruyenQQ's: `/comics/<slug>-<id>.jpg`.
+const DOCTRUYEN3Q_COVER_DOMAINS: &[(&str, &str)] = &[("anhvip", "anhvip.xyz")];
+
+/// Fold a search query to the vocabulary the site actually indexes: its
+/// `keyword` route matches the ASCII, diacritic-free story slug, so "võ luyện"
+/// has to arrive as "vo luyen" or every real Vietnamese query returns zero.
+fn fold_search_query(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'a' | 'à' | 'ả' | 'ã' | 'á' | 'ạ' | 'ă' | 'ắ' | 'ằ' | 'ẳ' | 'ẵ' | 'ặ' | 'â' | 'ấ'
+            | 'ầ' | 'ẩ' | 'ẫ' | 'ậ' => 'a',
+            'e' | 'è' | 'é' | 'ẻ' | 'ẽ' | 'ẹ' | 'ê' | 'ế' | 'ề' | 'ể' | 'ễ' | 'ệ' => {
+                'e'
+            }
+            'i' | 'ì' | 'í' | 'ỉ' | 'ĩ' | 'ị' => 'i',
+            'o' | 'ò' | 'ó' | 'ỏ' | 'õ' | 'ọ' | 'ô' | 'ố' | 'ồ' | 'ổ' | 'ỗ' | 'ộ' | 'ơ' | 'ớ'
+            | 'ờ' | 'ở' | 'ỡ' | 'ợ' => 'o',
+            'u' | 'ù' | 'ú' | 'ủ' | 'ũ' | 'ụ' | 'ư' | 'ứ' | 'ừ' | 'ử' | 'ữ' | 'ự' => {
+                'u'
+            }
+            'y' | 'ỳ' | 'ý' | 'ỷ' | 'ỹ' | 'ỵ' => 'y',
+            'd' | 'đ' => 'd',
+            other => other,
+        })
+        .collect()
+}
+
+/// Split a `<stem>.<numeric-id>` slug back into its parts. The id is all
+/// digits and a stem never ends with a dot, so the LAST dot is the boundary.
+fn split_id_slug(slug: &str) -> Option<(&str, &str)> {
+    let (stem, id) = slug.rsplit_once('.')?;
+    (!stem.is_empty() && !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+        .then_some((stem, id))
+}
+
+/// Rebuild `<stem>.<numeric-id>` from the two halves a URL path supplied.
+fn join_id_slug(stem: &str, id: &str) -> String {
+    format!("{stem}.{id}")
 }
 
 /// NetTruyen chapter/thumb CDN domain (rotating imageN. subdomains).
@@ -223,7 +278,10 @@ impl MadaraGeneric {
         // its base host and stays without one.
         let referer = matches!(
             profile,
-            SiteProfile::TruyenQQ | SiteProfile::Nettruyen | SiteProfile::Madara
+            SiteProfile::TruyenQQ
+                | SiteProfile::Nettruyen
+                | SiteProfile::Madara
+                | SiteProfile::Doctruyen3q
         )
         .then(|| base.as_str().to_string());
         let http = Arc::new(GuardedHttp::new(match profile {
@@ -255,6 +313,15 @@ impl MadaraGeneric {
                 allowed_domains: Vec::new(),
                 referer,
             },
+            SiteProfile::Doctruyen3q => HttpPolicy {
+                allowed_hosts,
+                allowed_domains: DOCTRUYEN3Q_IMAGE_DOMAINS
+                    .iter()
+                    .chain(DOCTRUYEN3Q_COVER_DOMAINS.iter().map(|(_, domain)| domain))
+                    .map(|domain| domain.to_string())
+                    .collect(),
+                referer,
+            },
         }));
         Ok(MadaraGeneric {
             id: id.to_string(),
@@ -283,12 +350,19 @@ impl MadaraGeneric {
             return None;
         }
         let host = parsed.host_str()?;
-        // TruyenQQ's covers live on a second CDN whose file names carry an
-        // upload timestamp, so the path cannot be re-derived from the slug the
-        // way NetTruyen's can. Only `/ebook/…` paths on the vetted cover domain
-        // are accepted, and they are always re-fetched against one fixed host.
-        if self.profile == SiteProfile::TruyenQQ {
-            if let Some(token) = TRUYENQQ_COVER_DOMAINS
+        // TruyenQQ's and DocTruyen3Q's covers live on a second CDN whose file
+        // names carry an upload timestamp or a numeric id, so the path cannot
+        // always be re-derived from the slug the way NetTruyen's can. Only the
+        // reader path of the vetted cover domain is accepted (`/ebook/…` and
+        // `/comics/…`), and it is always re-fetched against that one domain
+        // family.
+        let cover_table = match self.profile {
+            SiteProfile::TruyenQQ => Some((TRUYENQQ_COVER_DOMAINS, "/ebook/")),
+            SiteProfile::Doctruyen3q => Some((DOCTRUYEN3Q_COVER_DOMAINS, "/comics/")),
+            _ => None,
+        };
+        if let Some((domains, path_prefix)) = cover_table {
+            if let Some(token) = domains
                 .iter()
                 .find(|(_, domain)| host == *domain || host.ends_with(&format!(".{domain}")))
                 .map(|(token, _)| *token)
@@ -301,7 +375,7 @@ impl MadaraGeneric {
                     && label
                         .chars()
                         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                    && path.starts_with("/ebook/")
+                    && path.starts_with(path_prefix)
                     && key.len() <= 480;
                 return safe.then_some(key);
             }
@@ -396,6 +470,7 @@ impl MadaraGeneric {
             SiteProfile::TruyenQQ => "truyenqq".to_string(),
             SiteProfile::Nettruyen => "nettruyen".to_string(),
             SiteProfile::Dilib => "dilib".to_string(),
+            SiteProfile::Doctruyen3q => "doctruyen3q".to_string(),
         };
         Ok(MadaraGeneric {
             id,
@@ -414,12 +489,28 @@ impl MadaraGeneric {
             SiteProfile::TruyenQQ => format!("{}truyen-tranh/{slug}", self.base),
             SiteProfile::Nettruyen => format!("{}truyen-tranh/{slug}", self.base),
             SiteProfile::Dilib => format!("{}{slug}.html", self.base),
+            // The numeric story id is part of the route: /truyen-tranh/<slug>/<id>
+            SiteProfile::Doctruyen3q => match split_id_slug(slug) {
+                Some((stem, id)) => format!("{}truyen-tranh/{stem}/{id}", self.base),
+                None => format!("{}truyen-tranh/{slug}", self.base),
+            },
         }
     }
 
     fn chapter_url(&self, manga_slug: &str, chapter_slug: &str) -> String {
         match self.profile {
             SiteProfile::Madara => format!("{}manga/{}/{}/", self.base, manga_slug, chapter_slug),
+            // DocTruyen3Q chapters carry BOTH ids:
+            // /truyen-tranh/<story-slug>/chapter-<n>/<chapterId>
+            SiteProfile::Doctruyen3q => {
+                let story = split_id_slug(manga_slug).map_or(manga_slug, |(stem, _)| stem);
+                match split_id_slug(chapter_slug) {
+                    Some((stem, id)) => {
+                        format!("{}truyen-tranh/{story}/{stem}/{id}", self.base)
+                    }
+                    None => format!("{}truyen-tranh/{story}/{chapter_slug}", self.base),
+                }
+            }
             // TruyenQQ chapters are siblings of the story, not children:
             // /truyen-tranh/<story>-chap-<n>. The stored chapter id is the
             // whole stem, so `manga_slug` is already contained in it.
@@ -437,9 +528,10 @@ impl MadaraGeneric {
     /// on the story page (950 links verified live), so no extra page param.
     fn detail_chapter_list_url(&self, slug: &str) -> String {
         match self.profile {
-            SiteProfile::Madara | SiteProfile::Nettruyen | SiteProfile::Dilib => {
-                self.manga_url(slug)
-            }
+            SiteProfile::Madara
+            | SiteProfile::Nettruyen
+            | SiteProfile::Dilib
+            | SiteProfile::Doctruyen3q => self.manga_url(slug),
             SiteProfile::TruyenQQ => self.manga_url(slug),
         }
     }
@@ -455,6 +547,26 @@ impl MadaraGeneric {
             .or_else(|| self.base.join(raw).ok())?;
         if !self.owns_host(parsed.host_str()?) {
             return None;
+        }
+        if self.profile == SiteProfile::Doctruyen3q {
+            // /truyen-tranh/<slug>/<numericId> — the id is part of the route,
+            // so the stored identity carries both halves as `<slug>.<id>`.
+            let mut parts = parsed
+                .path_segments()?
+                .filter(|segment| !segment.is_empty());
+            if parts.next()? != "truyen-tranh" {
+                return None;
+            }
+            let stem = parts.next()?;
+            let id = parts.next()?;
+            if parts.next().is_some()
+                || id.is_empty()
+                || !id.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return None;
+            }
+            let slug = join_id_slug(stem, id);
+            return valid_slug(&slug).then_some(slug);
         }
         // Trailing slashes produce an empty final segment; ignore them so
         // "/manga/slug/" is still exactly two meaningful segments.
@@ -495,6 +607,8 @@ impl MadaraGeneric {
                 }
                 slug
             }
+            // Handled above: the identity is two path segments joined with `.`.
+            SiteProfile::Doctruyen3q => return None,
         };
         // Deeper paths are chapter links, not manga identities.
         if segments.next().is_some() || !valid_slug(slug) {
@@ -510,6 +624,28 @@ impl MadaraGeneric {
             .or_else(|| self.base.join(href).ok())?;
         if !self.owns_host(parsed.host_str()?) {
             return None;
+        }
+        if self.profile == SiteProfile::Doctruyen3q {
+            // /truyen-tranh/<story-slug>/chapter-<n>/<chapterId>; the numeric
+            // chapter id is required, so it rides along in the stored id.
+            let story = split_id_slug(manga_slug).map_or(manga_slug, |(stem, _)| stem);
+            let mut parts = parsed
+                .path_segments()?
+                .filter(|segment| !segment.is_empty());
+            if parts.next()? != "truyen-tranh" || parts.next()? != story {
+                return None;
+            }
+            let stem = parts.next()?;
+            let id = parts.next()?;
+            if parts.next().is_some()
+                || !stem.starts_with("chapter-")
+                || id.is_empty()
+                || !id.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return None;
+            }
+            let slug = join_id_slug(stem, id);
+            return valid_slug(&slug).then_some(slug);
         }
         let mut segments = parsed
             .path_segments()?
@@ -559,6 +695,8 @@ impl MadaraGeneric {
                 }
                 return Some(stem.to_string());
             }
+            // Handled above: the identity is the chapter stem plus its id.
+            SiteProfile::Doctruyen3q => return None,
         }
         let chapter = segments.next()?;
         if segments.next().is_some() || !valid_slug(chapter) {
@@ -715,6 +853,12 @@ impl MadaraGeneric {
                 // any that are not this story's chapter links.
                 "a[href$=\".html\"]"
             }
+            SiteProfile::Doctruyen3q => {
+                // Full list inline (no AJAX). The first row is a hidden ad
+                // pointing at a DIFFERENT domain, which `chapter_slug_from_url`
+                // rejects because it only accepts this host.
+                "#list-chapter-dt a.chapter[href]"
+            }
         })
         .unwrap();
         let mut seen: HashSet<String> = HashSet::new();
@@ -730,7 +874,17 @@ impl MadaraGeneric {
                 continue;
             }
             let label = node.text().collect::<String>().trim().to_string();
-            let number = chapter_number_from_slug(&slug);
+            // DocTruyen3Q prints the real number in `data-chapter` ("97",
+            // "60.5"); the stored id also carries the numeric chapter key, so
+            // parsing the stem would read `60.5.2502652` as the number.
+            let number = match self.profile {
+                SiteProfile::Doctruyen3q => node
+                    .value()
+                    .attr("data-chapter")
+                    .and_then(|value| value.trim().parse::<f64>().ok())
+                    .or_else(|| chapter_number_from_slug(&slug)),
+                _ => chapter_number_from_slug(&slug),
+            };
             let chapter_title = if label.is_empty() {
                 format!(
                     "Chương {}",
@@ -943,6 +1097,26 @@ impl SourceAdapter for MadaraGeneric {
                     _ => false,
                 }
             }
+            // /truyen-tranh/<slug>/<id> (story) and
+            // /truyen-tranh/<slug>/chapter-<n>/<id> (chapter).
+            SiteProfile::Doctruyen3q => {
+                let parts: Vec<&str> = url
+                    .path_segments()
+                    .into_iter()
+                    .flatten()
+                    .filter(|segment| !segment.is_empty())
+                    .collect();
+                let numeric = |value: &str| {
+                    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+                };
+                match parts.as_slice() {
+                    ["truyen-tranh", stem, id] => numeric(id) && valid_slug(stem),
+                    ["truyen-tranh", stem, chapter, id] => {
+                        numeric(id) && valid_slug(stem) && chapter.starts_with("chapter-")
+                    }
+                    _ => false,
+                }
+            }
         }
     }
 
@@ -983,6 +1157,11 @@ impl SourceAdapter for MadaraGeneric {
                 let _ = rest;
                 return Some((manga.to_string(), stem.to_string()));
             }
+            // A chapter URL carries the story SLUG but not its numeric id, and
+            // this site 404s any story route without the id — so a pasted
+            // chapter link cannot be turned into a manga identity here. It
+            // fails as "URL not recognized" rather than guessing an id.
+            SiteProfile::Doctruyen3q => return None,
         };
         let chapter = segments.next()?;
         // Exactly <manga>/<chapter> — deeper paths and bad slugs are not
@@ -1025,6 +1204,19 @@ impl SourceAdapter for MadaraGeneric {
                 }
             }
             SiteProfile::Dilib => return Err(SourceError::UnsupportedOperation),
+            SiteProfile::Doctruyen3q => {
+                // The route indexes the site's ASCII slugs, so the query has to
+                // arrive folded: "võ luyện" must leave as "vo luyen" or every
+                // real Vietnamese search returns nothing at all.
+                let folded =
+                    url::form_urlencoded::byte_serialize(fold_search_query(query).as_bytes())
+                        .collect::<String>();
+                if page == 1 {
+                    format!("{}tim-truyen?keyword={}", self.base, folded)
+                } else {
+                    format!("{}tim-truyen?keyword={}&page={}", self.base, folded, page)
+                }
+            }
         };
         let html = if self.profile == SiteProfile::TruyenQQ {
             self.http
@@ -1125,6 +1317,18 @@ impl SourceAdapter for MadaraGeneric {
                 );
             }
             SiteProfile::Dilib => {}
+            SiteProfile::Doctruyen3q => {
+                // One card per story; the title link carries `data-id` and the
+                // cover is a plain `src` on the vetted image domain.
+                self.collect_cards(
+                    &document,
+                    &Selector::parse("div.item-manga").unwrap(),
+                    &Selector::parse("a.title-manga[href]").unwrap(),
+                    &Selector::parse("div.image-item img").unwrap(),
+                    &mut seen,
+                    &mut items,
+                );
+            }
         }
         let has_more = match self.profile {
             SiteProfile::Madara => document
@@ -1140,6 +1344,10 @@ impl SourceAdapter for MadaraGeneric {
                 .next()
                 .is_some(),
             SiteProfile::Dilib => false,
+            SiteProfile::Doctruyen3q => document
+                .select(&Selector::parse("div.paginate a.page-link[href*='page']").unwrap())
+                .next()
+                .is_some(),
         };
         Ok(RemoteSearchPage { items, has_more })
     }
@@ -1286,6 +1494,14 @@ impl SourceAdapter for MadaraGeneric {
                 .path_segments()
                 .and_then(|mut segments| segments.next())
                 .and_then(|file| file.strip_suffix(".html").map(str::to_string)),
+            // Story links only (see chapter_from_url): /truyen-tranh/<slug>/<id>
+            SiteProfile::Doctruyen3q => url.path_segments().and_then(|segments| {
+                let parts: Vec<&str> = segments.filter(|segment| !segment.is_empty()).collect();
+                match parts.as_slice() {
+                    ["truyen-tranh", stem, id] => Some(join_id_slug(stem, id)),
+                    _ => None,
+                }
+            }),
         }
         .filter(|candidate| valid_slug(candidate))
         .ok_or(SourceError::MalformedUrl)?;
@@ -1311,14 +1527,21 @@ impl SourceAdapter for MadaraGeneric {
         let lazy_cdn: Option<&'static [&'static str]> = match self.profile {
             SiteProfile::TruyenQQ => Some(TRUYENQQ_IMAGE_DOMAINS),
             SiteProfile::Nettruyen => Some(std::slice::from_ref(&NETTRUYEN_IMAGE_DOMAIN)),
+            SiteProfile::Doctruyen3q => Some(DOCTRUYEN3Q_IMAGE_DOMAINS),
             SiteProfile::Madara | SiteProfile::Dilib => None,
         };
         if let Some(cdn) = lazy_cdn {
-            // Scoped to the reader container: both sites print pages inside
-            // `.page-chapter`, while avatars also sit on the same CDN domain
-            // (av.truyenvua.com) and ads sit elsewhere.
-            let lazy =
-                Selector::parse(".page-chapter img[data-src], .page-chapter img[src]").unwrap();
+            // DocTruyen3Q reuses `.page-chapter` for its ad banners too, and
+            // those point at the SAME image domain, so only the numbered page
+            // wrappers are real pages here.
+            let lazy = if self.profile == SiteProfile::Doctruyen3q {
+                Selector::parse(
+                    "div.list-image-detail div.page-chapter[id^='page_'] img[data-src], div.list-image-detail div.page-chapter[id^='page_'] img[src]",
+                )
+                .unwrap()
+            } else {
+                Selector::parse(".page-chapter img[data-src], .page-chapter img[src]").unwrap()
+            };
             let mut seen: HashSet<Url> = HashSet::new();
             for node in document.select(&lazy) {
                 let Some(raw) = ["data-src", "src"]
@@ -1461,16 +1684,21 @@ impl SourceAdapter for MadaraGeneric {
             let url = format!("https://{NETTRUYEN_COVER_HOST}{cover_key}");
             return self.http.get_bytes(&url, COVER_MAX_BYTES).await;
         }
-        // TruyenQQ covers keep the source's own `/ebook/…` path (the file name
-        // embeds an upload timestamp), but the host is always this fixed,
-        // compile-time vetted one — never anything the page supplied. Keys that
-        // are NOT `/cdn/…` are base-host paths (the site also proxies covers
-        // under `/img/…`) and fall through to the base-host guard below.
-        if self.profile == SiteProfile::TruyenQQ {
+        // TruyenQQ and DocTruyen3Q covers keep the source's own path (the file
+        // name embeds an upload timestamp or the numeric story id), but the host
+        // is always this fixed, compile-time vetted one — never anything the
+        // page supplied. Keys that are NOT `/cdn/…` are base-host paths (the
+        // site also proxies covers under `/img/…`) and fall through below.
+        let cover_prefix = match self.profile {
+            SiteProfile::TruyenQQ => Some((TRUYENQQ_COVER_DOMAINS, "ebook/")),
+            SiteProfile::Doctruyen3q => Some((DOCTRUYEN3Q_COVER_DOMAINS, "comics/")),
+            _ => None,
+        };
+        if let Some((domains, path_prefix)) = cover_prefix {
             if let Some(rest) = cover_key.strip_prefix("/cdn/") {
                 let (shard, path) = rest.split_once('/').ok_or(SourceError::MalformedUrl)?;
                 let (label, token) = shard.split_once('.').ok_or(SourceError::MalformedUrl)?;
-                let domain = TRUYENQQ_COVER_DOMAINS
+                let domain = domains
                     .iter()
                     .find(|(t, _)| *t == token)
                     .map(|(_, d)| *d)
@@ -1480,7 +1708,7 @@ impl SourceAdapter for MadaraGeneric {
                     && label
                         .chars()
                         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                    && path.starts_with("ebook/")
+                    && path.starts_with(path_prefix)
                     && !path.contains("//")
                     && !path.split('/').any(|seg| seg == ".." || seg == ".");
                 if !safe {
@@ -1544,7 +1772,10 @@ impl SourceAdapter for MadaraGeneric {
                 .and_then(|content| self.cover_key_from_src(content))
         });
 
-        let tag = Selector::parse("a[rel=\"tag\"]").unwrap();
+        // Madara tags its genre links; DocTruyen3Q puts the same list in its
+        // category row. Both are plain text links, and the dedupe below keeps a
+        // page that somehow matched both from listing a genre twice.
+        let tag = Selector::parse("a[rel=\"tag\"], li.category p.detail-info > a").unwrap();
         let mut genres: Vec<String> = Vec::new();
         for node in document.select(&tag) {
             let name = node.text().collect::<String>().trim().to_string();
@@ -2509,6 +2740,83 @@ mod tests {
         }
     }
 
+    /// Live journey for the DocTruyen3Q built-in, built the way the app builds
+    /// it (registry + persisted row): folded Vietnamese search → story detail →
+    /// inline chapter list → page manifest → REAL image bytes. The last step is
+    /// the one that matters: the shards answer 403 without the source's own
+    /// Referer, so a manifest alone proves nothing.
+    #[tokio::test]
+    #[ignore = "live probe: DocTruyen3Q search → detail → pages → image bytes"]
+    async fn live_builtin_d3q_journey_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "doctruyen3q".to_string(),
+            display_name: "DocTruyen3Q".to_string(),
+            adapter: "doctruyen3q".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("doctruyen3q").expect("built-in is registered");
+        // Several queries on purpose: an empty result here can mean the card
+        // selector is wrong OR that this site's index simply does not match the
+        // phrase, and the two need different fixes.
+        let mut page = adapter.search("naruto", 1).await.unwrap();
+        println!(
+            "D3Q search \"naruto\" items={} has_more={}",
+            page.items.len(),
+            page.has_more
+        );
+        if page.items.is_empty() {
+            page = adapter.search("võ luyện", 1).await.unwrap();
+            println!("D3Q search folded \"võ luyện\" items={}", page.items.len());
+        }
+        let first = page.items.first().expect("the search finds a story");
+        println!(
+            "D3Q search items={} id={} title={} cover={:?}",
+            page.items.len(),
+            first.source_manga_id,
+            first.title,
+            first.cover_key
+        );
+        let detail = adapter.manga_detail(&first.source_manga_id).await.unwrap();
+        println!(
+            "D3Q detail title={} chapters={} genres={} desc={}",
+            detail.summary.title,
+            detail.chapters.len(),
+            detail.genres.len(),
+            detail.description.is_some()
+        );
+        let chapter = detail
+            .chapters
+            .iter()
+            .rev()
+            .find(|chapter| chapter.source_chapter_id.starts_with("chapter-"))
+            .expect("at least one chapter");
+        let manifest = adapter
+            .page_manifest(&first.source_manga_id, &chapter.source_chapter_id)
+            .await
+            .unwrap();
+        let first_url = &manifest.pages[0].url;
+        let bytes = adapter.fetch_image(first_url).await.unwrap();
+        println!(
+            "D3Q chapter={} pages={} first={} bytes={}",
+            chapter.source_chapter_id,
+            manifest.pages.len(),
+            first_url,
+            bytes.len()
+        );
+        assert!(bytes.len() > 1024, "the shard must serve a real image");
+        if let Some(key) = &first.cover_key {
+            let cover = adapter
+                .fetch_cover(&first.source_manga_id, key)
+                .await
+                .map(|bytes| bytes.len());
+            println!("D3Q cover key={key} bytes={cover:?}");
+            assert!(cover.is_ok_and(|size| size > 512), "cover must fetch");
+        }
+    }
+
     /// What does a Mankichi chapter page actually contain? The user's whole
     /// queue of this title fails with `total_pages = 0`, so distinguish the
     /// three live possibilities: the JS reader changed shape, the images moved
@@ -3100,6 +3408,202 @@ mod tests {
         )
         .unwrap();
         (provider, transport)
+    }
+
+    fn d3q(
+        replies: Vec<Result<&'static str, &'static str>>,
+    ) -> (MadaraGeneric, Arc<MockTransport>) {
+        let transport = Arc::new(MockTransport::with(replies));
+        let provider = MadaraGeneric::with_transport_profile(
+            "DocTruyen3Q",
+            "https://doctruyen3qhub.fit/",
+            transport.clone(),
+            SiteProfile::Doctruyen3q,
+        )
+        .unwrap();
+        (provider, transport)
+    }
+
+    /// One card, exactly as the live `/tim-truyen?keyword=naruto` page prints
+    /// it: cover in `div.image-item img` on the CDN domain, title in
+    /// `a.title-manga`, both halves of the identity in the path.
+    const D3Q_SEARCH_FIXTURE: &str = r#"<div class="item-manga"><div class="item"><div class="clearfix">
+       <div class="image-item"><a href="https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/1263"
+         title="Naruto Full Color Edition"><img src="https://s2.anhvip.xyz/comics/naruto-full-color-edition-1263.jpg"
+         alt="Naruto Full Color Edition" class="image-item lazy"></a>
+         <div class="info-manga"><span> 254.5K </span></div></div>
+       <div class="caption"><h3><a href="https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/1263"
+         class="title-manga" data-id="1263">Naruto Full Color Edition</a></h3>
+         <ul><li class="chapter-detail"><a href="https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/chapter-700.9/2470001">Chap 700.9</a></li></ul>
+       </div></div></div></div>
+       <div class="paginate"><ul class="pagination"><li class="page-item active"><a class="page-link"
+         href="https://doctruyen3qhub.fit/tim-truyen?keyword=naruto&amp;page=1">1</a></li>
+         <li class="page-item"><a class="page-link" href="https://doctruyen3qhub.fit/tim-truyen?keyword=naruto&amp;page=2">2</a></li></ul></div>"#;
+
+    #[tokio::test]
+    async fn d3q_search_maps_cards_and_cdn_cover_key() {
+        let (provider, _) = d3q(vec![Ok(D3Q_SEARCH_FIXTURE)]);
+        let page = provider.search("naruto", 1).await.unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(
+            page.items[0].source_manga_id, "naruto-full-color-edition.1263",
+            "the numeric story id is part of the identity"
+        );
+        assert_eq!(page.items[0].title, "Naruto Full Color Edition");
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/cdn/s2.anhvip/comics/naruto-full-color-edition-1263.jpg"),
+            "shard + vetted-domain token, same encoding TruyenQQ covers use"
+        );
+        assert!(page.has_more, "the page's own pagination bar means more");
+    }
+
+    /// The site indexes ASCII slugs: without folding, every Vietnamese query
+    /// the user actually types returns an empty result list.
+    #[tokio::test]
+    async fn d3q_search_folds_diacritics_and_paginates() {
+        let (provider, transport) = d3q(vec![Ok(D3Q_SEARCH_FIXTURE), Ok(D3Q_SEARCH_FIXTURE)]);
+        provider.search("Võ Luyện Đỉnh Phong", 2).await.unwrap();
+        let requested = transport.requested.lock().unwrap();
+        let (_, url) = &requested[0];
+        assert!(
+            url.contains("keyword=vo+luyen+dinh+phong"),
+            "query must arrive folded, got {url}"
+        );
+        assert!(
+            url.contains("&page=2"),
+            "page 2 must be requested, got {url}"
+        );
+    }
+
+    #[test]
+    fn d3q_urls_rebuild_both_ids() {
+        let (provider, _) = d3q(vec![]);
+        assert_eq!(
+            provider.manga_url("vo-luyen-dinh-phong.442"),
+            "https://doctruyen3qhub.fit/truyen-tranh/vo-luyen-dinh-phong/442"
+        );
+        assert_eq!(
+            provider.chapter_url("vo-luyen-dinh-phong.442", "chapter-60.5.2502652"),
+            "https://doctruyen3qhub.fit/truyen-tranh/vo-luyen-dinh-phong/chapter-60.5/2502652"
+        );
+    }
+
+    /// Story page: the full list is inline, and the FIRST row is a hidden ad
+    /// pointing at a different domain — it must never become a chapter.
+    #[tokio::test]
+    async fn d3q_detail_reads_inline_chapters_and_drops_the_foreign_ad_row() {
+        let (provider, _) = d3q(vec![Ok(r#"<article id="comic-detail">
+           <h1 class="title-manga">Ai Đó Đang Điều Khiển Cơ Thể Của Tôi</h1>
+           <ul><li class="category"><p class="detail-info">Thể loại:
+             <a href="https://doctruyen3qhub.fit/tim-truyen/manhwa">Manhwa</a>
+             <a href="https://doctruyen3qhub.fit/tim-truyen/action">Action</a></p></li></ul>
+           <div class="list-chapter" id="list-chapter-dt">
+             <li class="row" style="display: none"><div class="chapters">
+               <a href="//doctruyen3q.xyz/truyen-tranh/khac/chapter-1/9" class="chapter" data-chapter="9">Quảng cáo</a>
+             </div></li>
+             <li class="row"><div class="chapters">
+               <a href="https://doctruyen3qhub.fit/truyen-tranh/ai-do-dang-dieu-khien-co-the-cua-toi/chapter-97/3606761"
+                  class="chapter" data-chapter="97">Chap 97</a></div></li>
+             <li class="row"><div class="chapters">
+               <a href="https://doctruyen3qhub.fit/truyen-tranh/ai-do-dang-dieu-khien-co-the-cua-toi/chapter-60.5/2502652"
+                  class="chapter" data-chapter="60.5">Chap 60.5: Tên chương</a></div></li>
+           </div></article>"#)]);
+        let detail = provider
+            .manga_detail("ai-do-dang-dieu-khien-co-the-cua-toi.14345")
+            .await
+            .unwrap();
+        assert_eq!(detail.genres, vec!["Manhwa", "Action"]);
+        let chapters = detail.chapters;
+        assert_eq!(
+            chapters.len(),
+            2,
+            "the foreign-domain ad row is not a chapter"
+        );
+        // The site prints newest first; the adapter stores them ascending, so
+        // the queue walks the story in reading order.
+        assert_eq!(chapters[0].source_chapter_id, "chapter-60.5.2502652");
+        assert_eq!(
+            chapters[0].number,
+            Some(60.5),
+            "data-chapter wins over parsing the id"
+        );
+        assert_eq!(chapters[0].title, "Chap 60.5: Tên chương");
+        assert_eq!(chapters[1].source_chapter_id, "chapter-97.3606761");
+        assert_eq!(chapters[1].number, Some(97.0));
+    }
+
+    /// `.page-chapter` is reused by the site's own ad banners ON THE SAME image
+    /// domain, so only the numbered page wrappers may become pages.
+    #[tokio::test]
+    async fn d3q_pages_take_numbered_wrappers_and_ignore_ads() {
+        let (provider, _) = d3q(vec![Ok(r#"<div class="list-image-detail">
+           <div class="page-chapter"><img src="//s2.anhvip.xyz/3qhub3.jpg"></div>
+           <div id="page_1" class="page-chapter"><img src="//s15.anhvip.xyz/image_comics/14345/3606761/img_001.jpg?data=vipx"></div>
+           <div id="page_2" class="page-chapter"><img src="//s8.topcdnv1.art/image_top/14345/3606761/img_002.webp?data=3q"></div>
+           <div class="page-chapter"><img src="//s2.anhvip.xyz/luotnv.jpg"></div>
+           </div>"#)]);
+        let manifest = provider
+            .page_manifest(
+                "ai-do-dang-dieu-khien-co-the-cua-toi.14345",
+                "chapter-97.3606761",
+            )
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2);
+        assert_eq!(
+            manifest.pages[0].url,
+            "https://s15.anhvip.xyz/image_comics/14345/3606761/img_001.jpg?data=vipx"
+        );
+        assert_eq!(manifest.pages[1].index, 1);
+    }
+
+    #[test]
+    fn d3q_owns_only_its_three_and_four_segment_routes() {
+        let (provider, _) = d3q(vec![]);
+        let owns = |path: &str| {
+            provider.owns_url(&Url::parse(&format!("https://doctruyen3qhub.fit{path}")).unwrap())
+        };
+        assert!(owns(
+            "/truyen-tranh/ai-do-dang-dieu-khien-co-the-cua-toi/14345"
+        ));
+        assert!(owns(
+            "/truyen-tranh/ai-do-dang-dieu-khien-co-the-cua-toi/chapter-97/3606761"
+        ));
+        assert!(!owns("/truyen-tranh/ai-do-dang-dieu-khien-co-the-cua-toi"));
+        assert!(!owns("/truyen-tranh/ai-do/chapter-97/not-a-number"));
+        assert!(!owns("/tim-truyen/manhwa"));
+        assert!(!owns("/"));
+    }
+
+    /// A chapter link cannot be turned into a manga identity (the story id is
+    /// missing), so it must be refused rather than guessed.
+    #[tokio::test]
+    async fn d3q_resolve_url_accepts_stories_and_refuses_chapter_links() {
+        let (provider, _) = d3q(vec![]);
+        let story =
+            Url::parse("https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/1263")
+                .unwrap();
+        assert_eq!(
+            provider.resolve_url(&story).await.unwrap(),
+            "naruto-full-color-edition.1263"
+        );
+        let chapter = Url::parse(
+            "https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/chapter-700.9/2470001",
+        )
+        .unwrap();
+        assert!(provider.chapter_from_url(&chapter).is_none());
+        assert!(provider.resolve_url(&chapter).await.is_err());
+    }
+
+    #[test]
+    fn fold_search_query_strips_vietnamese_diacritics() {
+        assert_eq!(
+            fold_search_query("Võ Luyện Đỉnh Phong"),
+            "vo luyen dinh phong"
+        );
+        assert_eq!(fold_search_query("Đàm Phán"), "dam phan");
+        assert_eq!(fold_search_query("Naruto 123"), "naruto 123");
     }
 
     const NT_SEARCH: &str = r#"<html><body>

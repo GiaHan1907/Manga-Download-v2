@@ -12,6 +12,7 @@ pub const BUILTIN_IDS: &[&str] = &[
     "truyenqq",
     "nettruyen",
     "dilib",
+    "doctruyen3q",
 ];
 pub const TTT_BASE_URL: &str = "https://truyentuoitho.com/";
 pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
@@ -30,6 +31,8 @@ pub const NT_BASE_URL: &str = "https://nettruyen.gg/";
 pub const NT_DISPLAY_NAME: &str = "NetTruyen";
 pub const DL_BASE_URL: &str = "https://dilib.vn/";
 pub const DL_DISPLAY_NAME: &str = "Dilib";
+pub const D3Q_BASE_URL: &str = "https://doctruyen3qhub.fit/";
+pub const D3Q_DISPLAY_NAME: &str = "DocTruyen3Q";
 
 /// Reviewed HTML-site built-ins sharing the generic scraper pipeline. Their
 /// ids are FIXED (never host-derived) so a domain edit keeps saved manga
@@ -77,6 +80,14 @@ pub const BUILTIN_HTML_SOURCES: &[BuiltInHtmlSpec] = &[
         base_url: DL_BASE_URL,
         image_hosts: None,
         profile: SiteProfile::Dilib,
+    },
+    BuiltInHtmlSpec {
+        id: "doctruyen3q",
+        display_name: D3Q_DISPLAY_NAME,
+        adapter: "doctruyen3q",
+        base_url: D3Q_BASE_URL,
+        image_hosts: None,
+        profile: SiteProfile::Doctruyen3q,
     },
 ];
 

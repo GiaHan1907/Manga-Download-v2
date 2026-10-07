@@ -170,6 +170,24 @@ Bằng chứng live sau khi sửa: 7/7 chương trả 324–346 trang và ảnh 
 
 **Bài học:** khi một adapter có HAI cách so khớp host (exact vs domain suffix), mọi luật "cái này thừa nên bỏ" phải được xét riêng cho từng cách. Và: một hằng số cấu hình bị lọc im lặng trên đường tới chỗ dùng — hãy in giá trị cuối cùng mà đối tượng thực sự mang, đừng tin danh sách khai báo.
 
+### 2h. Built-in thứ năm: DocTruyen3Q (doctruyen3qhub.fit) — 2026-10-05
+
+User: "Thêm trang build in : https://doctruyen3qhub.fit/". Đây là engine TỰ VIẾT (không WordPress, không Madara), nên nhận một `SiteProfile` riêng trong `madara_generic` — cùng pipeline đã kiểm chứng, chỉ khác grammar.
+
+Đường live recon (agent khảo sát, HTML lưu ở `.scratch/d3q-*.html`):
+* Truyện `/truyen-tranh/<slug>/<numericId>`; chương `/truyen-tranh/<slug>/chapter-<n>/<numericChapterId>`. **Id số là bắt buộc**: thiếu id → 404 thật, sai id → 302 tới `/error/404-manga` mà trang lỗi lại trả **HTTP 200** (soft-404 — nên không được tin status code).
+* Tìm kiếm `GET /tim-truyen?keyword=…&page=N`, 36 card/trang, trang 2 không trùng trang 1. **Route này khớp slug ASCII không dấu**, nên `fold_search_query()` bỏ dấu tiếng Việt trước khi gửi — nếu không, mọi truy vấn kiểu "võ luyện" trả về 0 kết quả và nguồn trông như hỏng.
+* Ảnh chương trong `div.list-image-detail div.page-chapter[id^='page_'] img[src]`, URL **protocol-relative**, trên các shard xoay số của CẢ MỘT DOMAIN (`s15.anhvip.xyz`, `s11.anhvip.xyz`, `s8.topcdnv1.art`) → dùng `allowed_domains` (khớp đuôi domain) chứ không phải exact-host. **Thiếu `Referer` là 403** với mọi shard (bìa thì không đòi).
+* Bẫy 1: site tái dùng `.page-chapter` cho **quảng cáo ngay trên cùng domain ảnh**, nên bộ lọc buộc phải có `[id^='page_']`; bỏ điều kiện này là tải cả banner vào CBZ.
+* Bẫy 2: dòng chương ĐẦU TIÊN là hàng ẩn `style="display:none"` trỏ domain KHÁC (`doctruyen3q.xyz`) — `chapter_slug_from_url` từ chối vì không phải host của nguồn, nên nó tự biến mất.
+
+**Cách mã hóa id** (quyết định thiết kế quan trọng nhất): adapter chỉ truyền MỘT chuỗi identity, nên id số được ghép vào slug bằng dấu `.` — `naruto-full-color-edition.1263`, `chapter-700.9.2472187`. Dấu `.` hợp lệ trong `valid_slug`, id luôn toàn chữ số, và chương có số thập phân (`chapter-60.5`) nên tách/ghép theo **dấu `.` CUỐI cùng** (`split_id_slug`/`join_id_slug`). Số chương lấy từ `data-chapter` chứ không parse từ id (nếu parse sẽ ra `700.92472187`).
+
+**Giới hạn đã biết và có chủ đích:** `chapter_from_url` trả `None` cho link chương, vì URL chương chỉ chứa slug truyện chứ KHÔNG chứa id số của truyện — mà không có id thì không dựng được route truyện. Dán link chương vì thế báo "URL không hợp lệ" thay vì đoán id. Dán link TRUYỆN thì hoạt động (`resolve_url` dựng `<slug>.<id>`).
+`genres` đã đọc được (`li.category p.detail-info > a`, thêm vào selector dùng chung — Madara vẫn khớp `a[rel=tag]`); `description`/`author` vẫn `None` với MỌI profile HTML trong app (hạn chế có sẵn, không phải của riêng nguồn này).
+
+Bằng chứng live (`live_builtin_d3q_journey_probe`, dựng qua registry + row y như app): search "naruto" → 2 card; detail → **707 chương**, 6 thể loại, cover key chuẩn; chương `chapter-700.9.2472187` → 24 trang, trang đầu tải thật 341 KB từ `s11.anhvip.xyz`; cover tải thật 21.976 KB→22 KB. Test đơn vị: 8 cái (`d3q_*` + `fold_search_query_*`), gồm cả fixture dựng đúng card thật.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.
