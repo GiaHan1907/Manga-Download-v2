@@ -905,6 +905,27 @@ impl MadaraGeneric {
         }
         chapters
     }
+
+    /// DocTruyen3Q needs the numeric story id in every route, but a pasted
+    /// chapter URL only carries the story slug. Resolve it through the site's
+    /// own search and require an EXACT stem match — a fuzzy hit would file one
+    /// story's chapters under another. `manga_detail` is the single step that
+    /// already talks to the network, so this is where an incomplete identity
+    /// becomes the canonical `<slug>.<id>`.
+    async fn heal_story_id(&self, slug: &str) -> Result<String, SourceError> {
+        if split_id_slug(slug).is_some() {
+            return Ok(slug.to_string());
+        }
+        // The keyword route matches SPACE-separated words: probing the live
+        // site with the hyphenated slug itself returns nothing, while
+        // "vo luyen" finds `vo-luyen-dinh-phong`.
+        let page = self.search(&slug.replace('-', " "), 1).await?;
+        page.items
+            .into_iter()
+            .find(|item| split_id_slug(&item.source_manga_id).is_some_and(|(stem, _)| stem == slug))
+            .map(|item| item.source_manga_id)
+            .ok_or(SourceError::NotFound)
+    }
 }
 
 fn valid_slug(slug: &str) -> bool {
@@ -1157,11 +1178,25 @@ impl SourceAdapter for MadaraGeneric {
                 let _ = rest;
                 return Some((manga.to_string(), stem.to_string()));
             }
-            // A chapter URL carries the story SLUG but not its numeric id, and
-            // this site 404s any story route without the id — so a pasted
-            // chapter link cannot be turned into a manga identity here. It
-            // fails as "URL not recognized" rather than guessing an id.
-            SiteProfile::Doctruyen3q => return None,
+            // A chapter URL carries the story SLUG but not its numeric id.
+            // Returning the bare stem is honest: `manga_detail` heals it into
+            // the canonical `<slug>.<id>` before anything is saved.
+            SiteProfile::Doctruyen3q => {
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                let story = segments.next()?;
+                let chapter = segments.next()?;
+                let id = segments.next()?;
+                if segments.next().is_some()
+                    || !chapter.starts_with("chapter-")
+                    || !id.bytes().all(|byte| byte.is_ascii_digit())
+                    || !valid_slug(story)
+                {
+                    return None;
+                }
+                return Some((story.to_string(), join_id_slug(chapter, id)));
+            }
         };
         let chapter = segments.next()?;
         // Exactly <manga>/<chapter> — deeper paths and bad slugs are not
@@ -1495,10 +1530,20 @@ impl SourceAdapter for MadaraGeneric {
                 .and_then(|mut segments| segments.next())
                 .and_then(|file| file.strip_suffix(".html").map(str::to_string)),
             // Story links only (see chapter_from_url): /truyen-tranh/<slug>/<id>
+            // Story links give the full identity; chapter links can only give
+            // the slug, which `manga_detail` heals.
             SiteProfile::Doctruyen3q => url.path_segments().and_then(|segments| {
                 let parts: Vec<&str> = segments.filter(|segment| !segment.is_empty()).collect();
+                let numeric = |value: &str| {
+                    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+                };
                 match parts.as_slice() {
-                    ["truyen-tranh", stem, id] => Some(join_id_slug(stem, id)),
+                    ["truyen-tranh", stem, id] if numeric(id) => Some(join_id_slug(stem, id)),
+                    ["truyen-tranh", stem, chapter, id]
+                        if numeric(id) && chapter.starts_with("chapter-") =>
+                    {
+                        Some(stem.to_string())
+                    }
                     _ => None,
                 }
             }),
@@ -1726,6 +1771,14 @@ impl SourceAdapter for MadaraGeneric {
         if !valid_slug(source_manga_id) {
             return Err(SourceError::MalformedUrl);
         }
+        // Heal an identity that is missing the numeric story id (a pasted
+        // chapter link), so what gets saved is the same canonical id Discover
+        // would have produced.
+        let canonical = match self.profile {
+            SiteProfile::Doctruyen3q => self.heal_story_id(source_manga_id).await?,
+            _ => source_manga_id.to_string(),
+        };
+        let source_manga_id = canonical.as_str();
         let page_url = self.detail_chapter_list_url(source_manga_id);
         let html = self.http.get_text(&page_url).await?;
         // Madara "load chapters via AJAX" pattern: the page ships only an
@@ -2815,6 +2868,33 @@ mod tests {
             println!("D3Q cover key={key} bytes={cover:?}");
             assert!(cover.is_ok_and(|size| size > 512), "cover must fetch");
         }
+
+        // The user-reported path itself: paste a CHAPTER link (no story id in
+        // it) and walk the real service functions. The story must end up saved
+        // under the canonical identity, i.e. the same row Discover would make.
+        let (story_stem, _) = split_id_slug(&first.source_manga_id).unwrap();
+        let (chapter_stem, chapter_id) = split_id_slug(&chapter.source_chapter_id).unwrap();
+        let pasted = format!(
+            "https://doctruyen3qhub.fit/truyen-tranh/{story_stem}/{chapter_stem}/{chapter_id}"
+        );
+        let link = crate::services::discovery_service::find_chapter_link(&registry, &pasted)
+            .expect("the chapter link classifies");
+        let (_dbdir, pool) = crate::db::test_pool().await;
+        let row = crate::services::discovery_service::ensure_chapter_row(&registry, &pool, &link)
+            .await
+            .expect("the paste saves the story and finds the chapter");
+        let stored: (String,) = sqlx::query_as(
+            "SELECT m.source_manga_id FROM chapters c JOIN mangas m ON m.id = c.manga_id WHERE c.id = ?1",
+        )
+        .bind(&row)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        println!("D3Q paste url={pasted} stored_manga_id={}", stored.0);
+        assert_eq!(
+            stored.0, first.source_manga_id,
+            "a pasted chapter must heal into the canonical identity"
+        );
     }
 
     /// What does a Mankichi chapter page actually contain? The user's whole
@@ -3440,6 +3520,14 @@ mod tests {
          href="https://doctruyen3qhub.fit/tim-truyen?keyword=naruto&amp;page=1">1</a></li>
          <li class="page-item"><a class="page-link" href="https://doctruyen3qhub.fit/tim-truyen?keyword=naruto&amp;page=2">2</a></li></ul></div>"#;
 
+    /// Story page in the site's own shape: one real chapter row plus the
+    /// hidden foreign-domain ad row that must never be stored.
+    const D3Q_STORY_FIXTURE: &str = r#"<article id="comic-detail"><h1 class="title-manga">Naruto Full Color Edition</h1>
+       <div class="list-chapter" id="list-chapter-dt">
+         <li class="row" style="display: none"><div class="chapters"><a href="//doctruyen3q.xyz/truyen-tranh/khac/chapter-1/9" class="chapter">ad</a></div></li>
+         <li class="row"><div class="chapters"><a href="https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/chapter-700.9/2470001" class="chapter" data-chapter="700.9">Chap 700.9</a></div></li>
+       </div></article>"#;
+
     #[tokio::test]
     async fn d3q_search_maps_cards_and_cdn_cover_key() {
         let (provider, _) = d3q(vec![Ok(D3Q_SEARCH_FIXTURE)]);
@@ -3576,10 +3664,10 @@ mod tests {
         assert!(!owns("/"));
     }
 
-    /// A chapter link cannot be turned into a manga identity (the story id is
-    /// missing), so it must be refused rather than guessed.
+    /// A chapter link lacks the story's numeric id, so it yields the bare slug
+    /// and `manga_detail` heals it. A story link resolves in one step.
     #[tokio::test]
-    async fn d3q_resolve_url_accepts_stories_and_refuses_chapter_links() {
+    async fn d3q_resolve_url_maps_stories_directly_and_chapters_by_slug() {
         let (provider, _) = d3q(vec![]);
         let story =
             Url::parse("https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/1263")
@@ -3592,8 +3680,52 @@ mod tests {
             "https://doctruyen3qhub.fit/truyen-tranh/naruto-full-color-edition/chapter-700.9/2470001",
         )
         .unwrap();
-        assert!(provider.chapter_from_url(&chapter).is_none());
-        assert!(provider.resolve_url(&chapter).await.is_err());
+        assert_eq!(
+            provider.resolve_url(&chapter).await.unwrap(),
+            "naruto-full-color-edition"
+        );
+        assert_eq!(
+            provider.chapter_from_url(&chapter),
+            Some((
+                "naruto-full-color-edition".to_string(),
+                "chapter-700.9.2470001".to_string()
+            ))
+        );
+    }
+
+    /// The heal: an identity without the numeric id is looked up through the
+    /// site's own search and the detail comes back keyed by the canonical id —
+    /// that is what makes a pasted chapter link save the SAME row as a story
+    /// found in Discover.
+    #[tokio::test]
+    async fn d3q_detail_heals_a_slug_without_the_numeric_id() {
+        let (provider, transport) = d3q(vec![Ok(D3Q_SEARCH_FIXTURE), Ok(D3Q_STORY_FIXTURE)]);
+        let detail = provider
+            .manga_detail("naruto-full-color-edition")
+            .await
+            .unwrap();
+        assert_eq!(
+            detail.summary.source_manga_id, "naruto-full-color-edition.1263",
+            "the saved identity must be fetchable on its own"
+        );
+        assert_eq!(detail.chapters.len(), 1);
+        let requested = transport.requested.lock().unwrap();
+        assert!(
+            requested[0].1.contains("keyword=naruto+full+color+edition"),
+            "the heal searches space-separated words: {:?}",
+            requested[0].1
+        );
+    }
+
+    /// A search that answers with a DIFFERENT story must not be accepted — the
+    /// exact-stem rule is what stops one story landing in another's row.
+    #[tokio::test]
+    async fn d3q_detail_refuses_a_fuzzy_identity_match() {
+        let (provider, _) = d3q(vec![Ok(D3Q_SEARCH_FIXTURE)]);
+        assert!(matches!(
+            provider.manga_detail("some-other-story").await,
+            Err(SourceError::NotFound)
+        ));
     }
 
     #[test]

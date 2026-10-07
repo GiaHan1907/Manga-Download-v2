@@ -733,6 +733,11 @@ pub async fn save(
     let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
 
     let ts = now_iso();
+    // Key the row by the identity the detail ACTUALLY represents. An adapter may
+    // heal an incomplete one — DocTruyen3Q's routes need a numeric story id that
+    // a pasted chapter URL does not carry — and storing the caller's raw input
+    // would leave a row whose own id cannot be fetched again.
+    let manga_key = detail.summary.source_manga_id.as_str();
     // mangas.source_id is an FK; built-in sources may have no row until first save.
     sqlx::query(
         "INSERT INTO sources (id, display_name, enabled, created_at, updated_at)
@@ -746,7 +751,7 @@ pub async fn save(
     let existing: Option<(String,)> =
         sqlx::query_as("SELECT id FROM mangas WHERE source_id = ?1 AND source_manga_id = ?2")
             .bind(source_id)
-            .bind(source_manga_id)
+            .bind(manga_key)
             .fetch_optional(&mut *tx)
             .await?;
     let updated = existing.is_some();
@@ -773,7 +778,7 @@ pub async fn save(
             )
             .bind(&id)
             .bind(source_id)
-            .bind(source_manga_id)
+            .bind(manga_key)
             .bind(&detail.summary.title)
             .bind(&None::<String>)
             .bind(&detail.description)
