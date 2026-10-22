@@ -213,6 +213,18 @@ Sửa hai phần:
 
 Test: `chapter_number_reads_a_leading_number_when_the_slug_starts_with_it` (kèm 3 case "không có số thì đừng bịa") và `backfill_fills_only_unnumbered_chapters_and_orders_the_list` (seed lộn xộn 3-1-2 + 1 row đã có số + 1 row không đọc được → đúng 3 row được điền, chạy lần hai = 0, danh sách ra 1-2-3-9-∅).
 
+### 2k. "Lỗi nội bộ không xác định" lần hai — mọi bước io phải tự gọi tên — 2026-10-22
+
+User báo lại đúng dòng "Không đổi được nơi lưu — Lỗi nội bộ không xác định." sau khi lỗi junction treo đã sửa. Kiểm tra hiện trường: junction `appdata\library → H:\My Drive\library` **vẫn lành** (6 thư mục truyện đọc xuyên qua nó), settings vẫn `H:\My Drive` — tức lần này thao tác thất bại TRƯỚC khi kịp đổi gì (rollback giữ nguyên hiện trường, đúng thiết kế).
+
+Bằng chứng thủ phạm: `Get-PSDrive` trên máy user trả **`H: FREE_GB = 0`** (Google Drive hết hạn mức/đồng bộ). Mọi `std::fs` lỗi khi tạo thư mục/sao chép vì thế là chuyện bình thường ở cấu hình đó — nhưng code chỉ `?` thẳng `io::Error` → wire `INTERNAL_ERROR` → người dùng không biết sửa gì.
+
+Sửa trong `services/storage_root.rs`: `io_reason()` dịch các mã Windows hay gặp (2/3 không tìm thấy, 5 từ chối quyền, 32/33 tệp bị giữ, 36/206 quá dài, 112 **hết chỗ trống**, 123/267 tên không hợp lệ) sang tiếng Việt, còn `stage_io()` gắn thêm bước gây lỗi. Áp dụng ở: tạo thư mục đích, duyệt danh sách tệp nguồn, tạo thư mục cha từng tệp, `copy`, `stream_equal`/`read_partial` (giờ nhận `stage`), `rename` publishing, `remove_junction` fallback, dời `library` cũ sang chỗ tạm, và staging của `reset_to_default`. Không còn đường nào trong `relocate`/`reset_to_default` để `AppError::Io` lọt lên UI.
+
+Test: `an_unusable_destination_names_its_stage` (đích nằm dưới một TỆP → message phải bắt đầu "Không tạo được \`" và không chứa chữ "nội bộ") và `io_reason_translates_the_codes_users_actually_hit`.
+
+**Hệ luận cần nhớ khi ai đó hỏi "vì sao chuyển nơi lưu thất bại":** nhìn `FREE_GB` của ổ nguồn/đích trước khi nghi ngờ code. Thư viện của user đang nằm trên Google Drive báo 0 byte trống — bản thân việc giữ 2 GB CBZ ở đó đã mong manh, chưa nói đến chuyển đi.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

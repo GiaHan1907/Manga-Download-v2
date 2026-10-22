@@ -27,6 +27,44 @@ pub const SETTINGS_KEY: &str = "storage.downloadRoot.v1";
 const MAX_TREE_ENTRIES: usize = 100_000;
 const COPY_CHUNK: usize = 64 * 1024;
 
+/// Why an OS call failed, in the user's language. A bare io error reached the
+/// UI as "Lỗi nội bộ không xác định", which told the user nothing while the
+/// real cause was usually visible in the error code (a Google Drive mount
+/// reporting zero free space, a file held by another process, a dehydrated
+/// cloud file). Windows codes are named here; other platforms fall back to the
+/// error kind, which is a fixed enum name and never carries a path.
+fn io_reason(error: &std::io::Error) -> String {
+    #[cfg(windows)]
+    match error.raw_os_error().unwrap_or_default() {
+        2 | 3 => {
+            return "không tìm thấy đường dẫn (ổ đĩa bị ngắt hay Google Drive chưa đồng bộ?)".into()
+        }
+        5 => return "bị từ chối quyền".into(),
+        32 | 33 => return "một tệp đang bị chương trình khác giữ".into(),
+        36 => return "đường dẫn quá dài".into(),
+        112 => return "nơi đích không còn chỗ trống".into(),
+        206 => return "tên tệp hoặc đường dẫn quá dài".into(),
+        123 | 267 => return "tên thư mục không hợp lệ (nơi đích không phải một thư mục?)".into(),
+        _ => {}
+    }
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "bị từ chối quyền".into(),
+        std::io::ErrorKind::NotFound => "không tìm thấy đường dẫn".into(),
+        std::io::ErrorKind::StorageFull => "không còn chỗ trống".into(),
+        std::io::ErrorKind::InvalidFilename => "tên tệp không hợp lệ".into(),
+        other => format!("lỗi hệ thống ({other:?})"),
+    }
+}
+
+/// Same failure with the step that hit it, so the message says what to fix.
+fn stage_io(stage: &str, error: &std::io::Error) -> AppError {
+    AppError::validation(format!(
+        "{stage}: {reason}.",
+        stage = stage,
+        reason = io_reason(error)
+    ))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootInfoDto {
@@ -169,17 +207,24 @@ pub fn validate_candidate(app_data_dir: &Path, candidate: &Path) -> Result<(), A
     Ok(())
 }
 
-fn stream_equal(a: &Path, b: &Path) -> Result<bool, AppError> {
-    let size_a = std::fs::metadata(a)?.len();
-    let size_b = std::fs::metadata(b)?.len();
+fn stream_equal(a: &Path, b: &Path, stage: &str) -> Result<bool, AppError> {
+    let size_a = std::fs::metadata(a)
+        .map_err(|error| stage_io(stage, &error))?
+        .len();
+    let size_b = std::fs::metadata(b)
+        .map_err(|error| stage_io(stage, &error))?
+        .len();
     if size_a != size_b {
         return Ok(false);
     }
-    let (mut fa, mut fb) = (File::open(a)?, File::open(b)?);
+    let (mut fa, mut fb) = (
+        File::open(a).map_err(|error| stage_io(stage, &error))?,
+        File::open(b).map_err(|error| stage_io(stage, &error))?,
+    );
     let (mut buf_a, mut buf_b) = (vec![0u8; COPY_CHUNK], vec![0u8; COPY_CHUNK]);
     loop {
-        let n_a = read_partial(&mut fa, &mut buf_a)?;
-        let n_b = read_partial(&mut fb, &mut buf_b)?;
+        let n_a = read_partial(&mut fa, &mut buf_a, stage)?;
+        let n_b = read_partial(&mut fb, &mut buf_b, stage)?;
         if n_a != n_b || buf_a[..n_a] != buf_b[..n_b] {
             return Ok(false);
         }
@@ -189,14 +234,14 @@ fn stream_equal(a: &Path, b: &Path) -> Result<bool, AppError> {
     }
 }
 
-fn read_partial(reader: &mut File, buf: &mut [u8]) -> Result<usize, AppError> {
+fn read_partial(reader: &mut File, buf: &mut [u8], stage: &str) -> Result<usize, AppError> {
     let mut filled = 0usize;
     while filled < buf.len() {
         match reader.read(&mut buf[filled..]) {
             Ok(0) => break,
             Ok(n) => filled += n,
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(AppError::Io(e)),
+            Err(e) => return Err(stage_io(stage, &e)),
         }
     }
     Ok(filled)
@@ -206,11 +251,15 @@ fn walk_files(root: &Path) -> Result<Vec<PathBuf>, AppError> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let entries = std::fs::read_dir(&dir)?;
+        let entries = std::fs::read_dir(&dir)
+            .map_err(|error| stage_io("Không đọc được danh sách tệp của thư viện", &error))?;
         for entry in entries {
-            let entry = entry?;
+            let entry = entry
+                .map_err(|error| stage_io("Không đọc được danh sách tệp của thư viện", &error))?;
             let path = entry.path();
-            let file_type = entry.file_type()?;
+            let file_type = entry
+                .file_type()
+                .map_err(|error| stage_io("Không đọc được danh sách tệp của thư viện", &error))?;
             if file_type.is_symlink() {
                 continue; // engine never creates links inside library
             }
@@ -252,11 +301,15 @@ pub fn copy_tree_verified(src: &Path, dst: &Path) -> Result<CopyReport, AppError
             .map_err(|_| AppError::Internal)?
             .to_path_buf();
         let target = dst.join(&rel);
+        // Every message names the file, because the failure that actually
+        // happens is per-file (a cloud placeholder that will not hydrate, an
+        // over-quota drive) and the user needs to know WHICH one to free.
+        let stage = format!("Không chuyển được tệp `{}`", rel.display());
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent).map_err(|error| stage_io(&stage, &error))?;
         }
         if target.exists() {
-            if stream_equal(&file, &target)? {
+            if stream_equal(&file, &target, &stage)? {
                 report.skipped_identical += 1;
                 continue;
             }
@@ -273,14 +326,14 @@ pub fn copy_tree_verified(src: &Path, dst: &Path) -> Result<CopyReport, AppError
             name.push_str(".m1989-part");
             target.with_file_name(name)
         };
-        std::fs::copy(&file, &tmp)?;
-        if !stream_equal(&file, &tmp)? {
+        std::fs::copy(&file, &tmp).map_err(|error| stage_io(&stage, &error))?;
+        if !stream_equal(&file, &tmp, &stage)? {
             let _ = std::fs::remove_file(&tmp);
-            return Err(AppError::validation(
-                "Bản sao không khớp byte gốc — hủy chuyển (đĩa lỗi?).".to_string(),
-            ));
+            return Err(AppError::validation(format!(
+                "{stage}: bản sao không khớp byte gốc, nên việc chuyển bị hủy (đĩa lỗi?).",
+            )));
         }
-        std::fs::rename(&tmp, &target)?;
+        std::fs::rename(&tmp, &target).map_err(|error| stage_io(&stage, &error))?;
         report.copied += 1;
     }
     Ok(report)
@@ -316,7 +369,7 @@ fn remove_junction(junction: &Path) -> Result<(), AppError> {
     match std::fs::remove_dir(junction) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(AppError::Io(error)),
+        Err(error) => Err(stage_io("Không gỡ được liên kết cũ", &error)),
     }
 }
 
@@ -372,7 +425,8 @@ pub async fn relocate(
         }
     }
 
-    std::fs::create_dir_all(&dst)?;
+    std::fs::create_dir_all(&dst)
+        .map_err(|error| stage_io(&format!("Không tạo được `{}`", dst.display()), &error))?;
     if let Some(current) = &src {
         copy_tree_verified(current, &dst)?;
     }
@@ -384,7 +438,8 @@ pub async fn relocate(
     } else if lib_slot.exists() {
         let stamp = now_iso().replace([':', '.', '-'], "");
         let parked = lib_slot.with_file_name(format!("library.old-{stamp}"));
-        std::fs::rename(&lib_slot, &parked)?;
+        std::fs::rename(&lib_slot, &parked)
+            .map_err(|error| stage_io("Không dời được thư mục library cũ sang chỗ tạm", &error))?;
         Some(parked)
     } else {
         None
@@ -441,7 +496,12 @@ pub async fn reset_to_default(
     };
     let stamp = now_iso().replace([':', '.', '-'], "");
     let staged_back = lib_slot.with_file_name(format!("library.in-{stamp}"));
-    std::fs::create_dir_all(&staged_back)?;
+    std::fs::create_dir_all(&staged_back).map_err(|error| {
+        stage_io(
+            "Không tạo được thư mục tạm trong dữ liệu của app để copy về",
+            &error,
+        )
+    })?;
     if let Err(error) = copy_tree_verified(&target, &staged_back) {
         let _ = std::fs::remove_dir_all(&staged_back);
         return Err(error);
@@ -680,5 +740,49 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    /// The user's SECOND "Không đổi được nơi lưu — Lỗi nội bộ không xác định."
+    /// had a different cause than the dangling link: any io failure in the copy
+    /// reached the UI as an anonymous internal error. Each step now names
+    /// itself, so the message says what to fix.
+    #[tokio::test]
+    async fn an_unusable_destination_names_its_stage() {
+        let (_dbdir, pool) = crate::db::test_pool().await;
+        let base = tempfile::tempdir().unwrap();
+        let app_data = base.path().join("appdata7");
+        std::fs::create_dir_all(storage::library_root(&app_data)).unwrap();
+        let blocker = base.path().join("blocker.txt");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let error = relocate(&pool, &app_data, &blocker.join("store7"))
+            .await
+            .unwrap_err();
+        match error {
+            AppError::Validation(message) => {
+                assert!(
+                    message.starts_with("Không tạo được `"),
+                    "the failing step must be named, got {message}"
+                );
+                assert!(
+                    !message.contains("nội bộ"),
+                    "never fall back to an anonymous internal error: {message}"
+                );
+            }
+            other => panic!("expected VALIDATION_ERROR naming the stage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn io_reason_translates_the_codes_users_actually_hit() {
+        let reason = |code: i32| io_reason(&std::io::Error::from_raw_os_error(code));
+        assert!(reason(112).contains("chỗ trống"), "{}", reason(112));
+        assert!(reason(5).contains("quyền"));
+        assert!(reason(32).contains("chương trình khác giữ"));
+        assert!(reason(3).contains("không tìm thấy"));
+        assert!(reason(267).contains("không hợp lệ"));
+        // An unknown code still produces something the user can quote back.
+        assert!(reason(9999).starts_with("lỗi hệ thống"));
     }
 }
