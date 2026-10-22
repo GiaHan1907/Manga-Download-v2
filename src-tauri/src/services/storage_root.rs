@@ -94,6 +94,29 @@ async fn stored_custom_root(pool: &SqlitePool) -> Option<PathBuf> {
     serde_json::from_str::<String>(&raw).ok().map(PathBuf::from)
 }
 
+async fn downloaded_bytes(pool: &SqlitePool) -> Result<i64, AppError> {
+    let bytes: i64 = sqlx::query_scalar(
+        "SELECT IFNULL(SUM(local_size_bytes), 0) FROM chapters WHERE local_path IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(bytes)
+}
+
+/// Whole gibibytes, rounded in the pessimistic direction for each side of a
+/// space comparison so a borderline volume is refused rather than attempted.
+fn gib(value: i64, up: bool) -> i64 {
+    const GIB: i64 = 1024 * 1024 * 1024;
+    if value <= 0 {
+        return 0;
+    }
+    if up {
+        (value + GIB - 1) / GIB
+    } else {
+        value / GIB
+    }
+}
+
 /// Where the verified files physically live right now: the app-data `library`
 /// directory itself, or the folder the junction points at. `None` means the
 /// junction dangles — the folder was moved or renamed outside the app, which
@@ -420,6 +443,30 @@ pub async fn relocate(
                      {claimed} chương đã tải. Hãy chọn đúng thư mục ĐANG chứa thư mục `library` \
                      (VD: file ở `D:\\Manga\\library` thì chọn `D:\\Manga`).",
                     dst.display()
+                )));
+            }
+        }
+    }
+
+    // Refuse before copying gigabytes into a volume that cannot hold them. A
+    // mid-copy failure on a cloud mount is slow and used to be opaque; this
+    // answers the question in one line, before anything is written.
+    if src.is_some() {
+        let needed = downloaded_bytes(pool).await?;
+        let probe = if new_base.exists() {
+            new_base
+        } else {
+            new_base.parent().unwrap_or(new_base)
+        };
+        if let Some((_, free)) = storage::volume_space(probe) {
+            if needed > free {
+                return Err(AppError::validation(format!(
+                    "Nơi đích `{}` chỉ còn khoảng {} GB trống, không đủ cho thư viện ~{} GB \
+                     (bản cũ chỉ bị bỏ sau khi bản mới được xác minh từng byte). Chọn ổ khác \
+                     còn chỗ hơn.",
+                    new_base.display(),
+                    gib(free, false),
+                    gib(needed, true)
                 )));
             }
         }
@@ -771,6 +818,39 @@ mod tests {
             }
             other => panic!("expected VALIDATION_ERROR naming the stage, got {other:?}"),
         }
+    }
+
+    /// The user's actual shape: a multi-gigabyte library and a destination that
+    /// cannot hold it. Refuse up front — mid-copy is slow and, until now,
+    /// unreadable — and write nothing.
+    #[tokio::test]
+    async fn relocate_refuses_a_destination_without_room() {
+        let (_dbdir, pool) = crate::db::test_pool().await;
+        let base = tempfile::tempdir().unwrap();
+        let app_data = base.path().join("appdata8");
+        std::fs::create_dir_all(storage::library_root(&app_data)).unwrap();
+        let (_manga, chapters) = crate::reader::testkit::seed_manga(&pool, "big", 1).await;
+        crate::reader::testkit::mark_downloaded(&pool, &chapters[0], "big/chapter-1.cbz", "cbz")
+            .await;
+        sqlx::query("UPDATE chapters SET local_size_bytes = 4000000000000 WHERE id = ?1")
+            .bind(&chapters[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let chosen = base.path().join("store8");
+        let error = relocate(&pool, &app_data, &chosen).await.unwrap_err();
+        match error {
+            AppError::Validation(message) => assert!(
+                message.contains("chỉ còn khoảng") && message.contains("GB trống"),
+                "got {message}"
+            ),
+            other => panic!("expected a space refusal, got {other:?}"),
+        }
+        assert!(
+            !chosen.join("library").exists(),
+            "the refusal happens before the first write"
+        );
     }
 
     #[test]

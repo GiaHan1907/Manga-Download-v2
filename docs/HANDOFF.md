@@ -223,7 +223,9 @@ Sửa trong `services/storage_root.rs`: `io_reason()` dịch các mã Windows ha
 
 Test: `an_unusable_destination_names_its_stage` (đích nằm dưới một TỆP → message phải bắt đầu "Không tạo được \`" và không chứa chữ "nội bộ") và `io_reason_translates_the_codes_users_actually_hit`.
 
-**Hệ luận cần nhớ khi ai đó hỏi "vì sao chuyển nơi lưu thất bại":** nhìn `FREE_GB` của ổ nguồn/đích trước khi nghi ngờ code. Thư viện của user đang nằm trên Google Drive báo 0 byte trống — bản thân việc giữ 2 GB CBZ ở đó đã mong manh, chưa nói đến chuyển đi.
+**Đính chính từ chính user:** thao tác thất bại là khi **chuyển sang ổ J** (một mount Google Drive khác, 25 GB trống) — không phải H:. Chi tiết này đổi cách sửa: ngoài việc gọi tên bước, `relocate` còn **chặn từ đầu khi nơi đích không đủ chỗ** (`downloaded_bytes` = `SUM(local_size_bytes)` của chương đã tải, so với `volume_space(new_base)`, làm tròn theo hướng thận trọng cả hai phía) — vì sao chép dở rồi mới fail vừa mất hàng chục phút vừa để lại một nửa bản sao. Thư viện chỉ bị bỏ bản cũ SAU khi bản mới được xác minh từng byte, nên cần đủ chỗ cho cả hai. Test: `relocate_refuses_a_destination_without_room` (khai báo 4 TB đã tải → từ chối, và `store/library` KHÔNG được tạo ra).
+
+**Hệ luận cần nhớ khi ai đó hỏi "vì sao chuyển nơi lưu thất bại":** nhìn `FREE_GB` của ổ nguồn và ổ đích trước khi nghi ngờ code. Cả H: (0 GB) và J: (25 GB) ở máy user đều là mount của Google Drive — để một thư viện nhiều GB trên đó vốn đã mong manh, và junction của app giả định một ổ đĩa cục bộ.
 
 ## 3. Bất biến kiến trúc (không được phá)
 
