@@ -271,6 +271,16 @@ Test: `t09_pacing_is_per_host_and_images_get_a_smaller_floor` (host khác không
 
 **Tác dụng phụ có chủ đích:** tải chương cũng nhanh hơn nhiều (ảnh không còn cách nhau 3 s). Nếu CDN bắt đầu trả 429, engine đã có nhánh `RateLimited` + thang retry để lùi; đó là dấu hiệu cần nâng `IMAGE_REQUEST_SPACING`, không phải hạ tiếp.
 
+### 2o. `SOURCE_NOT_FOUND` hàng loạt trên NetTruyen — trang nằm ở shard khác — 2026-10-23
+
+9 chương của "H2" (`nettruyen`) fail `SOURCE_NOT_FOUND`, **tải được một phần** (0–18/20 trang) và `attempts = 0`. Đọc `download_pages`: các trang thiếu có `storage_key = NULL`, tức hỏng từ trang đó trở đi — và index hỏng khác nhau mỗi chương (0, 4, 8, 12, 18…), nên không phải "manifest đếm thừa ở cuối".
+
+Probe `live_builtin_nt_page_fetch_probe` (dựng qua registry, tải từng trang) chỉ ra đúng URL: `https://image3.kcgsbok.com/nettruyen/h2/141/1.jpg` → 404, trong khi trang 0 và 17 cùng shard vẫn 200. Gọi lại URL đó 3 lần: **404 ổn định** (không phải rate limit). Thử cùng đường dẫn trên các shard anh em: **image2 trả 200** (97 KB). Tức trang HTML in MỘT shard cho mỗi ảnh, nhưng file thật có thể nằm ở shard khác trong cùng họ.
+
+Sửa: `fetch_image` chỉ khi gặp `NotFound` mới thử lại **đúng path đã in** trên các shard anh em `imageN.kcgsbok.com` / `cdnN.cloud-zzz.com` (N=1..6, trừ host vừa 404). `shard_siblings()` trả rỗng cho mọi host khác, nên không có phỏng đoán nào ngoài hai họ CDN đã allowlist — **không nới allowlist** vì chính sách đã cho cả domain. Nếu tất cả shard đều 404 thì chương vẫn fail `NotFound` (đúng: nội dung đã mất) và vẫn không auto-retry.
+
+Bằng chứng live sau sửa: `chuong-141` 18/18 trang (p1 được cứu qua image2), `chuong-201` 20/20, `chuong-11` 20/20. Test: `shard_siblings_only_apply_to_the_sharded_cdn_families`, `nt_image_fetch_falls_back_to_a_sibling_shard_on_404`. 9 tác vụ H2 đã fail trước đó cần bấm "Thử lại tất cả lỗi" sau khi cài bản mới.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

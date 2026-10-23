@@ -113,6 +113,44 @@ fn split_dash_id(slug: &str) -> Option<(&str, &str)> {
         .then_some((stem, id))
 }
 
+/// Sibling shard URLs for a NetTruyen-family CDN host (`imageN.kcgsbok.com`,
+/// `cdnN.cloud-zzz.com`). Empty for every other host, so a 404 elsewhere never
+/// turns into guessing.
+fn shard_siblings(url: &str) -> Vec<String> {
+    const SHARDS: u8 = 6;
+    let Ok(parsed) = Url::parse(url) else {
+        return Vec::new();
+    };
+    let Some(host) = parsed.host_str() else {
+        return Vec::new();
+    };
+    let Some((label, domain)) = host.split_once('.') else {
+        return Vec::new();
+    };
+    let Some(index) = label.find(|c: char| c.is_ascii_digit()) else {
+        return Vec::new();
+    };
+    let (prefix, numeric) = label.split_at(index);
+    if !matches!(prefix, "image" | "cdn")
+        || numeric.is_empty()
+        || !numeric.bytes().all(|b| b.is_ascii_digit())
+        || (domain != NETTRUYEN_IMAGE_DOMAIN && domain != NTAR_IMAGE_DOMAIN)
+    {
+        return Vec::new();
+    }
+    (1..=SHARDS)
+        .filter_map(|n| {
+            let candidate = format!("{prefix}{n}.{domain}");
+            if candidate == host {
+                return None;
+            }
+            let mut next = parsed.clone();
+            next.set_host(Some(&candidate)).ok()?;
+            Some(next.to_string())
+        })
+        .collect()
+}
+
 /// Rebuild `<stem>.<numeric-id>` from the two halves a URL path supplied.
 fn join_id_slug(stem: &str, id: &str) -> String {
     format!("{stem}.{id}")
@@ -1878,7 +1916,21 @@ impl SourceAdapter for MadaraGeneric {
     }
 
     async fn fetch_image(&self, url: &str) -> Result<Vec<u8>, SourceError> {
-        self.http.get_bytes(url, IMAGE_MAX_BYTES).await
+        let first = self.http.get_bytes(url, IMAGE_MAX_BYTES).await;
+        let Err(SourceError::NotFound) = &first else {
+            return first;
+        };
+        // NetTruyen-family CDNs shard by NUMBER and the page sometimes prints
+        // the wrong shard for a page that exists elsewhere (live 2026-10-23:
+        // image3/…/h2/141/1.jpg 404 while image2 serves it). Retry the exact
+        // path it printed on the sibling shards — the source's own policy
+        // already allows the whole domain family, so this widens nothing.
+        for sibling in shard_siblings(url) {
+            if let Ok(bytes) = self.http.get_bytes(&sibling, IMAGE_MAX_BYTES).await {
+                return Ok(bytes);
+            }
+        }
+        first
     }
 
     async fn fetch_cover(
@@ -3030,6 +3082,64 @@ mod tests {
         }
     }
 
+    /// The 2026-10-23 `SOURCE_NOT_FOUND` wave on nettruyen: chapters stop at a
+    /// random page index (0..18) and are never retried, so the manifest and the
+    /// CDN answer differently. Print the manifest page count, then walk the
+    /// pages and report the first URL that 404s.
+    #[tokio::test]
+    #[ignore = "live probe: which nettruyen page URL 404s"]
+    async fn live_builtin_nt_page_fetch_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "nettruyen".to_string(),
+            display_name: "NetTruyen".to_string(),
+            adapter: "nettruyen".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("nettruyen").expect("built-in");
+        for chapter in ["chuong-141", "chuong-201", "chuong-11"] {
+            let manifest = match adapter.page_manifest("h2", chapter).await {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    println!("NTP {chapter} manifest ERR {}", error.code());
+                    continue;
+                }
+            };
+            println!(
+                "NTP {chapter} pages={} first={} last={}",
+                manifest.pages.len(),
+                manifest.pages[0].url,
+                manifest.pages[manifest.pages.len() - 1].url
+            );
+            for page in &manifest.pages {
+                match adapter.fetch_image(&page.url).await {
+                    Ok(bytes) => {
+                        if page.index < 2 || page.index + 1 == manifest.pages.len() {
+                            println!(
+                                "NTP {chapter} p{} ok {}B {}",
+                                page.index,
+                                bytes.len(),
+                                page.url
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        println!(
+                            "NTP {chapter} p{}/{} ERR {} {}",
+                            page.index,
+                            manifest.pages.len(),
+                            error.code(),
+                            page.url
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     /// The 2026-10-23 failure: manifests parse (241-244 pages) but the first
     /// image request answers an upstream error, so every chapter of the wave
     /// fails with SOURCE_UPSTREAM and 0 pages. Print what the CDN actually
@@ -3953,6 +4063,51 @@ mod tests {
         );
         let story = Url::parse("https://nettruyenar.com/truyen-tranh/naruto-197").unwrap();
         assert!(provider.owns_url(&story));
+    }
+
+    /// The page prints ONE shard per image, but a page can live on a sibling
+    /// (live 2026-10-23: image3 served 404 for h2/141/1.jpg while image2 had
+    /// it). Only the two sharded families may be guessed at.
+    #[test]
+    fn shard_siblings_only_apply_to_the_sharded_cdn_families() {
+        let siblings = shard_siblings("https://image3.kcgsbok.com/nettruyen/h2/141/1.jpg");
+        assert_eq!(siblings.len(), 5, "{siblings:?}");
+        assert!(siblings.contains(&"https://image1.kcgsbok.com/nettruyen/h2/141/1.jpg".into()));
+        assert!(siblings.contains(&"https://image2.kcgsbok.com/nettruyen/h2/141/1.jpg".into()));
+        assert!(
+            !siblings.iter().any(|url| url.contains("image3.")),
+            "the host that already 404'd is never retried"
+        );
+        assert_eq!(
+            shard_siblings("https://cdn2.cloud-zzz.com/nettruyen/thumb/naruto.jpg").len(),
+            5
+        );
+        for foreign in [
+            "https://img.truyentuoitho.com/a/b.jpg",
+            "https://nettruyen.gg/x",
+            "https://cdn.example.com/x",
+            "not a url",
+        ] {
+            assert!(shard_siblings(foreign).is_empty(), "{foreign}");
+        }
+    }
+
+    /// A 404 on the printed shard must be retried on the siblings before the
+    /// chapter is failed.
+    #[tokio::test]
+    async fn nt_image_fetch_falls_back_to_a_sibling_shard_on_404() {
+        let (provider, transport) = nt(vec![Err("404"), Ok("image-bytes")]);
+        let bytes = provider
+            .fetch_image("https://image3.kcgsbok.com/nettruyen/h2/141/1.jpg")
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"image-bytes".to_vec());
+        let requested = transport.requested.lock().unwrap();
+        assert!(
+            requested[1].1.contains("image1.kcgsbok.com"),
+            "the fallback goes to a sibling: {:?}",
+            requested[1].1
+        );
     }
 
     /// Story page + the ASP.NET chapter JSON: the list comes from the endpoint
