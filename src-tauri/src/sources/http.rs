@@ -26,7 +26,18 @@ pub const MAX_REDIRECTS: u32 = 3;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Politeness floor between requests to the same host. Owners of user-added
 /// sources may raise limits server-side; the client never hammers.
-pub const MIN_REQUEST_SPACING: Duration = Duration::from_secs(3);
+///
+/// Measured 2026-10-22: with a 3 s floor, opening one story took 5.8 s because
+/// the page and its chapter JSON are two same-host requests — the wait, not
+/// the network, was the cost. 1 s still bounds the client to one request per
+/// second per host, which is the bound this rule exists for.
+pub const MIN_REQUEST_SPACING: Duration = Duration::from_secs(1);
+/// Floor for image requests (covers, page images). The page floor exists so a
+/// SITE is not hammered for pages/APIs; images come from CDNs built to serve
+/// them, and applying the page floor to them meant one cover per three
+/// seconds — the whole reason a result grid took tens of seconds to show its
+/// thumbnails.
+pub const IMAGE_REQUEST_SPACING: Duration = Duration::from_millis(150);
 /// Kept for docs/tests only: real requests carry the Chrome profile UA
 /// supplied by the emulation.
 #[allow(dead_code)]
@@ -156,7 +167,10 @@ pub(crate) fn is_public_ip(ip: &IpAddr) -> bool {
 pub struct GuardedHttp {
     policy: HttpPolicy,
     client: wreq::Client,
-    last_request_at: Mutex<Option<Instant>>,
+    /// Last request time PER HOST: the politeness floor is about not hammering
+    /// one site, so a CDN request must not be delayed by a page request to the
+    /// site's own host (that coupling was a per-adapter single timestamp).
+    last_request_at: Mutex<std::collections::HashMap<String, Instant>>,
 }
 
 impl GuardedHttp {
@@ -174,7 +188,7 @@ impl GuardedHttp {
         GuardedHttp {
             policy,
             client,
-            last_request_at: Mutex::new(None),
+            last_request_at: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -188,27 +202,27 @@ impl GuardedHttp {
         Ok(parsed)
     }
 
-    /// Enforce the politeness spacing without holding the lock across awaits.
-    async fn pace(&self) {
+    /// Enforce the politeness spacing per HOST, without holding the lock
+    /// across awaits.
+    async fn pace(&self, url: &Url, spacing: Duration) {
+        let Some(host) = url.host_str().map(str::to_string) else {
+            return;
+        };
         let wait = {
             let guard = self.last_request_at.lock().unwrap();
-            match *guard {
-                Some(previous) => {
-                    let due = previous + MIN_REQUEST_SPACING;
-                    let now = Instant::now();
-                    if due > now {
-                        Some(due - now)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            }
+            guard.get(&host).and_then(|previous| {
+                let due = *previous + spacing;
+                let now = Instant::now();
+                (due > now).then(|| due - now)
+            })
         };
         if let Some(duration) = wait {
             tokio::time::sleep(duration).await;
         }
-        *self.last_request_at.lock().unwrap() = Some(Instant::now());
+        self.last_request_at
+            .lock()
+            .unwrap()
+            .insert(host, Instant::now());
     }
 
     fn classify_status(status: wreq::StatusCode, retry_after: Option<String>) -> SourceError {
@@ -282,13 +296,19 @@ impl GuardedHttp {
     }
 
     async fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, SourceError> {
-        self.fetch_bytes_bounded(url, MAX_BODY_BYTES).await
+        self.fetch_bytes_bounded(url, MAX_BODY_BYTES, MIN_REQUEST_SPACING)
+            .await
     }
 
-    async fn fetch_bytes_bounded(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
+    async fn fetch_bytes_bounded(
+        &self,
+        url: &str,
+        max_bytes: u64,
+        spacing: Duration,
+    ) -> Result<Vec<u8>, SourceError> {
         let mut current = self.validate(url)?;
         for _ in 0..=MAX_REDIRECTS {
-            self.pace().await;
+            self.pace(&current, spacing).await;
             let request = self.with_referer(self.client.get(current.as_str()));
             let response = match request.send().await {
                 Ok(response) => response,
@@ -355,7 +375,8 @@ impl Transport for GuardedHttp {
     }
 
     async fn get_bytes(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, SourceError> {
-        self.fetch_bytes_bounded(url, max_bytes).await
+        self.fetch_bytes_bounded(url, max_bytes, IMAGE_REQUEST_SPACING)
+            .await
     }
 }
 
@@ -366,7 +387,7 @@ impl GuardedHttp {
         form: &[(&str, &str)],
     ) -> Result<Vec<u8>, SourceError> {
         let parsed = self.validate(url)?;
-        self.pace().await;
+        self.pace(&parsed, MIN_REQUEST_SPACING).await;
         let result = self
             .with_referer(
                 self.client
@@ -676,15 +697,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn t09_per_host_pacing_enforces_minimum_spacing() {
+    async fn t09_pacing_is_per_host_and_images_get_a_smaller_floor() {
         let g = guarded();
-        g.pace().await; // first call: no history
+        let site = Url::parse("https://api.mangadex.org/manga/x").unwrap();
+        let cdn = Url::parse("https://uploads.mangadex.org/cover.jpg").unwrap();
+
+        g.pace(&site, MIN_REQUEST_SPACING).await; // first call: no history
+
+        // A different host must not inherit the site's cooldown: a story page
+        // comes from the site while each cover comes from a CDN.
         let start = Instant::now();
-        g.pace().await; // second call must wait ~MIN_REQUEST_SPACING
+        g.pace(&cdn, MIN_REQUEST_SPACING).await;
+        assert!(
+            start.elapsed() < Duration::from_millis(400),
+            "cross-host pacing leaked: {:?}",
+            start.elapsed()
+        );
+
+        // The same host still pays the page floor.
+        let start = Instant::now();
+        g.pace(&site, MIN_REQUEST_SPACING).await;
+        assert!(
+            start.elapsed() >= MIN_REQUEST_SPACING - Duration::from_millis(400),
+            "same-host pacing lost: {:?}",
+            start.elapsed()
+        );
+
+        // Images use the shorter floor, otherwise one cover per 3 s.
+        g.pace(&cdn, IMAGE_REQUEST_SPACING).await;
+        let start = Instant::now();
+        g.pace(&cdn, IMAGE_REQUEST_SPACING).await;
         let elapsed = start.elapsed();
         assert!(
-            elapsed >= MIN_REQUEST_SPACING - Duration::from_millis(400),
-            "pacing leaked: {elapsed:?}"
+            elapsed >= IMAGE_REQUEST_SPACING - Duration::from_millis(60),
+            "image floor too small: {elapsed:?}"
+        );
+        assert!(
+            elapsed < MIN_REQUEST_SPACING / 2,
+            "image requests still pay the page floor: {elapsed:?}"
         );
     }
 

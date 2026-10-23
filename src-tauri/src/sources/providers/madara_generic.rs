@@ -3030,6 +3030,55 @@ mod tests {
         }
     }
 
+    /// How long search + metadata actually take through the app's own path.
+    /// Exists because "load metadata is slow" is a feeling until it is a
+    /// number, and the numbers point at the pacing floor, not at parsing.
+    #[tokio::test]
+    #[ignore = "live probe: timing of search, detail and covers"]
+    async fn live_metadata_timing_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "nettruyenar".to_string(),
+            display_name: "NetTruyen AR".to_string(),
+            adapter: "nettruyenar".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("nettruyenar").expect("built-in");
+        let started = std::time::Instant::now();
+        let page = adapter.search("naruto", 1).await.unwrap();
+        println!(
+            "TIMING search={}ms items={}",
+            started.elapsed().as_millis(),
+            page.items.len()
+        );
+        let first = page.items.first().unwrap();
+        let id = first.source_manga_id.clone();
+        let started = std::time::Instant::now();
+        let detail = adapter.manga_detail(&id).await.unwrap();
+        println!(
+            "TIMING detail={}ms chapters={}",
+            started.elapsed().as_millis(),
+            detail.chapters.len()
+        );
+        let key = first.cover_key.clone().expect("cover key");
+        let started = std::time::Instant::now();
+        let cover = adapter.fetch_cover(&id, &key).await.unwrap();
+        println!(
+            "TIMING cover_first={}ms bytes={}",
+            started.elapsed().as_millis(),
+            cover.len()
+        );
+        let started = std::time::Instant::now();
+        let again = adapter.fetch_cover(&id, &key).await.unwrap();
+        println!(
+            "TIMING cover_second={}ms bytes={}",
+            started.elapsed().as_millis(),
+            again.len()
+        );
+    }
+
     /// Live journey for the NetTruyen AR built-in, built the way the app builds
     /// it (registry + persisted row): search → story detail with the FULL JSON
     /// catalog → chapter pages → REAL image bytes (the CDN 403s without the

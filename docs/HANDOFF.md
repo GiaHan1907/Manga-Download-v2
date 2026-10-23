@@ -248,6 +248,27 @@ Sửa: helper `resolves_public(host)`; nếu host không resolve công khai thì
 
 **Bài học:** một unit test gọi DNS là một test phụ thuộc môi trường. Nếu khẳng định "URL tốt phải qua", hãy kiểm tra điều kiện tiên quyết trước, và biến trạng thái suy giảm thành một khẳng định đúng (fail-closed), không phải một lần bỏ qua im lặng.
 
+### 2n. Tốc độ tải metadata — đo trước khi sửa — 2026-10-22
+
+User: "Tăng tốc độ khi load metadata truyện, khi tìm kiếm". Đo bằng probe `live_metadata_timing_probe` (dựng qua registry, cùng đường app chạy) trên NetTruyen AR:
+
+| bước | trước | sau |
+|---|---|---|
+| search "naruto" (14 card) | 738 ms | **209 ms** |
+| mở truyện (trang + JSON 711 chương) | **5799 ms** | **2243 ms** |
+| bìa (mỗi cái) | chờ tới 3 s | ~100 ms |
+
+Nguyên nhân không phải parsing: `GuardedHttp` giữ **MỘT** `last_request_at` cho cả adapter, trong khi chú thích của chính nó nói "cùng host". Hệ quả: (a) request tới CDN phải chờ sàn của request tới host site; (b) **mỗi ảnh bìa chờ 3 giây** → lưới kết quả 14 card mất hàng chục giây chỉ để hiện thumbnail; (c) mở một truyện = 2 request cùng host = gần 6 giây chỉ để chờ.
+
+Sửa trong `sources/http.rs`:
+1. `last_request_at` → `HashMap<host, Instant>`; `pace(url, spacing)` chặn theo **từng host**.
+2. `IMAGE_REQUEST_SPACING = 150 ms` cho `get_bytes` (bìa + trang chương); `get_text`/`get_json` giữ sàn trang.
+3. `MIN_REQUEST_SPACING` 3 s → **1 s**, kèm số đo ngay trong doc-comment: 3 s từng làm một truyện mất 5.8 s chỉ vì chờ; 1 s vẫn là "một request/giây/host" — đúng thứ luật này bảo vệ.
+
+Test: `t09_pacing_is_per_host_and_images_get_a_smaller_floor` (host khác không phải chờ; cùng host vẫn chờ; ảnh dùng sàn nhỏ hơn).
+
+**Tác dụng phụ có chủ đích:** tải chương cũng nhanh hơn nhiều (ảnh không còn cách nhau 3 s). Nếu CDN bắt đầu trả 429, engine đã có nhánh `RateLimited` + thang retry để lùi; đó là dấu hiệu cần nâng `IMAGE_REQUEST_SPACING`, không phải hạ tiếp.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.
