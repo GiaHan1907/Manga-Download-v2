@@ -105,7 +105,10 @@ export default function RemoteDetailPage() {
           ) : (
             <StatusBadge tone="neutral">Chưa vào Library</StatusBadge>
           )}
-          <StatusBadge tone="neutral">Chưa tải — Phase 06</StatusBadge>
+          {/* This page only sees remote metadata, so it can never claim a
+              download state for a manga that is already in the Library — the
+              real status lives there. */}
+          {!alreadySaved && <StatusBadge tone="neutral">Chưa tải</StatusBadge>}
         </div>
 
       {manga.genres.length > 0 && (

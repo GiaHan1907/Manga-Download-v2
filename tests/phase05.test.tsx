@@ -249,7 +249,9 @@ describe("T05 remote preview and explicit save", () => {
     renderAt("/remote/madara-truyentuoitho-com/ninja-loan-thi");
     expect(await screen.findByRole("heading", { name: "Ninja Loạn Thị" })).toBeDefined();
     expect(screen.getByText("Xem trước từ xa")).toBeDefined();
-    expect(screen.getByText("Chưa tải — Phase 06")).toBeDefined();
+    expect(screen.getByText("Chưa tải")).toBeDefined();
+    // An internal phase name must never reach the screen.
+    expect(screen.queryByText(/Phase \d/)).toBeNull();
     expect(screen.getByText("Chương (2)")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Lưu vào Library" }));
