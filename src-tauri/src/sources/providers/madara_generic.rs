@@ -3030,6 +3030,45 @@ mod tests {
         }
     }
 
+    /// The 2026-10-23 failure: manifests parse (241-244 pages) but the first
+    /// image request answers an upstream error, so every chapter of the wave
+    /// fails with SOURCE_UPSTREAM and 0 pages. Print what the CDN actually
+    /// returns for a page, through the app's own policy.
+    #[tokio::test]
+    #[ignore = "live probe: what the TTT image CDN returns right now"]
+    async fn live_builtin_ttt_image_fetch_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "madara-truyentuoitho-com".to_string(),
+            display_name: "Truyen Tuoi Tho".to_string(),
+            adapter: "madara".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("madara-truyentuoitho-com").expect("built-in");
+        for chapter in ["tap-55", "tap-56", "tap-57"] {
+            let manifest = match adapter.page_manifest("ninja-loan-thi", chapter).await {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    println!("IMG {chapter} manifest ERR {}", error.code());
+                    continue;
+                }
+            };
+            let first = &manifest.pages[0].url;
+            let outcome = adapter.fetch_image(first).await;
+            println!(
+                "IMG {chapter} pages={} first={} -> {}",
+                manifest.pages.len(),
+                first,
+                match &outcome {
+                    Ok(bytes) => format!("ok {} bytes", bytes.len()),
+                    Err(error) => format!("ERR {} ({error})", error.code()),
+                }
+            );
+        }
+    }
+
     /// How long search + metadata actually take through the app's own path.
     /// Exists because "load metadata is slow" is a feeling until it is a
     /// number, and the numbers point at the pacing floor, not at parsing.
