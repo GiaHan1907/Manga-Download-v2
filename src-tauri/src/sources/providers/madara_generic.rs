@@ -3082,6 +3082,56 @@ mod tests {
         }
     }
 
+    /// Re-check the nine H2 chapters that failed SOURCE_NOT_FOUND, page by
+    /// page, through the app's own adapter + policy.
+    #[tokio::test]
+    #[ignore = "live probe: every page of the H2 chapters that used to 404"]
+    async fn live_builtin_nt_h2_full_page_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "nettruyen".to_string(),
+            display_name: "NetTruyen".to_string(),
+            adapter: "nettruyen".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("nettruyen").expect("built-in");
+        for chapter in [
+            "chuong-11",
+            "chuong-56",
+            "chuong-81",
+            "chuong-83",
+            "chuong-116",
+            "chuong-141",
+            "chuong-171",
+            "chuong-201",
+            "chuong-255",
+        ] {
+            let manifest = match adapter.page_manifest("h2", chapter).await {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    println!("H2 {chapter} MANIFEST ERR {}", error.code());
+                    continue;
+                }
+            };
+            let mut ok = 0usize;
+            let mut failed: Vec<String> = Vec::new();
+            for page in &manifest.pages {
+                match adapter.fetch_image(&page.url).await {
+                    Ok(_) => ok += 1,
+                    Err(error) => failed.push(format!("p{} {}", page.index, error.code())),
+                }
+            }
+            println!(
+                "H2 {chapter} pages={} ok={} failed={:?}",
+                manifest.pages.len(),
+                ok,
+                failed
+            );
+        }
+    }
+
     /// The 2026-10-23 `SOURCE_NOT_FOUND` wave on nettruyen: chapters stop at a
     /// random page index (0..18) and are never retried, so the manifest and the
     /// CDN answer differently. Print the manifest page count, then walk the
