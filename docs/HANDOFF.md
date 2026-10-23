@@ -227,6 +227,27 @@ Test: `an_unusable_destination_names_its_stage` (đích nằm dưới một TỆ
 
 **Hệ luận cần nhớ khi ai đó hỏi "vì sao chuyển nơi lưu thất bại":** nhìn `FREE_GB` của ổ nguồn và ổ đích trước khi nghi ngờ code. Cả H: (0 GB) và J: (25 GB) ở máy user đều là mount của Google Drive — để một thư viện nhiều GB trên đó vốn đã mong manh, và junction của app giả định một ổ đĩa cục bộ.
 
+### 2l. Built-in thứ sáu: NetTruyen AR (nettruyenar.com) — 2026-10-22
+
+User: "Thêm trang build in https://nettruyenar.com/". Recon trước khi viết code, và câu trả lời khác dự đoán ban đầu: **đây đúng là engine ASP.NET "Comic"** như nettruyen.gg — `Comic/Services/ComicService.asmx/ChapterList` có tồn tại, chỉ là không xuất hiện trong HTML (grep ban đầu ra 0 vì trang chỉ 29 dòng minified). Vì vậy profile `NettruyenAr` dùng CHUNG phần search/detail/reader với `Nettruyen`, chỉ khác bốn điểm:
+
+1. **CDN**: `cdn1/cdn2/cdn4.cloud-zzz.com` (không phải `kcgsbok.com`) → `NTAR_IMAGE_DOMAIN` + `allowed_domains`; ảnh chương và **cả bìa** đều 403 nếu thiếu `Referer` (đã đo: 403 vs 200/272 KB).
+2. **URL chương**: `/truyen-tranh/<slug-truyện>/<chapter-slug>/<chapterId>` — chú ý đoạn slug truyện ở đây **KHÔNG có id** (`naruto`, trong khi trang truyện là `naruto-197`). Đây là chi tiết mà probe live bắt được (manifest trả `NotFound`), không phải suy luận. Id chương nằm trong danh tính lưu trữ (`chuong-700.9.169160`, ghép bằng dấu `.`) và `chapter_url` cắt id của truyện trước khi dựng route.
+3. **Chapter list**: trang truyện chỉ in 20 chương mới nhất; danh sách đầy đủ lấy từ JSON `ChapterList?slug=<slug>&comicId=<id>` (fork này đòi **cả hai** tham số). Số chương thực: **711** — nên `MAX_CHAPTER_COUNT` (2000) tách hẳn khỏi `MAX_PAGE_COUNT` (600): dùng chung một hằng số từng làm câm lặng 111 chương cuối.
+4. **Bìa**: `src` là ảnh placeholder dùng chung cho mọi card, URL thật nằm ở `data-original`. `collect_cards` vì thế có thêm `collect_cards_with(..., thumb_attrs)` — bản cũ giữ nguyên thứ tự attr, profile mới đọc `data-original` trước. (Nếu đọc `src`, mọi truyện sẽ hiện cùng một thumbnail.)
+
+Dán link chương cũng hoạt động: `chapter_from_url` trả slug truyện **trần**, và `manga_detail` chữa thành `naruto-197` qua chính ô tìm kiếm — cơ chế heal của DocTruyen3Q được tổng quát hóa (`identity_stem`: `.id` cho D3Q, `-id` cho AR) nên một luật chặn hai kiểu danh tính.
+
+Bằng chứng live (`live_builtin_ntar_journey_probe`, dựng qua registry + row): search "naruto" → 14 card, id `naruto-197`, cover key `/cdn/cdn2.cloud-zzz/nettruyen/thumb/naruto.jpg`; detail → **711 chương**; chương `chapter-1.169161` → **56 trang**, ảnh đầu **272.265 B** từ `cdn1.cloud-zzz.com`; bìa 29.156 B. Test đơn vị: 5 (`ntar_*`) phủ card lazy-cover, JSON có id, route 4 đoạn, detail gọi đúng `comicId`, reader `data-src`.
+
+### 2m. Hai test `sources::http` phụ thuộc DNS — 2026-10-22
+
+Trong lúc chạy cổng cho nguồn mới, hai test đỏ ở CẢ bản không liên quan: `rejects_credentials_and_ip_literals_and_private_targets` và `redirect_targets_are_revalidated_before_the_next_hop`. Chúng khẳng định `validate("https://api.mangadex.org/…")` **phải Ok**, mà `validate` có gọi `assert_resolved_addresses_public` → DNS thật. Trên máy user, `Resolve-DnsName api.mangadex.org` trả **127.0.0.1** (ISP chặn), nên guard từ chối là ĐÚNG và test sai.
+
+Sửa: helper `resolves_public(host)`; nếu host không resolve công khai thì in một dòng "skipped: …" và khẳng định **fail-closed** (`validate` phải Err) thay vì đòi Ok. Test vẫn có giá trị đầy đủ ở nơi DNS sạch (CI), và không còn đổ lỗi cho code vì mạng của máy chạy.
+
+**Bài học:** một unit test gọi DNS là một test phụ thuộc môi trường. Nếu khẳng định "URL tốt phải qua", hãy kiểm tra điều kiện tiên quyết trước, và biến trạng thái suy giảm thành một khẳng định đúng (fail-closed), không phải một lần bỏ qua im lặng.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

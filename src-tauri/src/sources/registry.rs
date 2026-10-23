@@ -13,6 +13,7 @@ pub const BUILTIN_IDS: &[&str] = &[
     "nettruyen",
     "dilib",
     "doctruyen3q",
+    "nettruyenar",
 ];
 pub const TTT_BASE_URL: &str = "https://truyentuoitho.com/";
 pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
@@ -33,6 +34,8 @@ pub const DL_BASE_URL: &str = "https://dilib.vn/";
 pub const DL_DISPLAY_NAME: &str = "Dilib";
 pub const D3Q_BASE_URL: &str = "https://doctruyen3qhub.fit/";
 pub const D3Q_DISPLAY_NAME: &str = "DocTruyen3Q";
+pub const NTAR_BASE_URL: &str = "https://nettruyenar.com/";
+pub const NTAR_DISPLAY_NAME: &str = "NetTruyen AR";
 
 /// Reviewed HTML-site built-ins sharing the generic scraper pipeline. Their
 /// ids are FIXED (never host-derived) so a domain edit keeps saved manga
@@ -88,6 +91,16 @@ pub const BUILTIN_HTML_SOURCES: &[BuiltInHtmlSpec] = &[
         base_url: D3Q_BASE_URL,
         image_hosts: None,
         profile: SiteProfile::Doctruyen3q,
+    },
+    BuiltInHtmlSpec {
+        id: "nettruyenar",
+        display_name: NTAR_DISPLAY_NAME,
+        adapter: "nettruyenar",
+        base_url: NTAR_BASE_URL,
+        // Covers and pages sit on rotating `cdnN.cloud-zzz.com` shards, which
+        // the profile's domain list covers; no exact-host extras are needed.
+        image_hosts: None,
+        profile: SiteProfile::NettruyenAr,
     },
 ];
 

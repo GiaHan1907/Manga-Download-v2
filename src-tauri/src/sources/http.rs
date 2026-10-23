@@ -17,6 +17,11 @@ pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// Sized on live data: a TTT "(Full)" chapter is one scanned volume served as
 /// 346 images (probe 2026-10-05), so a 300 cap rejected real chapters.
 pub const MAX_PAGE_COUNT: usize = 600;
+/// Upper bound on chapters per story catalog. Deliberately separate from the
+/// page cap: a long-running series legitimately has more chapters than any one
+/// chapter has pages (live: 711 chapters on nettruyenar.com), and reusing the
+/// page cap silently truncated the catalog.
+pub const MAX_CHAPTER_COUNT: usize = 2000;
 pub const MAX_REDIRECTS: u32 = 3;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Politeness floor between requests to the same host. Owners of user-added
@@ -481,6 +486,27 @@ mod tests {
         GuardedHttp::new(mangadex_policy())
     }
 
+    /// Does this host resolve to public addresses on THIS machine? Two tests
+    /// assert that a good URL validates, which silently assumes honest DNS.
+    /// A blocked network answers 127.0.0.1 for api.mangadex.org, and then the
+    /// guard is right to refuse it.
+    fn resolves_public(host: &str) -> bool {
+        use std::net::ToSocketAddrs;
+        match (host, 443u16).to_socket_addrs() {
+            Ok(addrs) => {
+                let mut any = false;
+                for addr in addrs {
+                    any = true;
+                    if !is_public_ip(&addr.ip()) {
+                        return false;
+                    }
+                }
+                any
+            }
+            Err(_) => false,
+        }
+    }
+
     #[test]
     fn rejects_non_https_and_foreign_hosts() {
         let g = guarded();
@@ -505,7 +531,19 @@ mod tests {
             .validate("https://169.254.169.254/latest/meta-data")
             .is_err());
         assert!(g.validate("https://100.64.0.1/manga").is_err());
-        assert!(g.validate("https://api.mangadex.org/manga?title=x").is_ok());
+        if resolves_public("api.mangadex.org") {
+            assert!(g.validate("https://api.mangadex.org/manga?title=x").is_ok());
+        } else {
+            // Some networks DNS-block this host (live: it answers 127.0.0.1),
+            // which makes the positive half of this test meaningless. Failing
+            // here would blame the code for the network it runs on.
+            eprintln!("skipped: api.mangadex.org does not resolve publicly in this environment");
+            assert!(
+                g.validate("https://api.mangadex.org/manga?title=x")
+                    .is_err(),
+                "a non-public resolve must be refused, never fail-open"
+            );
+        }
     }
 
     #[test]
@@ -536,7 +574,15 @@ mod tests {
             );
         }
         let same_host = current.join("/manga/y/").unwrap();
-        assert!(g.validate(same_host.as_str()).is_ok());
+        if resolves_public("api.mangadex.org") {
+            assert!(g.validate(same_host.as_str()).is_ok());
+        } else {
+            eprintln!("skipped: api.mangadex.org does not resolve publicly here");
+            assert!(
+                g.validate(same_host.as_str()).is_err(),
+                "a non-public resolve must be refused, never fail-open"
+            );
+        }
     }
 
     #[tokio::test]

@@ -7,7 +7,8 @@ use crate::sources::dto::{
     RemoteMangaDetail, RemoteMangaSummary, RemoteSearchPage, SourceInfo, SourceStatus,
 };
 use crate::sources::http::{
-    GuardedHttp, HttpPolicy, Transport, COVER_MAX_BYTES, IMAGE_MAX_BYTES, MAX_PAGE_COUNT,
+    GuardedHttp, HttpPolicy, Transport, COVER_MAX_BYTES, IMAGE_MAX_BYTES, MAX_CHAPTER_COUNT,
+    MAX_PAGE_COUNT,
 };
 use async_trait::async_trait;
 use regex::Regex;
@@ -47,7 +48,22 @@ pub enum SiteProfile {
     /// are folded. Reader images live on rotating shards of vetted image
     /// domains and 403 without a Referer.
     Doctruyen3q,
+    /// nettruyenar.com runs the SAME ASP.NET "Comic" engine as NetTruyen
+    /// (`Comic/Services/ComicService.asmx/ChapterList`), so search, the JSON
+    /// chapter list and the `.page-chapter` reader are shared. What differs:
+    /// the CDN family is `cloud-zzz.com`, chapter routes carry a numeric id
+    /// (`/truyen-tranh/<story>/<chapter>/<chapterId>`, stored dot-joined), story
+    /// hrefs already end in `-<id>`, and the cover URL lives in `data-original`
+    /// (the `src` is a shared placeholder).
+    NettruyenAr,
 }
+
+/// nettruyenar.com serves both covers and pages from numbered shards of this
+/// one family (cdn1/cdn2/cdn4.cloud-zzz.com).
+const NTAR_IMAGE_DOMAIN: &str = "cloud-zzz.com";
+/// Cover keys reuse the `/cdn/<shard>.<token><path>` encoding TruyenQQ and
+/// DocTruyen3Q use, so `fetch_cover` re-derives a fixed, vetted host.
+const NTAR_COVER_DOMAINS: &[(&str, &str)] = &[("cloud-zzz", "cloud-zzz.com")];
 
 /// DocTruyen3Q serves chapter pages from numbered shards of these domains
 /// (recon 2026-10-07: s15.anhvip.xyz, s8.topcdnv1.art) — the shard differs
@@ -85,6 +101,14 @@ fn fold_search_query(text: &str) -> String {
 /// digits and a stem never ends with a dot, so the LAST dot is the boundary.
 fn split_id_slug(slug: &str) -> Option<(&str, &str)> {
     let (stem, id) = slug.rsplit_once('.')?;
+    (!stem.is_empty() && !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+        .then_some((stem, id))
+}
+
+/// Split `<stem>-<numeric-id>` (nettruyenar story slugs: `naruto-197`). The id
+/// is all digits, so the LAST hyphen is the boundary.
+fn split_dash_id(slug: &str) -> Option<(&str, &str)> {
+    let (stem, id) = slug.rsplit_once('-')?;
     (!stem.is_empty() && !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
         .then_some((stem, id))
 }
@@ -282,6 +306,7 @@ impl MadaraGeneric {
                 | SiteProfile::Nettruyen
                 | SiteProfile::Madara
                 | SiteProfile::Doctruyen3q
+                | SiteProfile::NettruyenAr
         )
         .then(|| base.as_str().to_string());
         let http = Arc::new(GuardedHttp::new(match profile {
@@ -322,6 +347,11 @@ impl MadaraGeneric {
                     .collect(),
                 referer,
             },
+            SiteProfile::NettruyenAr => HttpPolicy {
+                allowed_hosts,
+                allowed_domains: vec![NTAR_IMAGE_DOMAIN.to_string()],
+                referer,
+            },
         }));
         Ok(MadaraGeneric {
             id: id.to_string(),
@@ -359,6 +389,7 @@ impl MadaraGeneric {
         let cover_table = match self.profile {
             SiteProfile::TruyenQQ => Some((TRUYENQQ_COVER_DOMAINS, "/ebook/")),
             SiteProfile::Doctruyen3q => Some((DOCTRUYEN3Q_COVER_DOMAINS, "/comics/")),
+            SiteProfile::NettruyenAr => Some((NTAR_COVER_DOMAINS, "/nettruyen/")),
             _ => None,
         };
         if let Some((domains, path_prefix)) = cover_table {
@@ -471,6 +502,7 @@ impl MadaraGeneric {
             SiteProfile::Nettruyen => "nettruyen".to_string(),
             SiteProfile::Dilib => "dilib".to_string(),
             SiteProfile::Doctruyen3q => "doctruyen3q".to_string(),
+            SiteProfile::NettruyenAr => "nettruyenar".to_string(),
         };
         Ok(MadaraGeneric {
             id,
@@ -487,7 +519,9 @@ impl MadaraGeneric {
         match self.profile {
             SiteProfile::Madara => format!("{}manga/{slug}/", self.base),
             SiteProfile::TruyenQQ => format!("{}truyen-tranh/{slug}", self.base),
-            SiteProfile::Nettruyen => format!("{}truyen-tranh/{slug}", self.base),
+            SiteProfile::Nettruyen | SiteProfile::NettruyenAr => {
+                format!("{}truyen-tranh/{slug}", self.base)
+            }
             SiteProfile::Dilib => format!("{}{slug}.html", self.base),
             // The numeric story id is part of the route: /truyen-tranh/<slug>/<id>
             SiteProfile::Doctruyen3q => match split_id_slug(slug) {
@@ -518,6 +552,18 @@ impl MadaraGeneric {
             SiteProfile::Nettruyen => {
                 format!("{}truyen-tranh/{}/{}", self.base, manga_slug, chapter_slug)
             }
+            // nettruyenar chapters carry their numeric id as the last segment,
+            // and the story segment drops the story's own id (`naruto`, not
+            // `naruto-197`).
+            SiteProfile::NettruyenAr => {
+                let story = split_dash_id(manga_slug).map_or(manga_slug, |(stem, _)| stem);
+                match split_id_slug(chapter_slug) {
+                    Some((stem, id)) => {
+                        format!("{}truyen-tranh/{}/{}/{}", self.base, story, stem, id)
+                    }
+                    None => format!("{}truyen-tranh/{}/{}", self.base, story, chapter_slug),
+                }
+            }
             // Dilib chapters are /truyen-tranh/<story>-chap-<n>.html and the
             // stored chapter id is the full file stem (chapter_url rebuilds it).
             SiteProfile::Dilib => format!("{}truyen-tranh/{chapter_slug}.html", self.base),
@@ -530,6 +576,7 @@ impl MadaraGeneric {
         match self.profile {
             SiteProfile::Madara
             | SiteProfile::Nettruyen
+            | SiteProfile::NettruyenAr
             | SiteProfile::Dilib
             | SiteProfile::Doctruyen3q => self.manga_url(slug),
             SiteProfile::TruyenQQ => self.manga_url(slug),
@@ -593,7 +640,7 @@ impl MadaraGeneric {
                 }
                 stem
             }
-            SiteProfile::Nettruyen => {
+            SiteProfile::Nettruyen | SiteProfile::NettruyenAr => {
                 if segments.next()? != "truyen-tranh" {
                     return None;
                 }
@@ -678,6 +725,24 @@ impl MadaraGeneric {
                     return None;
                 }
             }
+            // /truyen-tranh/<story>/<chapter-slug>/<chapterId> — the id is
+            // part of the route, so the stored id carries both halves.
+            SiteProfile::NettruyenAr => {
+                let story = split_dash_id(manga_slug).map_or(manga_slug, |(stem, _)| stem);
+                if segments.next()? != "truyen-tranh" || segments.next()? != story {
+                    return None;
+                }
+                let chapter = segments.next()?;
+                let id = segments.next()?;
+                if segments.next().is_some()
+                    || id.is_empty()
+                    || !id.bytes().all(|byte| byte.is_ascii_digit())
+                    || !valid_slug(chapter)
+                {
+                    return None;
+                }
+                return Some(join_id_slug(chapter, id));
+            }
             SiteProfile::Dilib => {
                 // /truyen-tranh/<manga>-chap-<n>.html — the stored identity is
                 // the whole file stem, chapter_url rebuilds from it.
@@ -717,6 +782,30 @@ impl MadaraGeneric {
         seen: &mut HashSet<String>,
         items: &mut Vec<RemoteMangaSummary>,
     ) {
+        self.collect_cards_with(
+            document,
+            containers,
+            title_link,
+            thumb,
+            &["src", "data-src", "data-lazy-src", "data-original"],
+            seen,
+            items,
+        );
+    }
+
+    // `thumb_attrs` is the attribute order for the thumbnail: lazy sites put a
+    // shared placeholder in `src`, so they must list `data-original` first.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_cards_with(
+        &self,
+        document: &Html,
+        containers: &Selector,
+        title_link: &Selector,
+        thumb: &Selector,
+        thumb_attrs: &[&str],
+        seen: &mut HashSet<String>,
+        items: &mut Vec<RemoteMangaSummary>,
+    ) {
         for node in document.select(containers) {
             let Some(link) = node.select(title_link).next() else {
                 continue;
@@ -738,7 +827,7 @@ impl MadaraGeneric {
             };
             let cover_key = self.cover_key(&slug).or_else(|| {
                 node.select(thumb).find_map(|image| {
-                    ["src", "data-src", "data-lazy-src", "data-original"]
+                    thumb_attrs
                         .iter()
                         .find_map(|attr| image.value().attr(attr))
                         .and_then(|raw| self.cover_key_from_src(raw))
@@ -843,7 +932,7 @@ impl MadaraGeneric {
             SiteProfile::TruyenQQ => {
                 ".works-chapter-list a[href], .list_chapter a[href], ul.list-chapter a[href]"
             }
-            SiteProfile::Nettruyen => {
+            SiteProfile::Nettruyen | SiteProfile::NettruyenAr => {
                 ".list-chapter a.chapter[href], .nav-chapters a[href], #chapter_list a[href], ul.list-chapter a[href]"
             }
             SiteProfile::Dilib => {
@@ -912,17 +1001,27 @@ impl MadaraGeneric {
     /// story's chapters under another. `manga_detail` is the single step that
     /// already talks to the network, so this is where an incomplete identity
     /// becomes the canonical `<slug>.<id>`.
+    /// The story stem an identity is keyed by, when the identity carries the
+    /// id the route needs (`.id` for Doctruyen3Q, `-id` for nettruyenar).
+    fn identity_stem<'a>(&self, value: &'a str) -> Option<&'a str> {
+        match self.profile {
+            SiteProfile::Doctruyen3q => split_id_slug(value).map(|(stem, _)| stem),
+            SiteProfile::NettruyenAr => split_dash_id(value).map(|(stem, _)| stem),
+            _ => None,
+        }
+    }
+
     async fn heal_story_id(&self, slug: &str) -> Result<String, SourceError> {
-        if split_id_slug(slug).is_some() {
+        if self.identity_stem(slug).is_some() {
             return Ok(slug.to_string());
         }
         // The keyword route matches SPACE-separated words: probing the live
-        // site with the hyphenated slug itself returns nothing, while
+        // sites with the hyphenated slug itself returns nothing, while
         // "vo luyen" finds `vo-luyen-dinh-phong`.
         let page = self.search(&slug.replace('-', " "), 1).await?;
         page.items
             .into_iter()
-            .find(|item| split_id_slug(&item.source_manga_id).is_some_and(|(stem, _)| stem == slug))
+            .find(|item| self.identity_stem(&item.source_manga_id) == Some(slug))
             .map(|item| item.source_manga_id)
             .ok_or(SourceError::NotFound)
     }
@@ -1125,6 +1224,25 @@ impl SourceAdapter for MadaraGeneric {
                         .next()
                         .is_none_or(|c| it.next().is_none() && valid_slug(c))
             }
+            // /truyen-tranh/<story> and /truyen-tranh/<story>/<chapter>/<id>
+            SiteProfile::NettruyenAr => {
+                let parts: Vec<&str> = url
+                    .path_segments()
+                    .into_iter()
+                    .flatten()
+                    .filter(|segment| !segment.is_empty())
+                    .collect();
+                let numeric = |value: &str| {
+                    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+                };
+                match parts.as_slice() {
+                    ["truyen-tranh", story] => valid_slug(story),
+                    ["truyen-tranh", story, chapter, id] => {
+                        valid_slug(story) && valid_slug(chapter) && numeric(id)
+                    }
+                    _ => false,
+                }
+            }
             SiteProfile::Dilib => {
                 let mut it = url
                     .path_segments()
@@ -1190,6 +1308,23 @@ impl SourceAdapter for MadaraGeneric {
                 }
                 segments.next()?
             }
+            SiteProfile::NettruyenAr => {
+                if segments.next()? != "truyen-tranh" {
+                    return None;
+                }
+                let story = segments.next()?;
+                let chapter = segments.next()?;
+                let id = segments.next()?;
+                if segments.next().is_some()
+                    || id.is_empty()
+                    || !id.bytes().all(|byte| byte.is_ascii_digit())
+                    || !valid_slug(story)
+                    || !valid_slug(chapter)
+                {
+                    return None;
+                }
+                return Some((story.to_string(), join_id_slug(chapter, id)));
+            }
             SiteProfile::Dilib => {
                 if segments.next()? != "truyen-tranh" {
                     return None;
@@ -1251,7 +1386,7 @@ impl SourceAdapter for MadaraGeneric {
                 // fragment carries no pagination, so page > 1 repeats page 1.
                 format!("{}frontend/search/search", self.base)
             }
-            SiteProfile::Nettruyen => {
+            SiteProfile::Nettruyen | SiteProfile::NettruyenAr => {
                 // The site's own search route; `page` is their pagination param.
                 if page == 1 {
                     format!("{}tim-truyen?keyword={}", self.base, encoded)
@@ -1372,6 +1507,19 @@ impl SourceAdapter for MadaraGeneric {
                     &mut items,
                 );
             }
+            SiteProfile::NettruyenAr => {
+                // Same card shape as NetTruyen, but covers are lazy: `src` is a
+                // shared placeholder and the real URL sits in `data-original`.
+                self.collect_cards_with(
+                    &document,
+                    &Selector::parse(".items div.item").unwrap(),
+                    &Selector::parse("figcaption h3 a[href]").unwrap(),
+                    &Selector::parse("div.image img").unwrap(),
+                    &["data-original", "data-src", "src"],
+                    &mut seen,
+                    &mut items,
+                );
+            }
             SiteProfile::Dilib => {}
             SiteProfile::Doctruyen3q => {
                 // One card per story; the title link carries `data-id` and the
@@ -1395,7 +1543,7 @@ impl SourceAdapter for MadaraGeneric {
                 .next()
                 .is_some(),
             SiteProfile::TruyenQQ => false,
-            SiteProfile::Nettruyen => document
+            SiteProfile::Nettruyen | SiteProfile::NettruyenAr => document
                 .select(&Selector::parse(".pagination a[href*='page']").unwrap())
                 .next()
                 .is_some(),
@@ -1540,7 +1688,7 @@ impl SourceAdapter for MadaraGeneric {
                 segments.next();
                 segments.next().map(str::to_string)
             }),
-            SiteProfile::TruyenQQ | SiteProfile::Nettruyen => {
+            SiteProfile::TruyenQQ | SiteProfile::Nettruyen | SiteProfile::NettruyenAr => {
                 url.path_segments().and_then(|mut segments| {
                     segments.next();
                     segments.next().map(str::to_string)
@@ -1593,6 +1741,7 @@ impl SourceAdapter for MadaraGeneric {
         let lazy_cdn: Option<&'static [&'static str]> = match self.profile {
             SiteProfile::TruyenQQ => Some(TRUYENQQ_IMAGE_DOMAINS),
             SiteProfile::Nettruyen => Some(std::slice::from_ref(&NETTRUYEN_IMAGE_DOMAIN)),
+            SiteProfile::NettruyenAr => Some(std::slice::from_ref(&NTAR_IMAGE_DOMAIN)),
             SiteProfile::Doctruyen3q => Some(DOCTRUYEN3Q_IMAGE_DOMAINS),
             SiteProfile::Madara | SiteProfile::Dilib => None,
         };
@@ -1758,6 +1907,7 @@ impl SourceAdapter for MadaraGeneric {
         let cover_prefix = match self.profile {
             SiteProfile::TruyenQQ => Some((TRUYENQQ_COVER_DOMAINS, "ebook/")),
             SiteProfile::Doctruyen3q => Some((DOCTRUYEN3Q_COVER_DOMAINS, "comics/")),
+            SiteProfile::NettruyenAr => Some((NTAR_COVER_DOMAINS, "nettruyen/")),
             _ => None,
         };
         if let Some((domains, path_prefix)) = cover_prefix {
@@ -1796,7 +1946,9 @@ impl SourceAdapter for MadaraGeneric {
         // chapter link), so what gets saved is the same canonical id Discover
         // would have produced.
         let canonical = match self.profile {
-            SiteProfile::Doctruyen3q => self.heal_story_id(source_manga_id).await?,
+            SiteProfile::Doctruyen3q | SiteProfile::NettruyenAr => {
+                self.heal_story_id(source_manga_id).await?
+            }
             _ => source_manga_id.to_string(),
         };
         let source_manga_id = canonical.as_str();
@@ -1817,14 +1969,37 @@ impl SourceAdapter for MadaraGeneric {
         // reader GETs the complete list as JSON from ComicService/ChapterList.
         // Fetched here BEFORE the Html document exists (same !Send rule), and
         // used in place of the sparse HTML anchors when it is richer.
-        let nettruyen_json: Option<serde_json::Value> = if self.profile == SiteProfile::Nettruyen {
-            let url = format!(
-                "{}Comic/Services/ComicService.asmx/ChapterList?slug={}",
-                self.base, source_manga_id
-            );
-            self.http.get_json(&url).await.ok()
-        } else {
-            None
+        let nettruyen_json: Option<serde_json::Value> = match self.profile {
+            SiteProfile::Nettruyen => {
+                let url = format!(
+                    "{}Comic/Services/ComicService.asmx/ChapterList?slug={}",
+                    self.base, source_manga_id
+                );
+                self.http.get_json(&url).await.ok()
+            }
+            SiteProfile::NettruyenAr => {
+                // This fork's endpoint also wants the numeric comic id, which
+                // the story slug already ends with (`naruto-197`).
+                let (slug, comic_id) = source_manga_id
+                    .rsplit_once('-')
+                    .filter(|(_, id)| {
+                        !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    .unwrap_or((source_manga_id, ""));
+                let url = if comic_id.is_empty() {
+                    format!(
+                        "{}Comic/Services/ComicService.asmx/ChapterList?slug={}",
+                        self.base, slug
+                    )
+                } else {
+                    format!(
+                        "{}Comic/Services/ComicService.asmx/ChapterList?slug={}&comicId={}",
+                        self.base, slug, comic_id
+                    )
+                };
+                self.http.get_json(&url).await.ok()
+            }
+            _ => None,
         };
         let document = Html::parse_document(&html);
 
@@ -1872,7 +2047,8 @@ impl SourceAdapter for MadaraGeneric {
             }
         }
         if let Some(json) = &nettruyen_json {
-            let via_json = chapters_from_nettruyen_json(json);
+            let via_json =
+                chapters_from_nettruyen_json(json, self.profile == SiteProfile::NettruyenAr);
             // The story page's ~20 anchors are always a subset of the JSON
             // list; only the complete JSON manifest represents every chapter.
             if via_json.len() >= chapters.len() {
@@ -2066,7 +2242,10 @@ fn collect_page_urls(
 /// Map NetTruyen's `ChapterList` JSON (`{"data":[{chapter_slug, chapter_name,
 /// chapter_num, ...}]}`) into chapters. Malformed or non-string entries are
 /// skipped; the caller only keeps the result when richer than the HTML anchors.
-fn chapters_from_nettruyen_json(json: &serde_json::Value) -> Vec<RemoteChapter> {
+fn chapters_from_nettruyen_json(
+    json: &serde_json::Value,
+    with_chapter_id: bool,
+) -> Vec<RemoteChapter> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut chapters: Vec<RemoteChapter> = Vec::new();
     let Some(entries) = json.get("data").and_then(|data| data.as_array()) else {
@@ -2076,7 +2255,20 @@ fn chapters_from_nettruyen_json(json: &serde_json::Value) -> Vec<RemoteChapter> 
         let Some(slug) = entry.get("chapter_slug").and_then(|v| v.as_str()) else {
             continue;
         };
-        if !valid_slug(slug) || !seen.insert(slug.to_string()) {
+        if !valid_slug(slug) {
+            continue;
+        }
+        // nettruyenar routes carry the chapter's numeric id as the last path
+        // segment, so the stored id has to carry it too.
+        let source_chapter_id = if with_chapter_id {
+            match entry.get("chapter_id").and_then(|value| value.as_i64()) {
+                Some(id) => join_id_slug(slug, &id.to_string()),
+                None => continue,
+            }
+        } else {
+            slug.to_string()
+        };
+        if !seen.insert(source_chapter_id.clone()) {
             continue;
         }
         let number = match entry.get("chapter_num") {
@@ -2099,13 +2291,13 @@ fn chapters_from_nettruyen_json(json: &serde_json::Value) -> Vec<RemoteChapter> 
                 )
             });
         chapters.push(RemoteChapter {
-            source_chapter_id: slug.to_string(),
+            source_chapter_id,
             title,
             number,
             order: 0,
             published_at: None,
         });
-        if chapters.len() >= MAX_PAGE_COUNT {
+        if chapters.len() >= MAX_CHAPTER_COUNT {
             break;
         }
     }
@@ -2838,6 +3030,70 @@ mod tests {
         }
     }
 
+    /// Live journey for the NetTruyen AR built-in, built the way the app builds
+    /// it (registry + persisted row): search → story detail with the FULL JSON
+    /// catalog → chapter pages → REAL image bytes (the CDN 403s without the
+    /// source's own Referer, so a manifest alone proves nothing).
+    #[tokio::test]
+    #[ignore = "live probe: nettruyenar search → detail → pages → image bytes"]
+    async fn live_builtin_ntar_journey_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "nettruyenar".to_string(),
+            display_name: "NetTruyen AR".to_string(),
+            adapter: "nettruyenar".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("nettruyenar").expect("built-in is registered");
+        let page = adapter.search("naruto", 1).await.unwrap();
+        let first = page.items.first().expect("the search finds a story");
+        println!(
+            "NTAR search items={} id={} title={} cover={:?}",
+            page.items.len(),
+            first.source_manga_id,
+            first.title,
+            first.cover_key
+        );
+        let detail = adapter.manga_detail(&first.source_manga_id).await.unwrap();
+        println!(
+            "NTAR detail title={} chapters={}",
+            detail.summary.title,
+            detail.chapters.len()
+        );
+        assert!(
+            detail.chapters.len() > 20,
+            "the JSON catalog must beat the 20 rows printed in the page"
+        );
+        let chapter = detail
+            .chapters
+            .iter()
+            .find(|chapter| chapter.number.is_some())
+            .expect("a numbered chapter");
+        let manifest = adapter
+            .page_manifest(&first.source_manga_id, &chapter.source_chapter_id)
+            .await
+            .unwrap();
+        let bytes = adapter.fetch_image(&manifest.pages[0].url).await.unwrap();
+        println!(
+            "NTAR chapter={} pages={} first={} bytes={}",
+            chapter.source_chapter_id,
+            manifest.pages.len(),
+            manifest.pages[0].url,
+            bytes.len()
+        );
+        assert!(bytes.len() > 1024, "the CDN must serve a real image");
+        if let Some(key) = &first.cover_key {
+            let cover = adapter
+                .fetch_cover(&first.source_manga_id, key)
+                .await
+                .map(|bytes| bytes.len());
+            println!("NTAR cover key={key} bytes={cover:?}");
+            assert!(cover.is_ok_and(|size| size > 512), "cover must fetch");
+        }
+    }
+
     /// Live journey for the DocTruyen3Q built-in, built the way the app builds
     /// it (registry + persisted row): folded Vietnamese search → story detail →
     /// inline chapter list → page manifest → REAL image bytes. The last step is
@@ -3533,6 +3789,135 @@ mod tests {
         )
         .unwrap();
         (provider, transport)
+    }
+
+    fn ntar(
+        replies: Vec<Result<&'static str, &'static str>>,
+    ) -> (MadaraGeneric, Arc<MockTransport>) {
+        let transport = Arc::new(MockTransport::with(replies));
+        let provider = MadaraGeneric::with_transport_profile(
+            "NetTruyen AR",
+            "https://nettruyenar.com/",
+            transport.clone(),
+            SiteProfile::NettruyenAr,
+        )
+        .unwrap();
+        (provider, transport)
+    }
+
+    /// The real card: `src` is a shared placeholder, the CDN cover sits in
+    /// `data-original`. Reading `src` would give every card the same thumb.
+    #[tokio::test]
+    async fn ntar_search_reads_the_lazy_cover_and_keeps_the_numeric_story_id() {
+        let (provider, _) = ntar(vec![Ok(
+            r#"<div class="items"><div class="row"><div class="item"><figure class="clearfix">
+                 <div class="image"><a title="Truyện tranh Naruto" href="https://nettruyenar.com/truyen-tranh/naruto-197">
+                   <img src="/public/assets/images/thumb-default.jpg" class="lazy image-thumb"
+                        data-original="https://cdn2.cloud-zzz.com/nettruyen/thumb/naruto.jpg"></a></div>
+                 <figcaption><h3><a href="https://nettruyenar.com/truyen-tranh/naruto-197">Naruto</a></h3></figcaption>
+               </figure></div></div></div>"#,
+        )]);
+        let page = provider.search("naruto", 1).await.unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].source_manga_id, "naruto-197");
+        assert_eq!(
+            page.items[0].cover_key.as_deref(),
+            Some("/cdn/cdn2.cloud-zzz/nettruyen/thumb/naruto.jpg"),
+            "the placeholder must never win over data-original"
+        );
+    }
+
+    /// The chapter's numeric id is required by the route, so it rides in the
+    /// stored identity; the older NetTruyen profile keeps its plain slug.
+    #[test]
+    fn ntar_chapter_json_joins_the_numeric_chapter_id() {
+        let json = serde_json::json!({
+            "data": [
+                {"chapter_id": 169160, "chapter_name": "Chapter 700.9", "chapter_slug": "chuong-700.9", "chapter_num": 700.9},
+                {"chapter_id": 169159, "chapter_name": "Chapter 700", "chapter_slug": "chuong-700", "chapter_num": 700}
+            ]
+        });
+        let chapters = chapters_from_nettruyen_json(&json, true);
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].source_chapter_id, "chuong-700.9.169160");
+        assert_eq!(chapters[0].number, Some(700.9));
+        let plain = chapters_from_nettruyen_json(&json, false);
+        assert_eq!(plain[0].source_chapter_id, "chuong-700.9");
+    }
+
+    #[test]
+    fn ntar_routes_rebuild_from_the_stored_ids() {
+        let (provider, _) = ntar(vec![]);
+        assert_eq!(
+            provider.manga_url("naruto-197"),
+            "https://nettruyenar.com/truyen-tranh/naruto-197"
+        );
+        // The chapter route uses the story slug WITHOUT its numeric id.
+        assert_eq!(
+            provider.chapter_url("naruto-197", "chuong-700.9.169160"),
+            "https://nettruyenar.com/truyen-tranh/naruto/chuong-700.9/169160"
+        );
+        let chapter =
+            Url::parse("https://nettruyenar.com/truyen-tranh/naruto/chuong-700.9/169160").unwrap();
+        assert_eq!(
+            provider.chapter_from_url(&chapter),
+            Some(("naruto".to_string(), "chuong-700.9.169160".to_string()))
+        );
+        let story = Url::parse("https://nettruyenar.com/truyen-tranh/naruto-197").unwrap();
+        assert!(provider.owns_url(&story));
+    }
+
+    /// Story page + the ASP.NET chapter JSON: the list comes from the endpoint
+    /// (the static page only prints the latest 20), and it asks for both ids.
+    #[tokio::test]
+    async fn ntar_detail_fetches_the_full_json_catalog_with_comic_id() {
+        let (provider, transport) = ntar(vec![
+            Ok(
+                r#"<div class="detail-info"><h1 class="title-detail">Naruto</h1>
+                 <div id="nt_listchapter"><ul id="chapter_list">
+                 <li class="row"><div class="col-xs-5 chapter"><a href="https://nettruyenar.com/truyen-tranh/naruto-197/chuong-700/169159">Chapter 700</a></div></li>
+                 </ul></div></div>"#,
+            ),
+            Ok(
+                r#"{"data":[{"chapter_id":169159,"chapter_name":"Chapter 700","chapter_slug":"chuong-700","chapter_num":700},{"chapter_id":169160,"chapter_name":"Chapter 700.9","chapter_slug":"chuong-700.9","chapter_num":700.9}]}"#,
+            ),
+        ]);
+        let detail = provider.manga_detail("naruto-197").await.unwrap();
+        {
+            let requested = transport.requested.lock().unwrap();
+            assert!(
+                requested[1]
+                    .1
+                    .contains("ChapterList?slug=naruto&comicId=197"),
+                "the json endpoint needs both ids: {:?}",
+                requested[1].1
+            );
+        }
+        assert_eq!(detail.summary.title, "Naruto");
+        assert_eq!(
+            detail.chapters.len(),
+            2,
+            "the JSON list beats the single static row"
+        );
+        assert_eq!(detail.chapters[1].source_chapter_id, "chuong-700.9.169160");
+    }
+
+    /// Reader pages are lazy (`data-src` only) on the cloud-zzz family.
+    #[tokio::test]
+    async fn ntar_reader_takes_lazy_pages_from_the_cloud_zzz_cdn() {
+        let (provider, _) = ntar(vec![Ok(r#"<div class="reading-detail box_doc">
+             <div class="page-chapter"><img class="lozad" data-src="https://cdn1.cloud-zzz.com/nettruyen/naruto/1/0.jpg"></div>
+             <div class="page-chapter"><img class="lozad" data-src="https://cdn4.cloud-zzz.com/nettruyen/naruto/1/1.webp"></div>
+           </div>"#)]);
+        let manifest = provider
+            .page_manifest("naruto-197", "chuong-700.9.169160")
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2);
+        assert_eq!(
+            manifest.pages[0].url,
+            "https://cdn1.cloud-zzz.com/nettruyen/naruto/1/0.jpg"
+        );
     }
 
     fn d3q(
