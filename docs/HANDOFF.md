@@ -338,6 +338,18 @@ Ngoại lệ có chủ đích: `priority` vẫn đứng trên cùng, nên một 
 
 Bằng chứng: test `a_story_runs_as_one_group_in_the_order_it_first_entered` (hai truyện, chương xếp xen kẽ, `created_at` cố ý chồng chéo) — `list_tasks` và 4 lần `claim_next` trả **cùng một thứ tự** `A1, A2, B1, B2`; test UI `gom chương theo truyện…` trong `tests/downloadsQueueOrder.test.tsx`.
 
+### 2t. Push lên master → GitHub tự build và đăng .exe vào Releases — 2026-10-26
+
+Trước đây `ci.yml` chỉ chạy cổng chất lượng + build installer rồi để artifact trong Actions, còn `release-windows.yml` cố ý **không publish** (P10-06). Nay thêm `.github/workflows/publish-windows.yml` — workflow **duy nhất** được publish:
+
+1. `ci.yml` (push master + PR) chạy fmt/clippy/test/lint/typecheck/vitest/build rồi build NSIS x64, upload artifact `staging-windows-x64-unsigned`. PR chỉ có `contents: read` — không có đường publish từ PR.
+2. `publish-windows.yml` nghe `workflow_run` của **CI**, chỉ chạy khi `event = push`, `conclusion = success`, `head_branch = master`. Nó **tải lại artifact của CI** (không build lần hai), đổi tên thành `Manga-Downloader-1989-Setup-<short-sha>.exe`, tạo Release tag `build-<short-sha>`, đánh dấu `--latest`; chạy lại cùng commit thì `gh release upload --clobber`.
+3. Mỗi lần push = một Release (có SHA, link CI, SHA-256, ghi chú unsigned). Link luôn-mới-nhất: `https://github.com/GiaHan1907/Manga-Download-v2/releases/latest`.
+
+**Vì sao CI đỏ suốt từ trước:** chỉ một test — `perf::t09_perf_checkpoint_write_throughput` đo 2.000 lần ghi durable; runner GitHub mất **62,8 s** (31 ms/lần, fsync của đĩa dùng chung) so với ngưỡng 30 s đặt cho SSD local. Đó là độ trễ đĩa, không phải query chậm, nên ngưỡng nâng lên 120 s (vẫn bắt được lỗi cỡ "VACUUM mỗi checkpoint"). Kèm theo cho CI: `Swatinem/rust-cache` (BoringSSL ~10 phút nếu build nguội), `choco install nasm` (BoringSSL cần NASM trên Windows) và `LIBCLANG_PATH=C:\Program Files\LLVM\bin` (bindgen cho `btls-sys`).
+
+**Giới hạn đã biết:** bản build **unsigned** → SmartScreen sẽ hỏi; release chỉ sinh từ push lên `master` (branch khác không tạo release); mỗi push tốn một lượt Actions (repo private có hạn mức phút/tháng); muốn đổi sang **một** Release cuộn thay vì mỗi push một Release thì sửa tag cố định (VD `latest`) + giữ `--clobber` và bỏ `gh release create` khi đã tồn tại.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

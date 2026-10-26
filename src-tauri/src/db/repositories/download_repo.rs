@@ -952,9 +952,14 @@ mod tests {
         let (b2, _) = upsert_chapter(&pool, &manga_b, "b2", "B2", Some(2.0), None)
             .await
             .unwrap();
-        let outcome = queue_batch(&pool, &[a2.clone(), a1.clone(), b2.clone(), b1.clone()], "cbz", 0)
-            .await
-            .unwrap();
+        let outcome = queue_batch(
+            &pool,
+            &[a2.clone(), a1.clone(), b2.clone(), b1.clone()],
+            "cbz",
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome.created.len(), 4);
         // B's chapters were queued between A's, but A was in the queue first.
         for (chapter_id, created_at) in [

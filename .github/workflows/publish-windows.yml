@@ -1,0 +1,88 @@
+name: Publish Windows build
+
+# The only workflow that publishes. It runs after ci.yml has passed on
+# master and reuses the installer CI already built — no second compile, and
+# no publication path for pull requests (ci.yml stays read-only, and a
+# workflow_run carries no secrets from the trigger). Each push becomes one
+# GitHub Release tagged build-<short-sha> with the NSIS installer attached;
+# the newest release is marked "Latest" so /releases/latest always points at
+# the build from the most recent push.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-windows
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the installer built by CI
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-windows-x64-unsigned
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: staging
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          short="${SHA:0:7}"
+          tag="build-${short}"
+          setup="$(find staging -type f -name '*.exe' | head -n 1)"
+          if [ -z "$setup" ]; then
+            echo "Không tìm thấy file .exe trong artifact của CI." >&2
+            exit 1
+          fi
+
+          asset="Manga-Downloader-1989-Setup-${short}.exe"
+          cp "$setup" "$asset"
+          size="$(stat -c %s "$asset")"
+          sha256="$(sha256sum "$asset" | cut -d' ' -f1)"
+
+          cat > notes.md <<EOF
+          Bản build tự động từ commit \`${short}\`, mỗi lần push lên \`master\`.
+
+          - Commit: \`${SHA}\`
+          - CI: ${RUN_URL}
+          - Tệp: \`${asset}\` (${size} byte)
+          - SHA-256: \`${sha256}\`
+          - Ký số: chưa có chứng thư — bản unsigned, Windows sẽ hỏi SmartScreen.
+
+          Tải bản mới nhất: ${REPO_URL}/releases/latest
+          EOF
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --title "Build ${short}" --notes-file notes.md \
+              --latest --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SHA" \
+              --title "Build ${short}" \
+              --notes-file notes.md \
+              --latest
+          fi
+
+          echo "PUBLISHED ${tag} -> ${asset}"

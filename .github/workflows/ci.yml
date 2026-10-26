@@ -3,8 +3,9 @@ name: CI
 # Ordinary quality gates for every push/PR. Deliberately has NO release
 # secrets, NO signing, NO publish permissions (plan §8 / P10-06 rule:
 # untrusted PR jobs must never gain publication capability). A failing gate
-# below blocks the release workflow because release-windows.yml re-runs the
-# same sequence on the tagged commit.
+# below blocks publication: publish-windows.yml only runs after this workflow
+# succeeds on master, and release-windows.yml re-runs the same sequence on a
+# tagged commit before staging anything.
 
 on:
   push:
@@ -21,12 +22,22 @@ permissions:
 jobs:
   gates-windows:
     runs-on: windows-latest
+    # bindgen (btls-sys) looks here; the image installs LLVM at this path.
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      # BoringSSL is ~10 min to compile cold and dominates every run; the test
+      # and release profiles share this target dir.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: BoringSSL assembler (NASM)
+        run: choco install nasm --no-progress -y
       - name: Frozen frontend install (lockfile authoritative)
         run: npm ci
       - name: Single-version invariant
