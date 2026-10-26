@@ -346,12 +346,11 @@ pub async fn claim_next(pool: &SqlitePool) -> Result<Option<TaskRow>, AppError> 
     let candidate: Option<(String,)> = sqlx::query_as(
         "SELECT t.id FROM download_tasks t \
          JOIN chapters c ON c.id = t.chapter_id \
+         LEFT JOIN (SELECT c2.manga_id AS group_manga, MIN(t2.created_at) AS group_created \
+                    FROM download_tasks t2 JOIN chapters c2 ON c2.id = t2.chapter_id \
+                    GROUP BY c2.manga_id) g ON g.group_manga = c.manga_id \
          WHERE t.status = 'queued' AND (t.next_retry_at IS NULL OR t.next_retry_at <= ?1) \
-         ORDER BY t.priority DESC, \
-                  (SELECT MIN(t2.created_at) FROM download_tasks t2 \
-                   JOIN chapters c2 ON c2.id = t2.chapter_id \
-                   WHERE c2.manga_id = c.manga_id) ASC, \
-                  c.manga_id ASC, \
+         ORDER BY t.priority DESC, g.group_created ASC, c.manga_id ASC, \
                   c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
          LIMIT 1",
     )
@@ -787,11 +786,11 @@ pub async fn retryable_failed_ids(
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT t.id FROM download_tasks t \
          JOIN chapters c ON c.id = t.chapter_id \
+         LEFT JOIN (SELECT c2.manga_id AS group_manga, MIN(t2.created_at) AS group_created \
+                    FROM download_tasks t2 JOIN chapters c2 ON c2.id = t2.chapter_id \
+                    GROUP BY c2.manga_id) g ON g.group_manga = c.manga_id \
          WHERE t.status = 'failed' \
-         ORDER BY (SELECT MIN(t2.created_at) FROM download_tasks t2 \
-                   JOIN chapters c2 ON c2.id = t2.chapter_id \
-                   WHERE c2.manga_id = c.manga_id) ASC, \
-                  c.manga_id ASC, \
+         ORDER BY g.group_created ASC, c.manga_id ASC, \
                   c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
          LIMIT ?1",
     )

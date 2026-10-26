@@ -43,12 +43,11 @@ pub async fn list_tasks(
                  FROM download_tasks t \
                  JOIN chapters c ON c.id = t.chapter_id \
                  JOIN mangas m ON m.id = c.manga_id \
+                 LEFT JOIN (SELECT c2.manga_id AS group_manga, MIN(t2.created_at) AS group_created \
+                            FROM download_tasks t2 JOIN chapters c2 ON c2.id = t2.chapter_id \
+                            GROUP BY c2.manga_id) g ON g.group_manga = c.manga_id \
                  WHERE t.status = ?1 \
-                 ORDER BY t.priority DESC, \
-                          (SELECT MIN(t2.created_at) FROM download_tasks t2 \
-                           JOIN chapters c2 ON c2.id = t2.chapter_id \
-                           WHERE c2.manga_id = c.manga_id) ASC, \
-                          c.manga_id ASC, \
+                 ORDER BY t.priority DESC, g.group_created ASC, c.manga_id ASC, \
                           c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
                  LIMIT ?2 OFFSET ?3",
             )
@@ -68,11 +67,10 @@ pub async fn list_tasks(
                  FROM download_tasks t \
                  JOIN chapters c ON c.id = t.chapter_id \
                  JOIN mangas m ON m.id = c.manga_id \
-                 ORDER BY t.priority DESC, \
-                          (SELECT MIN(t2.created_at) FROM download_tasks t2 \
-                           JOIN chapters c2 ON c2.id = t2.chapter_id \
-                           WHERE c2.manga_id = c.manga_id) ASC, \
-                          c.manga_id ASC, \
+                 LEFT JOIN (SELECT c2.manga_id AS group_manga, MIN(t2.created_at) AS group_created \
+                            FROM download_tasks t2 JOIN chapters c2 ON c2.id = t2.chapter_id \
+                            GROUP BY c2.manga_id) g ON g.group_manga = c.manga_id \
+                 ORDER BY t.priority DESC, g.group_created ASC, c.manga_id ASC, \
                           c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
                  LIMIT ?1 OFFSET ?2",
             )

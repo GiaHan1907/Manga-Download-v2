@@ -320,15 +320,14 @@ Quyết định (user chọn): **để chương lỗi và chờ nguồn**, khôn
 
 User báo danh sách tải "vẫn sắp xếp lung tung" dù đã xếp theo số chương (§ mục trước): khi xếp hàng nhiều truyện cùng lúc, chương của truyện A và B vẫn xen kẽ, nên đọc danh sách không thành mạch. Yêu cầu: **mỗi truyện là một nhóm**, truyện nào vào hàng trước nằm trên, chương trong truyện tăng dần, và thứ tự này phải là thứ tự chạy thật.
 
-Khóa nhóm là **`MIN(created_at)` của chính truyện đó** (chương nào của truyện vào hàng sớm nhất), không phải `created_at` của từng dòng — nhờ vậy cả cụm giữ nguyên vị trí bất kể chương mới thêm lúc nào. SQL dùng chung một biểu thức ở cả ba chỗ:
+Khóa nhóm là **`MIN(created_at)` của chính truyện đó** (chương nào của truyện vào hàng sớm nhất), không phải `created_at` của từng dòng — nhờ vậy cả cụm giữ nguyên vị trí bất kể chương mới thêm lúc nào. Khóa này tính **một lần** bằng bảng gộp rồi LEFT JOIN, không dùng subquery tương quan: trên DB thật (531 tác vụ / 6 truyện) bản tương quan tốn **171 ms** cho `list_tasks` và **61 ms** cho mỗi `claim_next`; bảng gộp còn **3,1 ms** / **1,9 ms** với kết quả từng dòng giống hệt.
 
 ```
-ORDER BY t.priority DESC,
-         (SELECT MIN(t2.created_at) FROM download_tasks t2
-          JOIN chapters c2 ON c2.id = t2.chapter_id
-          WHERE c2.manga_id = c.manga_id) ASC,
-         c.manga_id ASC, c.number IS NULL ASC, c.number ASC,
-         t.created_at ASC, t.id ASC
+LEFT JOIN (SELECT c2.manga_id AS group_manga, MIN(t2.created_at) AS group_created
+           FROM download_tasks t2 JOIN chapters c2 ON c2.id = t2.chapter_id
+           GROUP BY c2.manga_id) g ON g.group_manga = c.manga_id
+ORDER BY t.priority DESC, g.group_created ASC, c.manga_id ASC,
+         c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC
 ```
 
 1. `claim_next` (thứ tự engine lấy việc) và `retryable_failed_ids` (thứ tự "Thử lại tất cả lỗi" vào lại hàng) — trong `download_repo.rs`.
