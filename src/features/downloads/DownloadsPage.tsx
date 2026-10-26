@@ -137,7 +137,9 @@ export default function DownloadsPage() {
   const [filter, setFilter] = useState<FilterId>("queue");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
-  const [purgeStatuses, setPurgeStatuses] = useState<string[]>(["failed", "cancelled"]);
+  // Routine cleanup targets finished history; failed/cancelled rows stay
+  // selected-off so they remain available for a retry.
+  const [purgeStatuses, setPurgeStatuses] = useState<string[]>(["completed"]);
   // "Toàn bộ thời gian" is the default on purpose: the age limit is a filter
   // the user adds, not a precondition. With 7 days selected by default,
   // clearing today's failed tasks silently deleted nothing.

@@ -112,17 +112,18 @@ describe("T06 Downloads manager (real backend)", () => {
     });
   });
 
-  it("clears history by default across all time, not only rows older than a week", async () => {
+  it("clears only finished history by default, across all time", async () => {
     mockQueue([baseTask("t9", "failed", 1)]);
     renderDownloads();
     await screen.findByText("Truyện t9");
     fireEvent.click(screen.getByRole("button", { name: /Dọn lịch sử/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Xóa đã chọn" }));
-    // The age limit is a filter the user adds. Defaulting it to 7 days made
-    // "Dọn lịch sử" delete nothing for a queue that failed today.
+    // Routine cleanup is finished history; failed/cancelled rows stay so the
+    // user can still retry them. The age limit is likewise opt-in — a 7-day
+    // default deleted nothing for a queue that failed today.
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("clear_download_history", {
-        statuses: ["failed", "cancelled"],
+        statuses: ["completed"],
       });
     });
   });
