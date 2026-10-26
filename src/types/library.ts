@@ -62,7 +62,7 @@ export type DownloadedChapterDto = {
   title: string;
   number: number | null;
   pageCount: number | null;
-  storageFormat: "cbz" | "folder" | null;
+  storageFormat: "cbz" | "folder" | "pdf" | null;
   sizeBytes: number | null;
   artifactOk: boolean;
   updatedAt: string;
