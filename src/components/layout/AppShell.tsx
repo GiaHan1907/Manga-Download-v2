@@ -5,6 +5,7 @@ import ErrorBoundary from "../../app/ErrorBoundary";
 import CommandPalette from "../../features/global-search/CommandPalette";
 import ToastViewport from "../ui/Toast";
 import PageContainer from "./PageContainer";
+import ShortcutsDialog from "./ShortcutsDialog";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import WindowTitlebar from "./WindowTitlebar";
@@ -28,6 +29,7 @@ export default function AppShell() {
         </section>
       </div>
       <CommandPalette />
+      <ShortcutsDialog />
       <ToastViewport />
     </div>
   );

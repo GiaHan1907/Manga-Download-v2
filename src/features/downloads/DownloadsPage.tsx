@@ -1,5 +1,5 @@
 import { Ban, Eraser, FolderOpen, Link, Pause, Play, RotateCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Button from "../../components/ui/Button";
 import Dialog from "../../components/ui/Dialog";
 import DownloadCard from "../../components/ui/DownloadCard";
@@ -16,9 +16,12 @@ import type { DownloadTaskDto } from "../../types/backend";
 import {
   allowedDownloadActions,
   canRemoveTask,
+  errorHint,
   formatBytes,
   formatEtaSeconds,
   formatSpeed,
+  formatWait,
+  retryWaitSeconds,
   DOWNLOAD_STATUS_LABEL,
   isActiveStatus,
   progressPercent,
@@ -146,6 +149,14 @@ export default function DownloadsPage() {
   const [purgeOlderThanDays, setPurgeOlderThanDays] = useState<number | null>(null);
   const [linkText, setLinkText] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
+  // Backoff countdowns must keep ticking while nothing else re-renders: task
+  // events fire per page, not per minute, so "tự thử lại sau 12 phút" would
+  // otherwise sit frozen until the next refresh.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const visible = useMemo(() => {
     const matcher = FILTERS.find((item) => item.id === filter) ?? FILTERS[0];
@@ -351,6 +362,8 @@ export default function DownloadsPage() {
             // ETA is only truthful while pages are actively advancing —
             // a paused/queued task must not keep showing a stale estimate.
             const etaActive = task.status === "resolving" || task.status === "downloading";
+            const wait = retryWaitSeconds(task, nowMs);
+            const hint = errorHint(task.errorCode);
             const parts = [
               `${task.completedPages}/${task.totalPages} trang`,
               liveInfo && liveInfo.bytes > 0 ? formatBytes(liveInfo.bytes) : null,
@@ -369,11 +382,28 @@ export default function DownloadsPage() {
                 speedHistory={speedHistory[task.id]}
                 actionError={actionErrors[task.id]}
               >
+                {wait !== null && wait > 0 && (
+                  <span className="download-card__meta">
+                    Tự thử lại lần {task.attempts + 1} sau {formatWait(wait)}
+                  </span>
+                )}
                 {task.status === "failed" && task.errorMessage && (
-                  <p className="download-card__error" role="status">
-                    {task.errorCode ? `[${task.errorCode}] ` : ""}
-                    {task.errorMessage}
-                  </p>
+                  <div className="download-card__error" role="status">
+                    {/* Message first (Rust already wrote it for humans), then
+                        the next step, then the wire code as reference — the
+                        old single line led with `[SOURCE_…]`, which read as a
+                        stack trace to anyone who is not the author. */}
+                    <p>{task.errorMessage}</p>
+                    {hint && <p className="download-card__hint">{hint}</p>}
+                    {task.attempts > 0 && (
+                      <p className="download-card__hint">
+                        Đã thử {task.attempts} lần · không tự thử lại nữa
+                      </p>
+                    )}
+                    {task.errorCode && (
+                      <p className="download-card__code">Mã lỗi: {task.errorCode}</p>
+                    )}
+                  </div>
                 )}
                 {task.status === "completed" && task.outputRelpath && (
                   <>

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { libraryReconcile, normalizeIpcError, queueChapterDownloadByUrl, revealDownload, watchRunNow } from "../../shared/api/desktop";
 import { pushToast } from "../../components/ui/toastStore";
+import { OPEN_SHORTCUTS_EVENT } from "../../components/layout/ShortcutsDialog";
 import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
 import { libraryApi } from "../../services/library.api";
@@ -73,6 +74,14 @@ const ACTIONS: ActionItem[] = [
     run: () => {
       void revealDownload({}).catch((error: unknown) => pushToast(normalizeIpcError(error).message));
     },
+  },
+  {
+    kind: "action",
+    id: "r-shortcuts",
+    label: "Phím tắt",
+    // A shortcut list is only useful if you can find it without already
+    // knowing the shortcut, so the palette carries it too.
+    run: () => window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT)),
   },
 ];
 

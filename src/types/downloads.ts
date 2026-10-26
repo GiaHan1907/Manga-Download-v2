@@ -139,6 +139,61 @@ export function formatEtaSeconds(seconds: number | null | undefined): string | n
   return `còn ~${Math.floor(minutes / 60)}h${minutes % 60}p`;
 }
 
+/// Seconds until this task's scheduled automatic retry. A task waiting out
+/// its backoff is `queued` again (the engine re-queues with attempts+1 and a
+/// due time), so without this the card looks identical to a fresh queue entry
+/// and the user cannot tell the app is still working on it.
+export function retryWaitSeconds(
+  task: Pick<DownloadTaskDto, "nextRetryAt">,
+  nowMs: number = Date.now(),
+): number | null {
+  if (!task.nextRetryAt) {
+    return null;
+  }
+  const due = Date.parse(task.nextRetryAt);
+  if (Number.isNaN(due)) {
+    return null;
+  }
+  return Math.max(0, Math.round((due - nowMs) / 1000));
+}
+
+/// Human wait, coarse on purpose: the value ticks, so false precision would
+/// only flicker. Sub-minute reads as "dưới 1 phút" rather than "0 phút".
+export function formatWait(seconds: number): string {
+  if (seconds < 60) {
+    return "dưới 1 phút";
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} phút`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} giờ` : `${hours} giờ ${rest} phút`;
+}
+
+/// One plain-Vietnamese next step per failure family. Codes are the Rust wire
+/// codes (`SourceError`/`LibraryError`/`AppError`); an unmapped code shows no
+/// hint rather than inventing advice — Rust's own message still leads.
+export const ERROR_HINT: Record<string, string> = {
+  SOURCE_NETWORK: "Kiểm tra mạng rồi thử lại; nguồn cũng có thể đang chặn theo khu vực.",
+  SOURCE_RATE_LIMITED: "Nguồn đang giới hạn lượt truy vấn — chờ vài phút rồi thử lại.",
+  SOURCE_UPSTREAM: "Lỗi tạm thời từ phía nguồn — chờ vài phút rồi thử lại.",
+  SOURCE_NOT_FOUND: "Nguồn có thể đã bỏ chương này — mở chi tiết truyện để kiểm tra.",
+  SOURCE_PARSE_ERROR: "Nguồn đã đổi cấu trúc trang — cần cập nhật nguồn trước khi tải lại.",
+  SOURCE_FORBIDDEN: "Nguồn chặn yêu cầu từ máy này (tường lửa hoặc theo khu vực).",
+  SOURCE_DISABLED: "Bật lại nguồn trong Cài đặt → Nguồn truyện rồi thử lại.",
+  LOCAL_FILE_MISSING: "File đã mất khỏi đĩa — tải lại chương này.",
+  LOCAL_FILE_CORRUPTED: "File lỗi hoặc không đọc được — tải lại chương này.",
+  CBZ_INVALID: "Archive CBZ không hợp lệ — tải lại chương này.",
+  DELETE_FAILED: "Không xóa được file — kiểm tra ổ đĩa rồi thử lại.",
+  STORAGE_OUTSIDE_LIBRARY_ROOT: "Đường dẫn nằm ngoài thư viện — kiểm tra lại nơi lưu trong Cài đặt.",
+};
+
+export function errorHint(code: string | null | undefined): string | null {
+  return code ? ERROR_HINT[code] ?? null : null;
+}
+
 /// Normalized polyline points for a 100x28 sparkline box; null when fewer
 /// than two samples carry no shape information.
 export function sparklinePoints(samples: number[]): string | null {

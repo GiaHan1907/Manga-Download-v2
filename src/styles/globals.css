@@ -1451,6 +1451,19 @@ button {
 .download-card__error {
   color: var(--error);
   font-size: var(--font-size-sm);
+  display: grid;
+  gap: 2px;
+}
+
+.download-card__hint {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.download-card__code {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  opacity: 0.75;
 }
 
 .download-card__sparkline {
@@ -3194,4 +3207,47 @@ button {
 
 .lib-activity__age {
   flex: 0 0 auto;
+}
+
+/* ---------- Bảng phím tắt (dialog "?") ---------- */
+.shortcut-group {
+  margin: var(--space-3) 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.shortcut-group:first-child {
+  margin-top: 0;
+}
+
+.shortcut-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+/* Two columns: keys keep one width so the action text lines up down the list. */
+.shortcut-list__row {
+  align-items: baseline;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(8rem, auto) 1fr;
+}
+
+.shortcut-list__row dd {
+  margin: 0;
+}
+
+.shortcut-key {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  white-space: nowrap;
 }
