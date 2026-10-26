@@ -295,6 +295,19 @@ Vì sao không "hỗ trợ Drive": muốn lấy trang từ Drive preview phải 
 
 **Cách nhận biết nhanh khi user báo `SOURCE_PARSE_ERROR` cho cả một truyện TTT:** probe in `sel iframe = 1` và `.reading-content img = 0` → gần như chắc chắn là embed Drive; khác với ca chương lẻ (Mankichi 2026-10-05) nơi container rỗng nhưng có script mã hoá giải được.
 
+### 2q. Hỗ trợ chương "một file" (PDF từ Drive) — 2026-10-26
+
+Sau §2p, user chọn hướng **lưu nguyên bản PDF** thay vì rasterize. Đã làm (đây là loại chương mới trong engine):
+
+1. **Nhận dạng ở adapter:** `drive_embed_download_url()` đọc `iframe[src]` của trang chương, chỉ chấp nhận `https://drive.google.com/file/d/<id>/preview…` và dựng `uc?export=download&id=<id>` từ chính id đó (không suy ra host/path nào khác). `PageManifest` có thêm `single_file_format`; khi có nó, `pages` đúng MỘT entry.
+2. **Policy:** chỉ TTT built-in (`TTT_BUILTIN_ID`) được thêm `drive.google.com` + `drive.usercontent.google.com` (redirect 303 → host thứ hai, mỗi hop đều được validate lại). Danh sách host ẢNH không đổi, nên một thẻ `<img>` vẫn không thể trỏ sang Google.
+3. **Worker:** nhánh một-file tải cả chương qua `SourceAdapter::fetch_chapter_file` (cap `CHAPTER_MAX_BYTES` = 400 MB), **kiểm magic `%PDF-`** trước khi ghi, stage thành `chapter.pdf`, rồi xuất bằng copy → so sánh từng byte (`transfer::files_identical`) → rename atomically. Định dạng của artifact theo NGUỒN, không theo lựa chọn lúc xếp hàng: xếp với "cbz" vẫn ra `.pdf` (test `a_single_file_chapter_is_stored_as_a_pdf_and_the_reader_refuses_it`).
+4. **Reader/reconcile:** `prove_artifact` coi `.pdf` là hợp lệ khi mở đầu bằng `%PDF-` (không thử mở như CBZ, nếu không reconcile sẽ xoá cờ offline của chương tốt). `reader_open_chapter`/trang trả `VALIDATION_ERROR` "Chương này là một file PDF (cả tập) — mở file trong thư mục truyện đã tải." UI hiện nhãn **PDF** ở danh sách chương và thẻ tải.
+
+Bằng chứng: test engine (lưu đúng byte, reader từ chối, sai magic → `failed` + `VALIDATION_ERROR` và không publish) và probe live `live_builtin_ttt_drive_volume_downloads`: tap-1 của Gasshu → manifest `single_file=Some("pdf")` → **89.052.555 byte trong 6 giây**, magic `%PDF-`.
+
+**Giới hạn đã biết:** không có trình đọc PDF trong app (mở bằng ứng dụng ngoài — mở thư mục truyện để lấy file); chỉ nhận embed Drive, embed khác vẫn `PARSE_ERROR`; `total_pages = 1` (một file là một "trang" tiến độ); file > 400 MB bị từ chối.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

@@ -115,6 +115,16 @@ impl SourceAdapter for ScriptedAdapter {
             }
             return Err(SourceError::Network);
         }
+        if source_chapter_id.contains("-pdf") {
+            return Ok(PageManifest {
+                source_chapter_id: source_chapter_id.to_string(),
+                pages: vec![PageDescriptor {
+                    index: 0,
+                    url: format!("https://engine.test/files/{source_chapter_id}.pdf"),
+                }],
+                single_file_format: Some("pdf".to_string()),
+            });
+        }
         let pages = (0..self.script.pages)
             .map(|index| PageDescriptor {
                 index,
@@ -124,8 +134,18 @@ impl SourceAdapter for ScriptedAdapter {
         Ok(PageManifest {
             source_chapter_id: source_chapter_id.to_string(),
             pages,
+            single_file_format: None,
         })
     }
+    async fn fetch_chapter_file(&self, url: &str) -> Result<Vec<u8>, SourceError> {
+        if url.contains("__badfile") {
+            return Ok(b"<html>not a pdf</html>".to_vec());
+        }
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        bytes.extend(std::iter::repeat_n(b'v', 2048));
+        Ok(bytes)
+    }
+
     async fn fetch_image(&self, url: &str) -> Result<Vec<u8>, SourceError> {
         let script = &self.script;
         let count = script.fetches.fetch_add(1, Ordering::SeqCst);
@@ -812,5 +832,68 @@ async fn network_breaker_only_counts_unreachable_source_failures() {
         count(&world.pool, "failed").await,
         5,
         "nothing was re-queued, so all five rows stay as they settled"
+    );
+}
+
+/// A chapter the source serves as ONE scanned volume must land as that file,
+/// keep its own format, and refuse the image reader — the TTT Drive shape.
+#[tokio::test]
+async fn a_single_file_chapter_is_stored_as_a_pdf_and_the_reader_refuses_it() {
+    let world = World::new(Script::new(3)).await;
+    let chapter = world.seed_chapter("volume-pdf").await;
+    world.queue(&chapter, "cbz").await;
+    let (pause, cancel) = no_flags();
+    let dto = world.run_once(pause, cancel).await.unwrap();
+    assert_eq!(dto.status, "completed");
+
+    let (relpath, format): (String, String) =
+        sqlx::query_as("SELECT local_path, output_format FROM chapters WHERE id = ?1")
+            .bind(&chapter)
+            .fetch_one(&world.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        format, "pdf",
+        "the artifact format follows the source, not the queue pick"
+    );
+    assert!(relpath.ends_with(".pdf"), "{relpath}");
+    let artifact = world.data_dir.path().join("library").join(&relpath);
+    let bytes = std::fs::read(&artifact).unwrap();
+    assert!(
+        bytes.starts_with(b"%PDF-"),
+        "the stored file must be the source's own bytes"
+    );
+    assert_eq!(dto.total_pages, 1, "one file is one page of progress");
+
+    let error =
+        crate::services::reader_service::open_chapter(&world.pool, world.data_dir.path(), &chapter)
+            .await
+            .unwrap_err();
+    assert!(matches!(error, AppError::Validation(_)), "{error:?}");
+}
+
+/// A source that promises a PDF and sends something else must fail before any
+/// artifact is published.
+#[tokio::test]
+async fn a_single_file_chapter_with_the_wrong_magic_fails_and_publishes_nothing() {
+    let world = World::new(Script::new(3)).await;
+    let chapter = world.seed_chapter("volume-pdf__badfile").await;
+    world.queue(&chapter, "cbz").await;
+    let (pause, cancel) = no_flags();
+    // A content error settles the task as `failed`; it is not a transient that
+    // silently retries, and nothing is published.
+    let dto = world.run_once(pause, cancel).await.unwrap();
+    assert_eq!(dto.status, "failed");
+    assert_eq!(dto.error_code.as_deref(), Some("VALIDATION_ERROR"));
+
+    let (relpath, format): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT local_path, output_format FROM chapters WHERE id = ?1")
+            .bind(&chapter)
+            .fetch_one(&world.pool)
+            .await
+            .unwrap();
+    assert!(
+        relpath.is_none() && format.is_none(),
+        "{relpath:?} {format:?}"
     );
 }

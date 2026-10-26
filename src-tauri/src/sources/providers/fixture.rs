@@ -92,6 +92,20 @@ impl SourceAdapter for FixtureProvider {
         if source_chapter_id == "fx-no-pages" {
             return Err(SourceError::NotFound);
         }
+        // A chapter whose id carries `-pdf` is ONE scanned volume served as a
+        // single file, the shape TTT produces with its Drive embeds.
+        if source_chapter_id.ends_with("-pdf") {
+            return Ok(PageManifest {
+                source_chapter_id: source_chapter_id.to_string(),
+                pages: vec![PageDescriptor {
+                    index: 0,
+                    url: format!(
+                        "https://fixture.manga1989.invalid/files/{source_chapter_id}__pdf"
+                    ),
+                }],
+                single_file_format: Some("pdf".to_string()),
+            });
+        }
         let count = if source_chapter_id.ends_with("-c2") {
             2
         } else {
@@ -110,7 +124,19 @@ impl SourceAdapter for FixtureProvider {
         Ok(PageManifest {
             source_chapter_id: source_chapter_id.to_string(),
             pages,
+            single_file_format: None,
         })
+    }
+
+    async fn fetch_chapter_file(&self, url: &str) -> Result<Vec<u8>, SourceError> {
+        if url.contains("__net") {
+            return Err(SourceError::Network);
+        }
+        // Importing shape: one PDF volume. Content is deterministic so tests can
+        // assert the stored bytes are untouched.
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        bytes.extend(std::iter::repeat_n(b'p', 4096));
+        Ok(bytes)
     }
 
     /// Deterministic in-memory image bytes. Pages whose chapter id carries

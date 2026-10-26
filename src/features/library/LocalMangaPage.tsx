@@ -550,7 +550,7 @@ export default function LocalMangaPage() {
                       {chapter.pageCount !== null ? `${chapter.pageCount} trang` : "Không rõ số trang"}
                       {chapter.sizeBytes ? ` · ${formatBytes(chapter.sizeBytes)}` : ""}
                       {" · "}
-                      {chapter.storageFormat === "folder" ? "thư mục ảnh" : "CBZ"}
+                      {chapter.storageFormat === "folder" ? "thư mục ảnh" : chapter.storageFormat === "pdf" ? "PDF" : "CBZ"}
                     </span>
                   </span>
                   {chapter.artifactOk ? (

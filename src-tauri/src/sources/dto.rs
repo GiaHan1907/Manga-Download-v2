@@ -134,4 +134,10 @@ pub struct PageDescriptor {
 pub struct PageManifest {
     pub source_chapter_id: String,
     pub pages: Vec<PageDescriptor>,
+    /// `Some("pdf")` when the chapter is ONE downloadable file (a scanned
+    /// volume) instead of a page list: `pages` then holds exactly one
+    /// descriptor pointing at that file, the worker stores the bytes as-is,
+    /// and the artifact keeps that extension. The offline reader cannot render
+    /// it — it is opened with an external application.
+    pub single_file_format: Option<String>,
 }

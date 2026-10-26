@@ -338,7 +338,7 @@ export default function DownloadsPage() {
               liveInfo && liveInfo.bytes > 0 ? formatBytes(liveInfo.bytes) : null,
               speed,
               etaActive ? formatEtaSeconds(etaSeconds[task.id]) : null,
-              task.targetFormat === "folder" ? "thư mục ảnh" : "CBZ",
+              task.targetFormat === "folder" ? "thư mục ảnh" : task.targetFormat === "pdf" ? "PDF" : "CBZ",
             ].filter(Boolean);
             return (
               <DownloadCard

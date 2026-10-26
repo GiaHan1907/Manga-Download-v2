@@ -85,6 +85,8 @@ struct PageJob {
     live: SharedLive,
     flags: WorkerFlags,
     running_total: Arc<Mutex<u64>>,
+    /// `Some("pdf")` when this chapter is ONE file rather than an image list.
+    single_file: Option<String>,
 }
 
 pub async fn run_task(
@@ -216,6 +218,16 @@ async fn attempt_run(
         ));
     }
     validate_manifest(&manifest)?;
+    // A single-file chapter (one scanned volume) is described by exactly one
+    // entry; anything else would be a manifest we cannot store honestly.
+    let single_file = manifest.single_file_format.clone();
+    if let Some(format) = &single_file {
+        if manifest.pages.len() != 1 || format != "pdf" {
+            return Err(AppError::validation(
+                "Chương một-file phải có đúng một mục và định dạng đã hỗ trợ.",
+            ));
+        }
+    }
     let total_pages = manifest.pages.len();
     download_repo::ensure_page_rows(&deps.pool, &task_id, total_pages).await?;
     let page_urls: Vec<String> = manifest.pages.iter().map(|page| page.url.clone()).collect();
@@ -247,6 +259,7 @@ async fn attempt_run(
             shutdown: deps.flags.shutdown.clone(),
         },
         running_total: Arc::new(Mutex::new(0u64)),
+        single_file: single_file.clone(),
     });
     loop {
         let pages = download_repo::list_pages(&deps.pool, &task_id).await?;
@@ -373,52 +386,87 @@ async fn attempt_run(
     storage::ensure_under_root(&library_root, &manga_dir)?;
     std::fs::create_dir_all(&manga_dir)?;
 
-    let base =
-        storage::chapter_artifact_name(ctx.chapter_number, &ctx.chapter_id, &task.target_format);
+    // A single-file chapter is named after ITS format, whatever the user picked
+    // at queue time — there is nothing to archive.
+    let export_format = single_file
+        .clone()
+        .unwrap_or_else(|| task.target_format.clone());
+    let base = storage::chapter_artifact_name(ctx.chapter_number, &ctx.chapter_id, &export_format);
     storage::assert_safe_name_component(&base)?;
-    let relpath = match task.target_format.as_str() {
-        "folder" => {
-            let final_dir = manga_dir.join(&base);
-            let part_dir = manga_dir.join(format!("{base}.part-dir"));
-            let newly_published =
-                exporter::export_folder(&staging, &exports, &part_dir, &final_dir)?;
-            // Last cooperative exit: the artifact was renamed by THIS run,
-            // so undoing the rename restores the pre-export state exactly.
-            // An adopted pre-existing artifact (recovered crash) is kept and
-            // the task completes — cancel cannot race the commit forever.
-            if deps.flags.shutdown.load(Ordering::Relaxed) {
-                return current_dto(deps, &task_id).await;
-            }
-            if newly_published && deps.flags.cancel.load(Ordering::Relaxed) {
-                let _ = std::fs::remove_dir_all(&final_dir);
-                transfer::discard_part_files(&staging)?;
-                return stop_as_cancelled(deps, &task_id).await;
-            }
-            format!("{manga_dir_name}/{base}")
+    let relpath = if single_file.is_some() {
+        // Copy the verified staged file beside the final name, compare byte for
+        // byte, then publish atomically — the same discipline as a CBZ.
+        let stored = download_repo::list_pages(&deps.pool, &task_id).await?;
+        let staged_name = stored
+            .iter()
+            .find(|page| page.status == "stored")
+            .and_then(|page| page.storage_key.clone())
+            .ok_or_else(|| AppError::validation("Thiếu tệp chương đã xác minh."))?;
+        let source_path = staging.join(&staged_name);
+        storage::ensure_under_root(&staging, &source_path)?;
+        if deps.flags.shutdown.load(Ordering::Relaxed) {
+            return current_dto(deps, &task_id).await;
         }
-        _ => {
-            let final_path = manga_dir.join(&base);
-            let (part_path, _) = exporter::part_paths(&final_path);
-            exporter::write_cbz(&staging, &exports, &part_path)?;
-            exporter::verify_cbz(&part_path, &exports)?;
-            // The final cooperative check happens while only our private
-            // `.part` exists — deleting it never touches user content.
-            if deps.flags.shutdown.load(Ordering::Relaxed) {
-                return current_dto(deps, &task_id).await;
+        if deps.flags.cancel.load(Ordering::Relaxed) {
+            transfer::discard_part_files(&staging)?;
+            return stop_as_cancelled(deps, &task_id).await;
+        }
+        let final_path = manga_dir.join(&base);
+        let (part_path, _) = exporter::part_paths(&final_path);
+        std::fs::copy(&source_path, &part_path)?;
+        if !transfer::files_identical(&source_path, &part_path)? {
+            let _ = std::fs::remove_file(&part_path);
+            return Err(AppError::validation(
+                "Bản sao tệp chương không khớp nguồn — hủy xuất.",
+            ));
+        }
+        std::fs::rename(&part_path, &final_path)?;
+        format!("{manga_dir_name}/{base}")
+    } else {
+        match task.target_format.as_str() {
+            "folder" => {
+                let final_dir = manga_dir.join(&base);
+                let part_dir = manga_dir.join(format!("{base}.part-dir"));
+                let newly_published =
+                    exporter::export_folder(&staging, &exports, &part_dir, &final_dir)?;
+                // Last cooperative exit: the artifact was renamed by THIS run,
+                // so undoing the rename restores the pre-export state exactly.
+                // An adopted pre-existing artifact (recovered crash) is kept and
+                // the task completes — cancel cannot race the commit forever.
+                if deps.flags.shutdown.load(Ordering::Relaxed) {
+                    return current_dto(deps, &task_id).await;
+                }
+                if newly_published && deps.flags.cancel.load(Ordering::Relaxed) {
+                    let _ = std::fs::remove_dir_all(&final_dir);
+                    transfer::discard_part_files(&staging)?;
+                    return stop_as_cancelled(deps, &task_id).await;
+                }
+                format!("{manga_dir_name}/{base}")
             }
-            if deps.flags.cancel.load(Ordering::Relaxed) {
-                let _ = std::fs::remove_file(&part_path);
-                transfer::discard_part_files(&staging)?;
-                return stop_as_cancelled(deps, &task_id).await;
+            _ => {
+                let final_path = manga_dir.join(&base);
+                let (part_path, _) = exporter::part_paths(&final_path);
+                exporter::write_cbz(&staging, &exports, &part_path)?;
+                exporter::verify_cbz(&part_path, &exports)?;
+                // The final cooperative check happens while only our private
+                // `.part` exists — deleting it never touches user content.
+                if deps.flags.shutdown.load(Ordering::Relaxed) {
+                    return current_dto(deps, &task_id).await;
+                }
+                if deps.flags.cancel.load(Ordering::Relaxed) {
+                    let _ = std::fs::remove_file(&part_path);
+                    transfer::discard_part_files(&staging)?;
+                    return stop_as_cancelled(deps, &task_id).await;
+                }
+                exporter::publish_artifact(&part_path, &final_path, &exports)?;
+                format!("{manga_dir_name}/{base}")
             }
-            exporter::publish_artifact(&part_path, &final_path, &exports)?;
-            format!("{manga_dir_name}/{base}")
         }
     };
 
     // Artifact byte size for Library accounting (best-effort; reconcile can
     // re-derive it). Folder mode sums the validated page set.
-    let artifact_size: Option<i64> = match task.target_format.as_str() {
+    let artifact_size: Option<i64> = match export_format.as_str() {
         "folder" => Some(exports.iter().map(|e| e.size_bytes).sum::<i64>()),
         _ => std::fs::metadata(manga_dir.join(&base))
             .map(|m| m.len() as i64)
@@ -428,7 +476,7 @@ async fn attempt_run(
         &deps.pool,
         &task_id,
         &relpath,
-        &task.target_format,
+        &export_format,
         artifact_size,
     )
     .await?
@@ -450,7 +498,31 @@ async fn fetch_and_store_page(
     if job.flags.cancel.load(Ordering::Relaxed) || job.flags.shutdown.load(Ordering::Relaxed) {
         return Err(AppError::Internal);
     }
-    let staged = transfer::fetch_page(&job.staging, index, job.adapter.fetch_image(&url)).await?;
+    let staged = if let Some(format) = &job.single_file {
+        // One scanned volume: fetch the file itself, keep the bytes as the
+        // artifact, and verify it really is the format the source promised.
+        let bytes = job
+            .adapter
+            .fetch_chapter_file(&url)
+            .await
+            .map_err(AppError::Source)?;
+        let magic: &[u8] = match format.as_str() {
+            "pdf" => b"%PDF-",
+            _ => {
+                return Err(AppError::validation(
+                    "Định dạng chương một-file không được hỗ trợ.",
+                ))
+            }
+        };
+        if !bytes.starts_with(magic) {
+            return Err(AppError::validation(
+                "Tệp chương không đúng định dạng nguồn khai báo.",
+            ));
+        }
+        transfer::store_single_file(&job.staging, format, &bytes)?
+    } else {
+        transfer::fetch_page(&job.staging, index, job.adapter.fetch_image(&url)).await?
+    };
     {
         let mut total = job.running_total.lock().unwrap();
         *total = total.saturating_add(staged.size_bytes as u64);

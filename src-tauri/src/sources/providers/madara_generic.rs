@@ -65,6 +65,14 @@ const NTAR_IMAGE_DOMAIN: &str = "cloud-zzz.com";
 /// DocTruyen3Q use, so `fetch_cover` re-derives a fixed, vetted host.
 const NTAR_COVER_DOMAINS: &[(&str, &str)] = &[("cloud-zzz", "cloud-zzz.com")];
 
+/// The TTT built-in's stable id (domain edits keep it).
+const TTT_BUILTIN_ID: &str = "madara-truyentuoitho-com";
+/// Hosts a SINGLE-FILE chapter may be downloaded from. TTT embeds some "Full"
+/// volumes from Google Drive, and the download redirects from
+/// drive.google.com to drive.usercontent.google.com — every redirect hop is
+/// re-validated, so both are listed.
+const TTT_FILE_HOSTS: &[&str] = &["drive.google.com", "drive.usercontent.google.com"];
+
 /// DocTruyen3Q serves chapter pages from numbered shards of these domains
 /// (recon 2026-10-07: s15.anhvip.xyz, s8.topcdnv1.art) — the shard differs
 /// per story, so the family is vetted, not one host.
@@ -111,6 +119,45 @@ fn split_dash_id(slug: &str) -> Option<(&str, &str)> {
     let (stem, id) = slug.rsplit_once('-')?;
     (!stem.is_empty() && !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
         .then_some((stem, id))
+}
+
+/// Direct download URL for a chapter page that embeds Google Drive's viewer
+/// (`drive.google.com/file/d/<id>/preview`). The id comes from the embed's own
+/// `src`; no other host or path is derived from page content.
+fn drive_embed_download_url(document: &Html) -> Option<String> {
+    let iframes = Selector::parse("iframe[src]").ok()?;
+    for node in document.select(&iframes) {
+        let Some(src) = node.value().attr("src") else {
+            continue;
+        };
+        let Ok(parsed) = Url::parse(src.trim()) else {
+            continue;
+        };
+        if parsed.host_str() != Some("drive.google.com") || parsed.scheme() != "https" {
+            continue;
+        }
+        let mut segments = match parsed.path_segments() {
+            Some(segments) => segments.filter(|segment| !segment.is_empty()),
+            None => continue,
+        };
+        if segments.next() != Some("file") || segments.next() != Some("d") {
+            continue;
+        }
+        let Some(id) = segments.next() else {
+            continue;
+        };
+        let id_ok = !id.is_empty()
+            && id.len() <= 128
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+        if id_ok {
+            return Some(format!(
+                "https://drive.google.com/uc?export=download&id={id}"
+            ));
+        }
+    }
+    None
 }
 
 /// Sibling shard URLs for a NetTruyen-family CDN host (`imageN.kcgsbok.com`,
@@ -333,6 +380,17 @@ impl MadaraGeneric {
         base.set_fragment(None);
         let mut allowed_hosts = vec![host.clone()];
         allowed_hosts.extend(extras.iter().cloned());
+        // TTT also serves some "Full" volumes as ONE PDF embedded from Google
+        // Drive. Only that built-in may reach Drive, and only through the
+        // policy: the page-image allowlist is untouched, so a chapter page
+        // still cannot point an <img> at Google.
+        if id == TTT_BUILTIN_ID {
+            for file_host in TTT_FILE_HOSTS {
+                if !allowed_hosts.iter().any(|known| known == file_host) {
+                    allowed_hosts.push((*file_host).to_string());
+                }
+            }
+        }
         // Hotlink-protected CDNs (the sharded image hosts these sites serve
         // chapters from, and TTT's Cloudflare worker for its script-rendered
         // chapters) 403 any request without the site's own origin as Referer.
@@ -1902,6 +1960,17 @@ impl SourceAdapter for MadaraGeneric {
             }
         }
         if urls.is_empty() || urls.len() > MAX_PAGE_COUNT {
+            // A chapter can also be ONE scanned volume served as a single file
+            // (TTT embeds those from Google Drive). There is no image to
+            // parse, so hand the worker the direct download URL and its format
+            // instead of failing.
+            if let Some(url) = drive_embed_download_url(&document) {
+                return Ok(PageManifest {
+                    source_chapter_id: source_chapter_id.to_string(),
+                    pages: vec![PageDescriptor { index: 0, url }],
+                    single_file_format: Some("pdf".to_string()),
+                });
+            }
             return Err(SourceError::Parse);
         }
         let pages = urls
@@ -1912,7 +1981,15 @@ impl SourceAdapter for MadaraGeneric {
         Ok(PageManifest {
             source_chapter_id: source_chapter_id.to_string(),
             pages,
+            single_file_format: None,
         })
+    }
+
+    async fn fetch_chapter_file(&self, url: &str) -> Result<Vec<u8>, SourceError> {
+        // One scanned volume: the cap is the chapter budget, not an image's.
+        self.http
+            .get_bytes(url, crate::downloader::CHAPTER_MAX_BYTES)
+            .await
     }
 
     async fn fetch_image(&self, url: &str) -> Result<Vec<u8>, SourceError> {
@@ -3190,6 +3267,48 @@ mod tests {
         }
     }
 
+    /// End-to-end against the real source: the Gasshu chapters are single-file
+    /// volumes behind a Drive embed. Resolve the manifest and download the
+    /// whole file through the app's policy (one request, no page loop).
+    #[tokio::test]
+    #[ignore = "live probe: download a Google-Drive volume chapter through the adapter"]
+    async fn live_builtin_ttt_drive_volume_downloads() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "madara-truyentuoitho-com".to_string(),
+            display_name: "Truyen Tuoi Tho".to_string(),
+            adapter: "madara".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("madara-truyentuoitho-com").expect("built-in");
+        let manifest = adapter
+            .page_manifest("gasshu-cau-be-bi-an", "tap-1")
+            .await
+            .expect("manifest");
+        println!(
+            "DRIVE single_file={:?} pages={} url={}",
+            manifest.single_file_format,
+            manifest.pages.len(),
+            manifest.pages[0].url
+        );
+        assert_eq!(manifest.single_file_format.as_deref(), Some("pdf"));
+        let started = std::time::Instant::now();
+        let bytes = adapter
+            .fetch_chapter_file(&manifest.pages[0].url)
+            .await
+            .expect("volume download");
+        println!(
+            "DRIVE bytes={} ms={} magic={}",
+            bytes.len(),
+            started.elapsed().as_millis(),
+            String::from_utf8_lossy(&bytes[..5.min(bytes.len())])
+        );
+        assert!(bytes.starts_with(b"%PDF-"));
+        assert!(bytes.len() > 1_000_000, "a scanned volume is megabytes");
+    }
+
     /// The 2026-10-26 wave: ten chapters of one TTT story yield zero pages.
     /// Print what the page actually holds so the next step follows the source.
     #[tokio::test]
@@ -4015,6 +4134,37 @@ mod tests {
     async fn loose_reader_pages_with_only_foreign_hosts_still_fail() {
         let (provider, _) = adapter(vec![Ok(
             r#"<div class="reading-content"><img src="https://cdn-moved.test/p1.jpg"/></div>"#,
+        )]);
+        assert!(matches!(
+            provider.page_manifest("m", "tap-1").await,
+            Err(SourceError::Parse)
+        ));
+    }
+
+    /// A chapter page that embeds Google Drive's viewer has no images at all;
+    /// it is ONE scanned volume, and the id must come from the embed's own src.
+    #[tokio::test]
+    async fn a_drive_embed_becomes_a_single_file_chapter() {
+        let (provider, _) = adapter(vec![Ok(
+            r#"<div class="reading-content"></div>
+               <iframe allowfullscreen src="https://drive.google.com/file/d/1GVXoxsUxQDNNcjqnAd7VSj78TePOcDLN/preview?usp=embed_googleplus"></iframe>"#,
+        )]);
+        let manifest = provider.page_manifest("m", "tap-1").await.unwrap();
+        assert_eq!(manifest.single_file_format.as_deref(), Some("pdf"));
+        assert_eq!(manifest.pages.len(), 1);
+        assert_eq!(
+            manifest.pages[0].url,
+            "https://drive.google.com/uc?export=download&id=1GVXoxsUxQDNNcjqnAd7VSj78TePOcDLN"
+        );
+    }
+
+    /// Any OTHER embedded player is not something we can download: the chapter
+    /// must still fail loudly rather than invent a file URL.
+    #[tokio::test]
+    async fn a_foreign_embed_still_fails_as_parse() {
+        let (provider, _) = adapter(vec![Ok(
+            r#"<div class="reading-content"></div>
+               <iframe src="https://player.example/v/123"></iframe>"#,
         )]);
         assert!(matches!(
             provider.page_manifest("m", "tap-1").await,

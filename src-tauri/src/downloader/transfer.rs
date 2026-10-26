@@ -78,6 +78,65 @@ pub fn write_and_validate(
     })
 }
 
+/// Land a single-file chapter (a scanned volume) in staging. Same
+/// write-flush-reread-rename discipline as a page, but the bytes ARE the
+/// artifact, so the caller validates format magic and size, and the staged
+/// name keeps the artifact extension.
+pub fn store_single_file(
+    staging_dir: &Path,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<StagedPage, AppError> {
+    let name = format!("chapter.{extension}");
+    let final_path = staging_dir.join(&name);
+    let part_path = staging_dir.join(format!("{name}.part"));
+    std::fs::create_dir_all(staging_dir)?;
+
+    use std::io::Write;
+    let mut file = std::fs::File::create(&part_path)?;
+    file.write_all(bytes)?;
+    file.flush()?;
+    drop(file);
+
+    let written = std::fs::read(&part_path)?;
+    if written.len() != bytes.len()
+        || image_validate::crc32(&written) != image_validate::crc32(bytes)
+    {
+        let _ = std::fs::remove_file(&part_path);
+        return Err(AppError::Io(std::io::Error::other(
+            "staged file write mismatch",
+        )));
+    }
+    if final_path.exists() {
+        std::fs::remove_file(&final_path)?;
+    }
+    std::fs::rename(&part_path, &final_path)?;
+    Ok(StagedPage {
+        name,
+        size_bytes: bytes.len() as i64,
+        checksum: image_validate::crc32_hex(bytes),
+    })
+}
+
+/// Byte-for-byte comparison in bounded chunks: used to verify a copied
+/// single-file artifact without holding two whole volumes in memory.
+pub fn files_identical(a: &Path, b: &Path) -> Result<bool, AppError> {
+    use std::io::Read;
+    let (mut fa, mut fb) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    let mut buf_a = vec![0u8; 64 * 1024];
+    let mut buf_b = vec![0u8; 64 * 1024];
+    loop {
+        let n_a = fa.read(&mut buf_a)?;
+        let n_b = fb.read(&mut buf_b)?;
+        if n_a != n_b || buf_a[..n_a] != buf_b[..n_b] {
+            return Ok(false);
+        }
+        if n_a == 0 {
+            return Ok(true);
+        }
+    }
+}
+
 /// Delete leftover `*.part` files in a task-owned staging directory (bounded
 /// to that single directory). Never touches final staged pages.
 pub fn discard_part_files(staging_dir: &Path) -> std::io::Result<()> {

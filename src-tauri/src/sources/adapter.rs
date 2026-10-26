@@ -133,6 +133,12 @@ pub trait SourceAdapter: Send + Sync {
     async fn fetch_image(&self, _url: &str) -> Result<Vec<u8>, SourceError> {
         Err(SourceError::UnsupportedOperation)
     }
+    /// Fetches a manifest's single-file chapter (a scanned volume served as one
+    /// PDF). Separate from `fetch_image` because the byte cap is a whole
+    /// chapter, not one image. Default: unsupported.
+    async fn fetch_chapter_file(&self, _url: &str) -> Result<Vec<u8>, SourceError> {
+        Err(SourceError::UnsupportedOperation)
+    }
     /// Fetches a cover image for a `cover_key` this adapter previously
     /// published (adapters rebuild the real URL internally — the key never
     /// round-trips a full URL). Default: unsupported; the UI degrades to a

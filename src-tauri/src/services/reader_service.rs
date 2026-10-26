@@ -94,6 +94,13 @@ pub async fn open_chapter(
     chapter_id: &str,
 ) -> Result<ReaderManifestDto, AppError> {
     let record = load_downloaded_chapter(pool, chapter_id).await?;
+    if record.output_format == "pdf" {
+        // A scanned volume is ONE PDF file; this reader draws page images from
+        // a CBZ or an image folder. Say so instead of failing as a bad archive.
+        return Err(AppError::validation(
+            "Chương này là một file PDF (cả tập) — mở file trong thư mục truyện đã tải.",
+        ));
+    }
     let artifact = resolve_artifact(app_data_dir, &record.local_path)?;
 
     let mut pages: Vec<ReaderPageDto> = Vec::new();
@@ -203,6 +210,11 @@ pub async fn page_bytes(
     page_index: usize,
 ) -> Result<Vec<u8>, AppError> {
     let record = load_downloaded_chapter(pool, chapter_id).await?;
+    if record.output_format == "pdf" {
+        return Err(AppError::validation(
+            "Chương này là một file PDF — không có trang ảnh để đọc trong app.",
+        ));
+    }
     let artifact = resolve_artifact(app_data_dir, &record.local_path)?;
     let bytes = if record.output_format == "folder" {
         let pages = image_folder::list_pages(&artifact)?;

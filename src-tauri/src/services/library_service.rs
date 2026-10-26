@@ -371,6 +371,22 @@ fn prove_artifact(artifact: &Path, format: &str) -> Prove {
             }
             Err(_) => Prove::Corrupt,
         }
+    } else if format == "pdf" {
+        // A scanned volume is ONE file: present means it really is a PDF, not
+        // that some archive opened. Never treat it as a corrupt CBZ.
+        use std::io::Read;
+        let is_pdf = std::fs::File::open(artifact)
+            .and_then(|mut file| {
+                let mut magic = [0u8; 5];
+                file.read_exact(&mut magic)?;
+                Ok(magic == *b"%PDF-")
+            })
+            .unwrap_or(false);
+        if is_pdf {
+            Prove::Ok(artifact.metadata().ok().map(|m| m.len() as i64))
+        } else {
+            Prove::Corrupt
+        }
     } else {
         match cbz::open(artifact) {
             Ok(archive) => Prove::Ok(
