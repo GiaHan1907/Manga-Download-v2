@@ -3190,6 +3190,133 @@ mod tests {
         }
     }
 
+    /// The 2026-10-26 wave: ten chapters of one TTT story yield zero pages.
+    /// Print what the page actually holds so the next step follows the source.
+    #[tokio::test]
+    #[ignore = "live probe: why a TTT chapter yields zero pages"]
+    async fn live_builtin_ttt_zero_page_probe_for_story() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "madara-truyentuoitho-com".to_string(),
+            display_name: "Truyen Tuoi Tho".to_string(),
+            adapter: "madara".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("madara-truyentuoitho-com").expect("built-in");
+        let raw = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        for chapter in ["tap-1", "tap-2", "tap-3"] {
+            match adapter.page_manifest("gasshu-cau-be-bi-an", chapter).await {
+                Ok(manifest) => {
+                    println!(
+                        "GZ {chapter} pages={} first={:?}",
+                        manifest.pages.len(),
+                        manifest.pages.first().map(|page| page.url.clone())
+                    );
+                    continue;
+                }
+                Err(error) => println!("GZ {chapter} ERR {}", error.code()),
+            }
+            let url = format!("https://truyentuoitho.com/manga/gasshu-cau-be-bi-an/{chapter}/");
+            let html = match raw.http.get_text(&url).await {
+                Ok(html) => html,
+                Err(error) => {
+                    println!("GZ {chapter} fetch ERR {}", error.code());
+                    continue;
+                }
+            };
+            let document = Html::parse_document(&html);
+            println!(
+                "GZ {chapter} bytes={} title={:?}",
+                html.len(),
+                document
+                    .select(&Selector::parse("title").unwrap())
+                    .next()
+                    .map(|node| node.text().collect::<String>().trim().to_string())
+            );
+            for sel in [
+                ".reading-content",
+                ".reading-content img",
+                "img.wp-manga-chapter-img",
+                ".page-box",
+                ".page-break",
+                "script",
+                "iframe",
+            ] {
+                println!(
+                    "GZ {chapter} sel {sel} = {}",
+                    document.select(&Selector::parse(sel).unwrap()).count()
+                );
+            }
+            let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+            for node in document.select(&Selector::parse("img").unwrap()) {
+                let Some(attr_value) = ["src", "data-src", "data-lazy-src", "data-original"]
+                    .iter()
+                    .filter_map(|attr| node.value().attr(attr))
+                    .map(str::trim)
+                    .find(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                if let Ok(joined) = raw.base.join(attr_value) {
+                    *hosts
+                        .entry(joined.host_str().unwrap_or("-").to_string())
+                        .or_default() += 1;
+                }
+            }
+            println!("GZ {chapter} img hosts={hosts:?}");
+            println!("GZ {chapter} allowed={:?}", raw.allowed_image_hosts());
+            for node in document.select(&Selector::parse("iframe").unwrap()) {
+                println!(
+                    "GZ {chapter} iframe src={:?} tag={}",
+                    node.value().attr("src"),
+                    node.html().chars().take(300).collect::<String>()
+                );
+            }
+            let mut interesting: Vec<String> = Vec::new();
+            for node in document.select(&Selector::parse("script").unwrap()) {
+                let text = node.inner_html();
+                for marker in ["atob", "fromCharCode", "images", "chapter_images", "reader"] {
+                    if text.contains(marker) && text.len() > 120 {
+                        interesting.push(format!(
+                            "[{marker} len={}] {}",
+                            text.len(),
+                            text.chars()
+                                .filter(|c| !c.is_whitespace())
+                                .take(300)
+                                .collect::<String>()
+                        ));
+                        break;
+                    }
+                }
+            }
+            for entry in interesting.iter().take(4) {
+                println!("GZ {chapter} script {entry}");
+            }
+            match encrypted_reader_images(&document) {
+                Some(urls) => println!(
+                    "GZ {chapter} DECODED {} first={:?}",
+                    urls.len(),
+                    urls.first()
+                ),
+                None => println!("GZ {chapter} DECODED none"),
+            }
+            if let Some(node) = document
+                .select(&Selector::parse(".reading-content").unwrap())
+                .next()
+            {
+                let snippet: String = node.html().chars().take(1200).collect();
+                println!("GZ {chapter} container={snippet}");
+            }
+        }
+    }
+
     /// The 2026-10-23 failure: manifests parse (241-244 pages) but the first
     /// image request answers an upstream error, so every chapter of the wave
     /// fails with SOURCE_UPSTREAM and 0 pages. Print what the CDN actually

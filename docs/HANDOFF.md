@@ -281,6 +281,20 @@ Sửa: `fetch_image` chỉ khi gặp `NotFound` mới thử lại **đúng path 
 
 Bằng chứng live sau sửa: `chuong-141` 18/18 trang (p1 được cứu qua image2), `chuong-201` 20/20, `chuong-11` 20/20. Test: `shard_siblings_only_apply_to_the_sharded_cdn_families`, `nt_image_fetch_falls_back_to_a_sibling_shard_on_404`. 9 tác vụ H2 đã fail trước đó cần bấm "Thử lại tất cả lỗi" sau khi cài bản mới.
 
+### 2p. Cả một truyện TTT nhúng Google Drive — 2026-10-26
+
+10 chương của "Gasshu Cậu Bé Bí Ẩn" (`tap-1…10`) fail `SOURCE_PARSE_ERROR`, `total_pages = 0`, `attempts = 0`. Probe `live_builtin_ttt_zero_page_probe_for_story` cho thấy `.reading-content` **rỗng**, không có `<img>`, không có `.page-box`, không script mã hoá nào giải được (`DECODED none`) — nhưng có **1 iframe**:
+
+```
+<iframe src="https://drive.google.com/file/d/1GVXoxsUxQDNNcjqnAd7VSj78TePOcDLN/preview?usp=embed_googleplus" …>
+```
+
+Tức truyện này không còn phục vụ ảnh; trang nhúng trình xem Google Drive và Drive tự render trang phía client. **Không có URL ảnh nào để tải**, nên đây không phải lỗi parser: `SOURCE_PARSE_ERROR` là câu trả lời đúng ("không có gì đọc được"), và `attempts = 0` là đúng (lỗi nội dung, không tự retry).
+
+Vì sao không "hỗ trợ Drive": muốn lấy trang từ Drive preview phải allowlist `drive.google.com` + `lh3.googleusercontent.com` và lái phiên JS/cookie của Drive — khác hẳn hợp đồng hiện tại (mỗi nguồn chỉ đọc host của chính nó, mọi thứ qua transport không JS). Đây là tính năng khác, không phải một dòng sửa; và nó cũng rất dễ vỡ. Quyết định: **giữ fail loudly**, ghi lại đây để lần sau ai thấy lỗi này biết ngay phải mở trang xem có iframe Drive hay không.
+
+**Cách nhận biết nhanh khi user báo `SOURCE_PARSE_ERROR` cho cả một truyện TTT:** probe in `sel iframe = 1` và `.reading-content img = 0` → gần như chắc chắn là embed Drive; khác với ca chương lẻ (Mankichi 2026-10-05) nơi container rỗng nhưng có script mã hoá giải được.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.
