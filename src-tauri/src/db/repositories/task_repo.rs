@@ -38,13 +38,18 @@ pub async fn list_tasks(
                 "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
                         t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
                         t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
-                        c.number AS chapter_number, \
+                        c.manga_id AS manga_id, c.number AS chapter_number, \
                         t.created_at, t.updated_at \
                  FROM download_tasks t \
                  JOIN chapters c ON c.id = t.chapter_id \
                  JOIN mangas m ON m.id = c.manga_id \
                  WHERE t.status = ?1 \
-                 ORDER BY t.priority DESC, c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+                 ORDER BY t.priority DESC, \
+                          (SELECT MIN(t2.created_at) FROM download_tasks t2 \
+                           JOIN chapters c2 ON c2.id = t2.chapter_id \
+                           WHERE c2.manga_id = c.manga_id) ASC, \
+                          c.manga_id ASC, \
+                          c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
                  LIMIT ?2 OFFSET ?3",
             )
             .bind(value)
@@ -58,12 +63,17 @@ pub async fn list_tasks(
                 "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
                         t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
                         t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
-                        c.number AS chapter_number, \
+                        c.manga_id AS manga_id, c.number AS chapter_number, \
                         t.created_at, t.updated_at \
                  FROM download_tasks t \
                  JOIN chapters c ON c.id = t.chapter_id \
                  JOIN mangas m ON m.id = c.manga_id \
-                 ORDER BY t.priority DESC, c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+                 ORDER BY t.priority DESC, \
+                          (SELECT MIN(t2.created_at) FROM download_tasks t2 \
+                           JOIN chapters c2 ON c2.id = t2.chapter_id \
+                           WHERE c2.manga_id = c.manga_id) ASC, \
+                          c.manga_id ASC, \
+                          c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
                  LIMIT ?1 OFFSET ?2",
             )
             .bind(limit)
@@ -94,6 +104,7 @@ pub fn to_dto(row: TaskRow) -> DownloadTaskDto {
         output_relpath: row.output_relpath,
         chapter_title: row.chapter_title,
         manga_title: row.manga_title,
+        manga_id: row.manga_id,
         chapter_number: row.chapter_number,
         created_at: row.created_at,
         updated_at: row.updated_at,

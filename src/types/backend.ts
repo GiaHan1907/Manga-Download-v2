@@ -89,6 +89,10 @@ export type DownloadTaskDto = {
   outputRelpath: string | null;
   chapterTitle: string | null;
   mangaTitle: string | null;
+  /// Owning manga id: the queue lists a manga's chapters together, so the
+  /// renderer groups by it. Optional because fixtures and the demo service
+  /// predate it.
+  mangaId?: string | null;
   /// Chapter number, joined server-side so the queue can be read in chapter
   /// order. Optional because test fixtures and the demo service predate it.
   chapterNumber?: number | null;

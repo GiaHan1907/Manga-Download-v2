@@ -316,6 +316,29 @@ Quyết định (user chọn): **để chương lỗi và chờ nguồn**, khôn
 
 **Cách phân biệt hai ca `SOURCE_NOT_FOUND` trên nettruyen:** so các trang trong cùng chương — nếu chỉ MỘT index 404 và các trang kề bên 200 thì là lỗ hổng dữ liệu (ca này); nếu 404 bắt đầu từ một index rồi mọi trang sau đều thiếu thì kiểm shard (§2o).
 
+### 2s. Hàng đợi tải gom theo truyện — 2026-10-26
+
+User báo danh sách tải "vẫn sắp xếp lung tung" dù đã xếp theo số chương (§ mục trước): khi xếp hàng nhiều truyện cùng lúc, chương của truyện A và B vẫn xen kẽ, nên đọc danh sách không thành mạch. Yêu cầu: **mỗi truyện là một nhóm**, truyện nào vào hàng trước nằm trên, chương trong truyện tăng dần, và thứ tự này phải là thứ tự chạy thật.
+
+Khóa nhóm là **`MIN(created_at)` của chính truyện đó** (chương nào của truyện vào hàng sớm nhất), không phải `created_at` của từng dòng — nhờ vậy cả cụm giữ nguyên vị trí bất kể chương mới thêm lúc nào. SQL dùng chung một biểu thức ở cả ba chỗ:
+
+```
+ORDER BY t.priority DESC,
+         (SELECT MIN(t2.created_at) FROM download_tasks t2
+          JOIN chapters c2 ON c2.id = t2.chapter_id
+          WHERE c2.manga_id = c.manga_id) ASC,
+         c.manga_id ASC, c.number IS NULL ASC, c.number ASC,
+         t.created_at ASC, t.id ASC
+```
+
+1. `claim_next` (thứ tự engine lấy việc) và `retryable_failed_ids` (thứ tự "Thử lại tất cả lỗi" vào lại hàng) — trong `download_repo.rs`.
+2. `list_tasks` (thứ tự hiển thị, cả nhánh lọc trạng thái lẫn nhánh tất cả) — trong `task_repo.rs`.
+3. `DownloadTaskDto` có thêm `manga_id` (join server-side, chỉ để renderer gom nhóm). Frontend `byQueueOrder` giờ là comparator theo `(priority, createdAt sớm nhất của truyện, mangaId, số chương, createdAt)` — **không** dùng thứ tự mảng server trả về, để event realtime chèn một dòng lạ không làm nhảy nhóm.
+
+Ngoại lệ có chủ đích: `priority` vẫn đứng trên cùng, nên một chương được nâng ưu tiên sẽ tách khỏi nhóm truyện của nó — đúng ý "ưu tiên tải trước", và khớp với `claim_next`.
+
+Bằng chứng: test `a_story_runs_as_one_group_in_the_order_it_first_entered` (hai truyện, chương xếp xen kẽ, `created_at` cố ý chồng chéo) — `list_tasks` và 4 lần `claim_next` trả **cùng một thứ tự** `A1, A2, B1, B2`; test UI `gom chương theo truyện…` trong `tests/downloadsQueueOrder.test.tsx`.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

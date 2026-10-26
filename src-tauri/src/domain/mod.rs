@@ -136,6 +136,9 @@ pub struct DownloadTaskDto {
     /// Display-only names joined server-side (identity stays in the ids).
     pub chapter_title: Option<String>,
     pub manga_title: Option<String>,
+    /// Owning manga id, joined server-side: the queue lists rows grouped by
+    /// this, so the renderer can keep a manga's chapters together.
+    pub manga_id: Option<String>,
     /// Chapter number, joined server-side: the Downloads list is ordered and
     /// read in chapter order, not the order the batch happened to be queued.
     pub chapter_number: Option<f64>,

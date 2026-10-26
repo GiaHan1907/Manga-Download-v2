@@ -113,6 +113,7 @@ mod tests {
             output_relpath: None,
             chapter_title: None,
             manga_title: None,
+            manga_id: None,
             chapter_number: None,
             created_at: "t".into(),
             updated_at: "t".into(),

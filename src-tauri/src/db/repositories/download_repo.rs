@@ -38,6 +38,9 @@ pub const MAX_PRIORITY: i64 = 10;
 pub struct TaskRow {
     pub id: String,
     pub chapter_id: String,
+    /// Owning manga: the queue is grouped by it, so the DTO carries it too.
+    #[sqlx(default)]
+    pub manga_id: Option<String>,
     pub status: String,
     pub target_format: String,
     pub priority: i64,
@@ -103,7 +106,7 @@ const TASK_SELECT: &str =
     "SELECT t.id, t.chapter_id, t.status, t.target_format, t.priority, t.completed_pages, \
      t.total_pages, t.attempts, t.next_retry_at, t.error_code, t.error_message, t.revision, \
      t.finished_at, t.output_relpath, c.title AS chapter_title, m.title AS manga_title, \
-     c.number AS chapter_number, \
+     c.manga_id AS manga_id, c.number AS chapter_number, \
      t.created_at, t.updated_at \
      FROM download_tasks t \
      JOIN chapters c ON c.id = t.chapter_id \
@@ -330,11 +333,13 @@ pub async fn set_priority(
 /// Dispatcher claim: the highest-priority, oldest eligible queued task whose
 /// retry window (if any) has elapsed, atomically moved to `resolving`.
 ///
+/// The queue runs in the order the user reads it: one story's chapters stay
+/// contiguous (grouped by that manga's earliest queued task), stories in the
+/// order they first entered the queue, chapters ascending inside a story.
 /// A bulk submission writes every row with the SAME `created_at`, so the
-/// timestamp cannot order it — falling through to the task id made the queue
-/// run in UUID order, i.e. chapters arrived random. The remaining tiebreak is
-/// therefore the chapter's own reading order, exactly the expression
-/// `manga_repo::list_chapters` uses so the queue matches the chapter list.
+/// timestamp alone cannot order it — falling through to the task id made the
+/// queue run in UUID order. The chapter tiebreak is the same expression
+/// `manga_repo::list_chapters` uses, so the queue matches the chapter list.
 pub async fn claim_next(pool: &SqlitePool) -> Result<Option<TaskRow>, AppError> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let ts = now_iso();
@@ -342,8 +347,12 @@ pub async fn claim_next(pool: &SqlitePool) -> Result<Option<TaskRow>, AppError> 
         "SELECT t.id FROM download_tasks t \
          JOIN chapters c ON c.id = t.chapter_id \
          WHERE t.status = 'queued' AND (t.next_retry_at IS NULL OR t.next_retry_at <= ?1) \
-         ORDER BY t.priority DESC, t.created_at ASC, \
-                  c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+         ORDER BY t.priority DESC, \
+                  (SELECT MIN(t2.created_at) FROM download_tasks t2 \
+                   JOIN chapters c2 ON c2.id = t2.chapter_id \
+                   WHERE c2.manga_id = c.manga_id) ASC, \
+                  c.manga_id ASC, \
+                  c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
          LIMIT 1",
     )
     .bind(&ts)
@@ -779,7 +788,11 @@ pub async fn retryable_failed_ids(
         "SELECT t.id FROM download_tasks t \
          JOIN chapters c ON c.id = t.chapter_id \
          WHERE t.status = 'failed' \
-         ORDER BY t.created_at ASC, c.number IS NULL ASC, c.number ASC, c.created_at ASC, t.id ASC \
+         ORDER BY (SELECT MIN(t2.created_at) FROM download_tasks t2 \
+                   JOIN chapters c2 ON c2.id = t2.chapter_id \
+                   WHERE c2.manga_id = c.manga_id) ASC, \
+                  c.manga_id ASC, \
+                  c.number IS NULL ASC, c.number ASC, t.created_at ASC, t.id ASC \
          LIMIT ?1",
     )
     .bind(limit as i64)
@@ -912,6 +925,75 @@ mod tests {
             vec!["Tập 1", "Tập 2", "Tập 3"],
             "the queue must run chapter by chapter, not by task id"
         );
+    }
+
+    /// The queue is grouped by manga: chapters of one story stay contiguous
+    /// instead of interleaving with whatever else was queued in between, and
+    /// the story that FIRST entered the queue runs first. The view must agree
+    /// with the claim order — what the user sees at the top is what runs next.
+    #[tokio::test]
+    async fn a_story_runs_as_one_group_in_the_order_it_first_entered() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        ensure_source(&pool, "src-a", "Source A").await.unwrap();
+        let (manga_a, _) = upsert_manga(&pool, "src-a", "m-a", "A", None, None, "ongoing")
+            .await
+            .unwrap();
+        let (manga_b, _) = upsert_manga(&pool, "src-a", "m-b", "B", None, None, "ongoing")
+            .await
+            .unwrap();
+        let (a1, _) = upsert_chapter(&pool, &manga_a, "a1", "A1", Some(1.0), None)
+            .await
+            .unwrap();
+        let (a2, _) = upsert_chapter(&pool, &manga_a, "a2", "A2", Some(2.0), None)
+            .await
+            .unwrap();
+        let (b1, _) = upsert_chapter(&pool, &manga_b, "b1", "B1", Some(1.0), None)
+            .await
+            .unwrap();
+        let (b2, _) = upsert_chapter(&pool, &manga_b, "b2", "B2", Some(2.0), None)
+            .await
+            .unwrap();
+        let outcome = queue_batch(&pool, &[a2.clone(), a1.clone(), b2.clone(), b1.clone()], "cbz", 0)
+            .await
+            .unwrap();
+        assert_eq!(outcome.created.len(), 4);
+        // B's chapters were queued between A's, but A was in the queue first.
+        for (chapter_id, created_at) in [
+            (&a1, "2026-10-26T00:00:01Z"),
+            (&a2, "2026-10-26T00:00:04Z"),
+            (&b1, "2026-10-26T00:00:02Z"),
+            (&b2, "2026-10-26T00:00:03Z"),
+        ] {
+            sqlx::query(
+                "UPDATE download_tasks SET created_at = ?1, updated_at = ?1 WHERE chapter_id = ?2",
+            )
+            .bind(created_at)
+            .bind(chapter_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let (items, _) =
+            crate::db::repositories::task_repo::list_tasks(&pool, Some("queued"), 20, 0)
+                .await
+                .unwrap();
+        let listed: Vec<String> = items
+            .iter()
+            .map(|task| task.chapter_title.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(listed, vec!["A1", "A2", "B1", "B2"], "view groups by story");
+        assert_eq!(items[0].manga_id.as_deref(), Some(manga_a.as_str()));
+
+        let mut claimed = Vec::new();
+        for _ in 0..4 {
+            let task = claim_next(&pool).await.unwrap().expect("a queued task");
+            claimed.push(task.chapter_title.clone().unwrap_or_default());
+            transition(&pool, &task.id, &["resolving"], "completed")
+                .await
+                .unwrap();
+        }
+        assert_eq!(claimed, listed, "claim order agrees with the view");
     }
 
     #[tokio::test]

@@ -40,20 +40,30 @@ const FILTERS: { id: FilterId; label: string; match: (s: DownloadTaskDto["status
   { id: "cancelled", label: "Đã hủy", match: (s) => s === "cancelled" },
 ];
 
-/// The order the queue actually runs in, mirrored from `list_tasks`: a raised
-/// priority first, then chapter number small→large, unnumbered chapters last,
-/// then submission time. Re-sorting here also keeps the view stable when an
-/// event arrives for a task that was not on the loaded page.
-function byQueueOrder(a: DownloadTaskDto, b: DownloadTaskDto): number {
-  if (a.priority !== b.priority) return b.priority - a.priority;
-  const left = a.chapterNumber ?? null;
-  const right = b.chapterNumber ?? null;
-  if (left === null || right === null) {
-    if (left !== right) return left === null ? 1 : -1;
-  } else if (left !== right) {
-    return left - right;
-  }
-  return a.createdAt.localeCompare(b.createdAt);
+/// The order the queue actually runs in, mirrored from `list_tasks`/`claim_next`:
+/// raised priority first, then whole manga groups in the order each manga first
+/// entered the queue, then chapter number small→large, unnumbered last, then
+/// submission time. Grouping is the point — a manga's chapters must stay
+/// contiguous instead of interleaving with whatever else was queued.
+function byQueueOrder(firstQueued: Map<string, string>) {
+  return (a: DownloadTaskDto, b: DownloadTaskDto): number => {
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    // Rust groups by MIN(created_at) per manga; a task whose chapter has no
+    // manga falls back to the empty key, which sorts first like the NULL.
+    const groupA = a.mangaId ? firstQueued.get(a.mangaId) ?? "" : "";
+    const groupB = b.mangaId ? firstQueued.get(b.mangaId) ?? "" : "";
+    if (groupA !== groupB) return groupA.localeCompare(groupB);
+    const mangaOrder = (a.mangaId ?? "").localeCompare(b.mangaId ?? "");
+    if (mangaOrder !== 0) return mangaOrder;
+    const left = a.chapterNumber ?? null;
+    const right = b.chapterNumber ?? null;
+    if (left !== right) {
+      if (left === null) return 1;
+      if (right === null) return -1;
+      return left - right;
+    }
+    return a.createdAt.localeCompare(b.createdAt);
+  };
 }
 
 const statusLabel = DOWNLOAD_STATUS_LABEL;
@@ -137,7 +147,13 @@ export default function DownloadsPage() {
 
   const visible = useMemo(() => {
     const matcher = FILTERS.find((item) => item.id === filter) ?? FILTERS[0];
-    return tasks.filter((task) => matcher.match(task.status)).sort(byQueueOrder);
+    const firstQueued = new Map<string, string>();
+    for (const task of tasks) {
+      if (!task.mangaId) continue;
+      const seen = firstQueued.get(task.mangaId);
+      if (seen === undefined || task.createdAt < seen) firstQueued.set(task.mangaId, task.createdAt);
+    }
+    return tasks.filter((task) => matcher.match(task.status)).sort(byQueueOrder(firstQueued));
   }, [tasks, filter]);
 
   const counts = useMemo(
