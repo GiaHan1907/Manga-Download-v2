@@ -3,10 +3,13 @@ name: Publish Windows build
 # The only workflow that publishes. It runs after ci.yml has passed on
 # master and reuses the installer CI already built — no second compile, and
 # no publication path for pull requests (ci.yml stays read-only, and a
-# workflow_run carries no secrets from the trigger). Each push becomes one
-# GitHub Release tagged build-<short-sha> with the NSIS installer attached;
-# the newest release is marked "Latest" so /releases/latest always points at
-# the build from the most recent push.
+# workflow_run carries no secrets from the trigger).
+#
+# One Release per VERSION, not per push: the tag is v<version> read from
+# src-tauri/tauri.conf.json at the built commit, and the same-named asset is
+# replaced on every push of that version. Bumping the version in tauri.conf.json
+# starts a new Release. Only a newly created Release is marked "Latest", so a
+# late fix to an older version never demotes a newer one.
 
 on:
   workflow_run:
@@ -48,21 +51,31 @@ jobs:
         run: |
           set -euo pipefail
           short="${SHA:0:7}"
-          tag="build-${short}"
+          version="$(gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/${GITHUB_REPOSITORY}/contents/src-tauri/tauri.conf.json?ref=${SHA}" \
+            | jq -r '.version')"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Không đọc được version từ tauri.conf.json tại ${SHA}." >&2
+            exit 1
+          fi
+          tag="v${version}"
           setup="$(find staging -type f -name '*.exe' | head -n 1)"
           if [ -z "$setup" ]; then
             echo "Không tìm thấy file .exe trong artifact của CI." >&2
             exit 1
           fi
 
-          asset="Manga-Downloader-1989-Setup-${short}.exe"
+          # Stable name per version: a later push of the same version replaces
+          # this asset instead of piling up files in the Release.
+          asset="Manga-Downloader-1989-Setup-v${version}.exe"
           cp "$setup" "$asset"
           size="$(stat -c %s "$asset")"
           sha256="$(sha256sum "$asset" | cut -d' ' -f1)"
 
           cat > notes.md <<EOF
-          Bản build tự động từ commit \`${short}\`, mỗi lần push lên \`master\`.
+          Bản build mới nhất của phiên bản ${version}, tự động từ mỗi push lên \`master\`.
 
+          - Phiên bản: \`${version}\`
           - Commit: \`${SHA}\`
           - CI: ${RUN_URL}
           - Tệp: \`${asset}\` (${size} byte)
@@ -74,13 +87,15 @@ jobs:
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$tag" --title "Build ${short}" --notes-file notes.md \
-              --latest --repo "$GITHUB_REPOSITORY"
+            # No --latest here: updating an older version must not demote a
+            # newer Release that is already the latest.
+            gh release edit "$tag" --title "Manga Downloader 1989 v${version}" \
+              --notes-file notes.md --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" "$asset" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$SHA" \
-              --title "Build ${short}" \
+              --title "Manga Downloader 1989 v${version}" \
               --notes-file notes.md \
               --latest
           fi
