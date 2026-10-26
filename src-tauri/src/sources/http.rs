@@ -691,9 +691,17 @@ mod tests {
                 "{url} must not resolve-fail-open"
             );
         }
-        // A guaranteed-NXDOMAIN host must error, never fall through silently.
-        let parsed = Url::parse("https://nonexistent-host-for-p09.invalid/").unwrap();
-        assert!(policy.assert_resolved_addresses_public(&parsed).is_err());
+        // A guaranteed-NXDOMAIN host must error, never fall through silently — but
+        // the assertion only says anything while DNS really answers "no such
+        // host". On 2026-10-26 this machine once resolved the reserved TLD
+        // (cause never established; the same name returned NXDOMAIN minutes
+        // later, and a std probe agrees today), and the guard was right to
+        // accept the public address it was handed.
+        const NXDOMAIN_HOST: &str = "nonexistent-host-for-p09.invalid";
+        if !resolves_public(NXDOMAIN_HOST) {
+            let parsed = Url::parse(&format!("https://{NXDOMAIN_HOST}/")).unwrap();
+            assert!(policy.assert_resolved_addresses_public(&parsed).is_err());
+        }
     }
 
     #[tokio::test]
