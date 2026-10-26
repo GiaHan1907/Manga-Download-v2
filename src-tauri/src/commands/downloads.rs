@@ -386,11 +386,21 @@ pub async fn reveal_download(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), AppError> {
     let target = resolve_reveal_path(&state.db, &state.app_data_dir, task_id.as_deref()).await?;
+    // No task: open the library folder itself; with a task: select the artifact.
+    spawn_shell_open(&target, task_id.is_some())
+}
+
+/// Shell-execute one path through Explorer: `/select` highlights a file in its
+/// folder, otherwise the path itself opens (folder → Explorer, file → its
+/// default handler). Every path is derived in Rust from the DB + app root and
+/// re-validated against the library root before it reaches here — the renderer
+/// never supplies a path.
+pub(crate) fn spawn_shell_open(target: &std::path::Path, select: bool) -> Result<(), AppError> {
     let mut command = std::process::Command::new("explorer.exe");
-    if task_id.is_some() {
+    if select {
         command.arg(format!("/select,{}", target.display()));
     } else {
-        command.arg(&target);
+        command.arg(target);
     }
     command
         .spawn()

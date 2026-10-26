@@ -9,6 +9,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
+import { pushToast } from "../../components/ui/toastStore";
+import { normalizeIpcError, openChapterFile } from "../../shared/api/desktop";
 import type { ReaderManifestDto } from "../../types/library";
 import { localServices } from "../../services/provider";
 import { settingsApi } from "../../services/settings.api";
@@ -90,6 +92,17 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
   // Last scroll-derived position (vertical mode) for progress persistence.
   const scrollInfo = useRef<{ page: number; fraction: number } | null>(null);
   const pendingResumeFraction = useRef<number | null>(null);
+
+  // Escape hatch from the "không mở được chương" screen: a PDF volume (the
+  // reader only draws page images) or a folder opens in the OS handler. Rust
+  // resolves and validates the path; failures surface as a toast.
+  async function openExternally() {
+    try {
+      await openChapterFile({ chapterId });
+    } catch (error) {
+      pushToast(normalizeIpcError(error).message);
+    }
+  }
 
   // Defaults from real Settings (Phase 04) once; user can override per session.
   useEffect(() => {
@@ -284,9 +297,20 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
             : "Không tìm thấy chương."
         }
         action={
-          <button type="button" className="btn btn--secondary" onClick={() => navigate(-1)}>
-            Quay lại
-          </button>
+          <>
+            {/* The one failure this screen can fix itself: a PDF volume (or any
+                folder the reader cannot draw) is readable in the OS handler. */}
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => void openExternally()}
+            >
+              Mở bằng ứng dụng ngoài
+            </button>
+            <button type="button" className="btn btn--secondary" onClick={() => navigate(-1)}>
+              Quay lại
+            </button>
+          </>
         }
       />
     );

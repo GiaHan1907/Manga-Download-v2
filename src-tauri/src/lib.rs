@@ -193,6 +193,7 @@ pub fn run() {
             commands::import::library_import_cbz_path,
             commands::reader::reader_open_chapter,
             commands::reader::reader_get_page_bytes,
+            commands::reader::open_chapter_file,
             commands::storage::storage_status,
             commands::storage::clear_regenerable_cache,
             commands::storage::get_download_root,

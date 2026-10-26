@@ -98,6 +98,51 @@ beforeEach(() => {
   });
 });
 
+/// A scanned volume is ONE PDF the in-app reader refuses to draw, so the row
+/// must offer the OS handler instead of a dead "Đọc" button.
+const PDF_VOLUME = {
+  id: "c1",
+  title: "Tập 1",
+  number: 1,
+  pageCount: 1,
+  storageFormat: "pdf",
+  sizeBytes: 5000,
+  artifactOk: true,
+  updatedAt: "2026-10-01T00:00:00.000Z",
+};
+
+describe("a PDF volume opens outside the app", () => {
+  it("offers 'Mở file' instead of the reader and sends only the chapter id", async () => {
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((cmd: string) =>
+      cmd === "library_get_downloaded_chapters"
+        ? Promise.resolve({ chapters: [PDF_VOLUME] })
+        : base(cmd),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/library/m1"]}>
+        <Routes>
+          <Route path="/library/:mangaId" element={<LocalMangaPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const open = await screen.findByRole("button", {
+      name: "Mở file PDF của Tập 1 bằng ứng dụng ngoài",
+    });
+    const row = open.closest("li") as HTMLElement;
+    expect(row.textContent).toContain("PDF");
+    // No reader link for this row: reading a PDF in-app is not possible.
+    expect(row.querySelector('a[href*="/read/"]')).toBeNull();
+
+    fireEvent.click(open);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_chapter_file", { chapterId: "c1" }),
+    );
+  });
+});
+
 describe("missing artifacts return to the download list", () => {
   it("a chapter with artifactOk=false is offered for re-download", async () => {
     render(

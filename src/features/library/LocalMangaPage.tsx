@@ -1,4 +1,4 @@
-import { Download, Eraser, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
+import { Download, Eraser, ExternalLink, FolderInput, FolderOpen, Play, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Button from "../../components/ui/Button";
@@ -12,6 +12,8 @@ import { pushToast } from "../../components/ui/toastStore";
 import {
   listReadHistory as desktopListReadHistory,
   clearReadHistory as desktopClearReadHistory,
+  normalizeIpcError,
+  openChapterFile,
 } from "../../shared/api/desktop";
 import type { LocalMangaDetailDto } from "../../types/backend";
 import type { SourceViewDto } from "../../types/source";
@@ -275,6 +277,17 @@ export default function LocalMangaPage() {
       );
     } finally {
       setFavoriteBusy(false);
+    }
+  }
+
+  // Chapters stored as one PDF volume have no in-app reader (the reader draws
+  // page images); hand the file to the OS default handler instead.
+  async function openExternally(chapterId: string) {
+    setActionError(null);
+    try {
+      await openChapterFile({ chapterId });
+    } catch (error) {
+      setActionError(normalizeIpcError(error).message);
     }
   }
 
@@ -555,10 +568,21 @@ export default function LocalMangaPage() {
                   </span>
                   {chapter.artifactOk ? (
                     <>
-                      <Button to={`/read/${chapter.id}`} variant="secondary">
-                        <Play size={14} aria-hidden="true" />
-                        Đọc
-                      </Button>
+                      {chapter.storageFormat === "pdf" ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => void openExternally(chapter.id)}
+                          aria-label={`Mở file PDF của ${chapter.title} bằng ứng dụng ngoài`}
+                        >
+                          <ExternalLink size={14} aria-hidden="true" />
+                          Mở file
+                        </Button>
+                      ) : (
+                        <Button to={`/read/${chapter.id}`} variant="secondary">
+                          <Play size={14} aria-hidden="true" />
+                          Đọc
+                        </Button>
+                      )}
                       {confirmDelete === chapter.id ? (
                         <span className="row-actions" role="group" aria-label="Xác nhận xóa">
                           <Button

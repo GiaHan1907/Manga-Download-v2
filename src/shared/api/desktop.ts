@@ -351,6 +351,13 @@ export async function revealDownload(args: { taskId?: string } = {}): Promise<vo
   await invoke<void>("reveal_download", args);
 }
 
+/// Open a downloaded chapter with the OS default handler — the way to read a
+/// PDF volume, which the in-app reader cannot draw. Rust resolves and
+/// validates the path; the renderer only ever sends the chapter id.
+export async function openChapterFile(args: { chapterId: string }): Promise<void> {
+  await invoke<void>("open_chapter_file", args);
+}
+
 /// Subscribe to coalesced task updates. Returns an unsubscribe function that
 /// MUST be called on teardown (design §8.2 listener cleanup).
 export async function subscribeDownloadTask(

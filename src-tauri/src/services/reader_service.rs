@@ -55,6 +55,30 @@ fn resolve_artifact(app_data_dir: &Path, relpath: &str) -> Result<PathBuf, AppEr
     storage::ensure_under_root(&library_root, &candidate)
 }
 
+/// Absolute path of a downloaded chapter's artifact, for handing to the OS
+/// default handler. Joined component-by-component (the stored relpath uses
+/// '/'; a mixed `\dir/sub.cbz` string is accepted by file APIs but opens
+/// nothing through Explorer). Split from the command so the resolution —
+/// including the missing-file and traversal guards — is testable without
+/// spawning a process.
+pub async fn openable_artifact(
+    pool: &SqlitePool,
+    app_data_dir: &Path,
+    chapter_id: &str,
+) -> Result<PathBuf, AppError> {
+    let record = load_downloaded_chapter(pool, chapter_id).await?;
+    let root = storage::library_root(app_data_dir);
+    let mut absolute = root.clone();
+    for part in Path::new(&record.local_path).components() {
+        absolute.push(part.as_os_str());
+    }
+    let absolute = storage::ensure_under_root(&root, &absolute)?;
+    if !absolute.exists() {
+        return Err(LibraryError::FileMissing.into());
+    }
+    Ok(absolute)
+}
+
 /// Ordered DOWNLOADED chapters of one manga (same comparator as list_chapters).
 async fn local_chapter_neighbours(
     pool: &SqlitePool,
@@ -382,5 +406,46 @@ mod tests {
         assert_eq!(manifest.start_scroll_offset, Some(0.5));
         let other = env.open(&chapters[0]).await.unwrap();
         assert_eq!(other.start_page, 0, "progress belongs to c3, not c1");
+    }
+
+    #[tokio::test]
+    async fn openable_artifact_resolves_under_the_root_and_refuses_bad_input() {
+        let (env, _manga, chapters) = env_with_cbz().await;
+
+        let path = openable_artifact(&env.pool, env.data.path(), &chapters[0])
+            .await
+            .unwrap();
+        assert!(path.ends_with("c1.cbz"));
+        assert!(
+            path.exists(),
+            "handing a missing path to Explorer is useless"
+        );
+        if cfg!(windows) {
+            assert!(
+                !path.to_string_lossy().contains('/'),
+                "explorer opens nothing for a mixed-separator path: {path:?}"
+            );
+        }
+
+        // Recorded but gone from disk → honest "re-download" error.
+        testkit::mark_downloaded(&env.pool, &chapters[2], "m1/vanished.cbz", "cbz").await;
+        assert!(matches!(
+            openable_artifact(&env.pool, env.data.path(), &chapters[2]).await,
+            Err(AppError::Library(LibraryError::FileMissing))
+        ));
+
+        // Never a chapter without an artifact, an unknown id, or a traversal.
+        let (unknown_manga, extra) = testkit::seed_manga(&env.pool, "m2", 1).await;
+        let _ = unknown_manga;
+        assert!(openable_artifact(&env.pool, env.data.path(), &extra[0])
+            .await
+            .is_err());
+        assert!(openable_artifact(&env.pool, env.data.path(), "ghost")
+            .await
+            .is_err());
+        testkit::mark_downloaded(&env.pool, &chapters[1], "../escape.cbz", "cbz").await;
+        assert!(openable_artifact(&env.pool, env.data.path(), &chapters[1])
+            .await
+            .is_err());
     }
 }
