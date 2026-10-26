@@ -3159,6 +3159,61 @@ mod tests {
         }
     }
 
+    /// Which page of a given nettruyen chapter still 404s, and on which shards
+    /// the same path exists (`vua-phap-thuat/chapter-296` failed at 13/19 with
+    /// the sibling fallback already shipped).
+    #[tokio::test]
+    #[ignore = "live probe: locate a page that 404s on every known shard"]
+    async fn live_builtin_nt_page_404_probe() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "nettruyen".to_string(),
+            display_name: "NetTruyen".to_string(),
+            adapter: "nettruyen".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("nettruyen").expect("built-in");
+        let manifest = adapter
+            .page_manifest("vua-phap-thuat", "chapter-296")
+            .await
+            .expect("manifest");
+        println!("NF pages={}", manifest.pages.len());
+        for page in &manifest.pages {
+            if let Err(error) = adapter.fetch_image(&page.url).await {
+                println!(
+                    "NF p{}/{} ERR {} url={}",
+                    page.index,
+                    manifest.pages.len(),
+                    error.code(),
+                    page.url
+                );
+                let parsed = Url::parse(&page.url).ok();
+                if let Some(parsed) = parsed {
+                    let host = parsed.host_str().unwrap_or("-").to_string();
+                    println!("NF   host={host} siblings={:?}", shard_siblings(&page.url));
+                    for n in 1..=9u8 {
+                        let candidate = format!("https://image{n}.{}", NETTRUYEN_IMAGE_DOMAIN);
+                        let mut probe = parsed.clone();
+                        if probe.set_host(Some(&candidate)).is_err() {
+                            continue;
+                        }
+                        let outcome = adapter.fetch_image(probe.as_str()).await;
+                        println!(
+                            "NF   {candidate} -> {}",
+                            match outcome {
+                                Ok(bytes) => format!("ok {}B", bytes.len()),
+                                Err(error) => error.code().to_string(),
+                            }
+                        );
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     /// Re-check the nine H2 chapters that failed SOURCE_NOT_FOUND, page by
     /// page, through the app's own adapter + policy.
     #[tokio::test]
@@ -4145,10 +4200,8 @@ mod tests {
     /// it is ONE scanned volume, and the id must come from the embed's own src.
     #[tokio::test]
     async fn a_drive_embed_becomes_a_single_file_chapter() {
-        let (provider, _) = adapter(vec![Ok(
-            r#"<div class="reading-content"></div>
-               <iframe allowfullscreen src="https://drive.google.com/file/d/1GVXoxsUxQDNNcjqnAd7VSj78TePOcDLN/preview?usp=embed_googleplus"></iframe>"#,
-        )]);
+        let (provider, _) = adapter(vec![Ok(r#"<div class="reading-content"></div>
+               <iframe allowfullscreen src="https://drive.google.com/file/d/1GVXoxsUxQDNNcjqnAd7VSj78TePOcDLN/preview?usp=embed_googleplus"></iframe>"#)]);
         let manifest = provider.page_manifest("m", "tap-1").await.unwrap();
         assert_eq!(manifest.single_file_format.as_deref(), Some("pdf"));
         assert_eq!(manifest.pages.len(), 1);
@@ -4162,10 +4215,8 @@ mod tests {
     /// must still fail loudly rather than invent a file URL.
     #[tokio::test]
     async fn a_foreign_embed_still_fails_as_parse() {
-        let (provider, _) = adapter(vec![Ok(
-            r#"<div class="reading-content"></div>
-               <iframe src="https://player.example/v/123"></iframe>"#,
-        )]);
+        let (provider, _) = adapter(vec![Ok(r#"<div class="reading-content"></div>
+               <iframe src="https://player.example/v/123"></iframe>"#)]);
         assert!(matches!(
             provider.page_manifest("m", "tap-1").await,
             Err(SourceError::Parse)

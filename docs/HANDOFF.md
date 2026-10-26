@@ -308,6 +308,14 @@ Bằng chứng: test engine (lưu đúng byte, reader từ chối, sai magic →
 
 **Giới hạn đã biết:** không có trình đọc PDF trong app (mở bằng ứng dụng ngoài — mở thư mục truyện để lấy file); chỉ nhận embed Drive, embed khác vẫn `PARSE_ERROR`; `total_pages = 1` (một file là một "trang" tiến độ); file > 400 MB bị từ chối.
 
+### 2r. Một trang mất hẳn trên CDN — "Vua Pháp Thuật" ch.296 — 2026-10-26
+
+User báo `SOURCE_NOT_FOUND` cho "Vua Pháp Thuật" (nettruyen), chương 296: `total_pages = 19`, `completed_pages = 13`, `attempts = 0`. Đây là ca KHÁC với §2o (shard sai): probe `live_builtin_nt_page_404_probe` tải từng trang và chỉ ra **trang 8** (`/nettruyen/vua-phap-thuat/296/8.jpg`) 404, trong khi **trang 7, 9, 10 cùng chương vẫn 200**. Fallback shard đã chạy đúng (image1–6) và **cả 4 shard trả lời đều 404**; thử thêm `8.webp`, `08.jpg`, `008.jpg`, `8.jpeg` → 404 hết. Tức file không tồn tại ở nguồn, không phải app dựng sai URL hay chọn sai shard.
+
+Quyết định (user chọn): **để chương lỗi và chờ nguồn**, không thêm trạng thái "chương thiếu trang" — một CBZ thiếu trang sẽ trông như đủ nếu ai đó copy ra ngoài app, và các lỗ hổng kiểu này thường được nguồn upload lại. `NotFound` vẫn không auto-retry (đúng: lỗi nội dung); user bấm "Thử lại tất cả lỗi" sau.
+
+**Cách phân biệt hai ca `SOURCE_NOT_FOUND` trên nettruyen:** so các trang trong cùng chương — nếu chỉ MỘT index 404 và các trang kề bên 200 thì là lỗ hổng dữ liệu (ca này); nếu 404 bắt đầu từ một index rồi mọi trang sau đều thiếu thì kiểm shard (§2o).
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.
