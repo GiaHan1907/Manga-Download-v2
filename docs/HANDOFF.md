@@ -370,7 +370,9 @@ Probe live: các trang tải về đúng là PNG thật (`89 50 4E 47 0D 0A 1A 0
 
 Sửa: hằng số đúng + sửa toàn bộ fixture; thêm test hồi quy dùng **một PNG 1×1 thật** (base64 do trình duyệt tạo) và assert rằng chuỗi byte cũ **không** phải PNG. Sau khi sửa, probe trả `Some(Png)` cho các trang mẫu và chương tải được.
 
-Kèm theo: một trang có thể trả về nội dung **không phải ảnh** một lần (CDN trả challenge/half-written edge copy; đúng URL đó vài giây sau trả PNG hợp lệ). Trước đây một trang như vậy làm **cả chương** fail với lỗi không retry được. Nay `fetch_page` thử lại **một lần** khi bytes bị từ chối (`AppError::ImageRejected`), rồi mới báo lỗi; mã wire vẫn là `VALIDATION_ERROR`.
+Kèm theo: một trang có thể bị tầng transport từ chối vì **body vượt cap** (`SourceError::Parse` khi CDN trả bản lớn hơn bình thường) — nay cũng được thử lại một lần trước khi bỏ chương, và mỗi lần fetch trang lỗi được ghi vào log kèm **chỉ số trang + mã lỗi** (trước đây DB chỉ có mã của cả chương).
+
+Một trang có thể trả về nội dung **không phải ảnh** một lần (CDN trả challenge/half-written edge copy; đúng URL đó vài giây sau trả PNG hợp lệ). Trước đây một trang như vậy làm **cả chương** fail với lỗi không retry được. Nay `fetch_page` thử lại **một lần** khi bytes bị từ chối (`AppError::ImageRejected`), rồi mới báo lỗi; mã wire vẫn là `VALIDATION_ERROR`.
 
 **Cách nhận biết lần sau:** `UNSUPPORTED_TYPE` cho cả một chương mà nguồn nổi tiếng dùng PNG → kiểm tra ngay hằng số chữ ký bằng một file PNG thật, đừng tin fixture tự dựng.
 

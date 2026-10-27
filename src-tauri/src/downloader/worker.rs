@@ -526,7 +526,18 @@ async fn fetch_and_store_page(
         }
         transfer::store_single_file(&job.staging, format, &bytes)?
     } else {
-        transfer::fetch_page(&job.staging, index, || job.adapter.fetch_image(&url)).await?
+        transfer::fetch_page(&job.staging, index, || async {
+            match job.adapter.fetch_image(&url).await {
+                Ok(bytes) => Ok(bytes),
+                Err(error) => {
+                    // The log file is the only place that knows WHICH page of
+                    // a long chapter gave up, and with which code.
+                    crate::app_log!("page {index} fetch failed: {}", error.code());
+                    Err(error)
+                }
+            }
+        })
+        .await?
     };
     // Bandwidth cap: pace the payload we just pulled before the next page
     // leaves, so a cap in Settings is a cap on the wire, not per chapter.

@@ -46,7 +46,20 @@ where
     let mut attempt = 0usize;
     loop {
         attempt += 1;
-        let bytes = fetch().await.map_err(AppError::Source)?;
+        let bytes = match fetch().await {
+            Ok(bytes) => bytes,
+            // `Parse` from the image transport means the body was refused at
+            // the byte layer (size cap) — the CDN sometimes answers with a
+            // larger representation than usual. One refetch is enough.
+            Err(error)
+                if attempt < PAGE_FETCH_ATTEMPTS
+                    && matches!(error, crate::sources::adapter::SourceError::Parse) =>
+            {
+                tokio::time::sleep(PAGE_REFETCH_DELAY).await;
+                continue;
+            }
+            Err(error) => return Err(AppError::Source(error)),
+        };
         match image_validate::validate(&bytes, crate::sources::http::IMAGE_MAX_BYTES as usize) {
             Ok(kind) => {
                 let name = staged_name(page_index, kind.extension());
@@ -267,6 +280,33 @@ mod tests {
             PAGE_FETCH_ATTEMPTS
         );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_size_refused_body_is_refetched_once() {
+        use crate::sources::adapter::SourceError;
+        let dir = tempfile::tempdir().unwrap();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend(std::iter::repeat_n(0x33u8, 48));
+
+        let seen = calls.clone();
+        let page = fetch_page(dir.path(), 3, move || {
+            let seen = seen.clone();
+            let png = png.clone();
+            async move {
+                if seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Err(SourceError::Parse)
+                } else {
+                    Ok(png)
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(page.name, staged_name(3, "png"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[test]

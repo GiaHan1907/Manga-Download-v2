@@ -3077,6 +3077,54 @@ mod tests {
             .await
             .expect("manifest");
         println!("DIAG pages = {}", manifest.pages.len());
+        // Repeat the manifest resolution: the app failed after one stored page,
+        // which points at an intermittent answer rather than the markup itself.
+        // Which page actually fails? Sweep the whole chapter the way the worker
+        // does (sequential fetches) and report every failure with its index.
+        let mut failures = 0usize;
+        for (index, page) in manifest.pages.iter().enumerate() {
+            match adapter.fetch_image(&page.url).await {
+                Ok(bytes) => {
+                    let kind = crate::downloader::image_validate::detect(&bytes);
+                    if kind.is_none() {
+                        println!("DIAG sweep {index} NOT-AN-IMAGE bytes={}", bytes.len());
+                        failures += 1;
+                    }
+                }
+                Err(error) => {
+                    println!("DIAG sweep {index} err={}", error.code());
+                    failures += 1;
+                }
+            }
+            if failures >= 5 {
+                break;
+            }
+        }
+        println!("DIAG sweep done failures={failures}");
+        for round in 0..6 {
+            let outcome = adapter.page_manifest(slug, "tap-85").await;
+            match outcome {
+                Ok(manifest) => println!("DIAG round {round} ok pages={}", manifest.pages.len()),
+                Err(error) => {
+                    println!("DIAG round {round} err={}", error.code());
+                    let url = adapter.chapter_url(slug, "tap-85");
+                    if let Ok(html) = adapter.http.get_text(&url).await {
+                        let document = Html::parse_document(&html);
+                        println!(
+                            "DIAG round {round} html bytes={} imgs={} page-box={} reading={}",
+                            html.len(),
+                            document.select(&Selector::parse("img").unwrap()).count(),
+                            document
+                                .select(&Selector::parse(".page-box").unwrap())
+                                .count(),
+                            document
+                                .select(&Selector::parse(".reading-content").unwrap())
+                                .count()
+                        );
+                    }
+                }
+            }
+        }
         let mut indices: Vec<usize> = (0..8).map(|step| step * manifest.pages.len() / 8).collect();
         indices.dedup();
         for index in indices {
