@@ -54,61 +54,80 @@ pub fn run() {
                 sources::registry::SourceRegistry::from_rows(&rows),
             ));
 
-            // Phase 06: normalize any interrupted lifecycle, then start the
-            // bounded dispatcher over the shared registry/pool.
             let events = Arc::new(downloader::progress::ProgressEmitter::new(Arc::new(
                 commands::downloads::TauriEventSink::new(app.handle().clone(), Arc::clone(&flags)),
             )));
-            match tauri::async_runtime::block_on(downloader::recovery::reconcile_startup(
-                &pool,
-                &app_data_dir,
-            )) {
-                Ok(report) => {
-                    if report.normalized_tasks > 0 || report.cleared_missing_outputs > 0 {
-                        eprintln!(
-                            "download recovery: {:?} tasks requeued, {} stale offline flags cleared",
-                            report.normalized_tasks, report.cleared_missing_outputs
-                        );
-                    }
-                }
-                Err(error) => eprintln!("download recovery skipped: {}", error.wire_pair().0),
-            }
-            // Chapters saved before the parser knew that some sites put the
-            // number FIRST in the slug have none at all, which is why their
-            // Library list looked shuffled. Idempotent: NULL rows only.
-            match tauri::async_runtime::block_on(services::library_service::backfill_chapter_numbers(
-                &pool,
-            )) {
-                Ok(filled) if filled > 0 => {
-                    eprintln!("chapter numbers: {filled} rows healed from their slug")
-                }
-                Err(error) => {
-                    eprintln!("chapter number backfill skipped: {}", error.wire_pair().0)
-                }
-                _ => {}
-            }
-            // Phase 08: drop staging dirs left by terminal/unknown tasks.
-            match tauri::async_runtime::block_on(services::storage_service::clear_regenerable_cache(
-                &pool,
-                &app_data_dir,
-            )) {
-                Ok(cleanup) => {
-                    if cleanup.removed_dirs > 0 {
-                        eprintln!(
-                            "startup cache cleanup: {} dirs, {} bytes freed",
-                            cleanup.removed_dirs, cleanup.freed_bytes
-                        );
-                    }
-                }
-                Err(error) => eprintln!("startup cache cleanup skipped: {}", error.wire_pair().0),
-            }
             let downloads = downloader::scheduler::Coordinator::new(
                 pool.clone(),
                 Arc::clone(&registry),
                 app_data_dir.clone(),
                 Arc::clone(&events),
             );
-            downloads.start();
+
+            // Recovery, the chapter-number backfill and the cache sweep used to
+            // run inline here. They stat every completed artifact and walk the
+            // library, which on a mapped/virtual drive (the library may live on
+            // a cloud folder) kept the window hidden for tens of seconds. Run
+            // them off the startup path, then open the dispatcher: claiming a
+            // task before recovery has normalized the lifecycle is exactly what
+            // recovery exists to prevent.
+            {
+                let pool = pool.clone();
+                let app_data_dir = app_data_dir.clone();
+                let downloads = Arc::clone(&downloads);
+                tauri::async_runtime::spawn(async move {
+                    let started = std::time::Instant::now();
+                    match downloader::recovery::reconcile_startup(&pool, &app_data_dir).await {
+                        Ok(report) => {
+                            if report.normalized_tasks > 0 || report.cleared_missing_outputs > 0 {
+                                eprintln!(
+                                    "download recovery: {:?} tasks requeued, {} stale offline flags cleared",
+                                    report.normalized_tasks, report.cleared_missing_outputs
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("download recovery skipped: {}", error.wire_pair().0)
+                        }
+                    }
+                    // Chapters saved before the parser knew that some sites put
+                    // the number FIRST in the slug have none at all, which is
+                    // why their Library list looked shuffled. Idempotent.
+                    match services::library_service::backfill_chapter_numbers(&pool).await {
+                        Ok(filled) if filled > 0 => {
+                            eprintln!("chapter numbers: {filled} rows healed from their slug")
+                        }
+                        Err(error) => eprintln!(
+                            "chapter number backfill skipped: {}",
+                            error.wire_pair().0
+                        ),
+                        _ => {}
+                    }
+                    match services::storage_service::clear_regenerable_cache(
+                        &pool,
+                        &app_data_dir,
+                    )
+                    .await
+                    {
+                        Ok(cleanup) => {
+                            if cleanup.removed_dirs > 0 {
+                                eprintln!(
+                                    "startup cache cleanup: {} dirs, {} bytes freed",
+                                    cleanup.removed_dirs, cleanup.freed_bytes
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("startup cache cleanup skipped: {}", error.wire_pair().0)
+                        }
+                    }
+                    downloads.start();
+                    eprintln!(
+                        "startup: maintenance finished in {} ms",
+                        started.elapsed().as_millis()
+                    );
+                });
+            }
 
             // The tray is an enhancement — a platform refusal must never
             // brick startup (same policy as recovery/cleanup logging).
