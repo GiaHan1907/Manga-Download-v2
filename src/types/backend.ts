@@ -168,3 +168,12 @@ export type ActivityItemDto = {
   at: string;
   code: string | null;
 };
+
+/// Counts returned by the library backup export/import.
+export type BackupSummaryDto = {
+  mangas: number;
+  favorites: number;
+  watched: number;
+  progress: number;
+  skipped: number;
+};

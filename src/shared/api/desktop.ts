@@ -4,6 +4,7 @@ import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
   ActivityItemDto,
   AppSettingsDto,
+  BackupSummaryDto,
   CacheCleanupDto,
   DownloadRootDto,
   DownloadTaskDto,
@@ -599,4 +600,14 @@ function isAppErrorCode(value: unknown): value is AppError["code"] {
 /// Read-only merged feed of watcher alerts + download outcomes, newest first.
 export async function listRecentActivity(args: { limit?: number } = {}): Promise<ActivityItemDto[]> {
   return invoke<ActivityItemDto[]>("app_list_recent_activity", args);
+}
+
+/// Both commands open a native file dialog in Rust; `null` means the user
+/// cancelled, which is not an error. The renderer never supplies a path.
+export async function exportLibraryBackup(): Promise<BackupSummaryDto | null> {
+  return invoke<BackupSummaryDto | null>("app_export_library_backup");
+}
+
+export async function importLibraryBackup(): Promise<BackupSummaryDto | null> {
+  return invoke<BackupSummaryDto | null>("app_import_library_backup");
 }
