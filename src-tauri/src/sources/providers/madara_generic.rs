@@ -2875,6 +2875,54 @@ mod tests {
         assert!(matches!(error, SourceError::Parse));
     }
 
+    /// Live case 2026-10-27: whole "tập" chapters (Lộc Đỉnh Ký, Đệ Nhất Mì
+    /// Vương) embed their pages as Blogger-hosted images. The shipped TTT host
+    /// list must accept them, or every such chapter dies as SOURCE_PARSE_ERROR.
+    #[tokio::test]
+    async fn ttt_shipped_hosts_accept_blogger_volume_pages() {
+        const BLOGGER_PAGE_BOX: &str = r#"<html><body><div class="reading-content">
+          <div class="page-box"><img src="https://blogger.googleusercontent.com/img/b/x/s0/001.webp"/></div>
+          <div class="page-box"><img src="https://blogger.googleusercontent.com/img/b/y/s0/002.webp"/></div>
+        </div></body></html>"#;
+
+        let hosts = ttt_image_hosts();
+        assert!(
+            hosts
+                .iter()
+                .any(|host| host == "blogger.googleusercontent.com"),
+            "the shipped list must keep the host these volumes actually use"
+        );
+        let borrowed: Vec<&str> = hosts.iter().map(String::as_str).collect();
+        let provider = adapter_with_hosts(vec![Ok(BLOGGER_PAGE_BOX)], &borrowed);
+        let manifest = provider
+            .page_manifest("loc-dinh-ky-lam-chanh-duc", "tap-1")
+            .await
+            .unwrap();
+        assert_eq!(manifest.pages.len(), 2);
+        assert!(manifest
+            .pages
+            .iter()
+            .all(|page| page.url.contains("blogger.googleusercontent.com")));
+    }
+
+    /// The allowlist stays exact: another Google host is still a foreign host.
+    #[tokio::test]
+    async fn a_google_host_outside_the_list_still_fails_closed() {
+        const OTHER_GOOGLE: &str = r#"<html><body><div class="reading-content">
+          <div class="page-box"><img src="https://lh3.googleusercontent.com/volume/001.webp"/></div>
+        </div></body></html>"#;
+        let hosts = ttt_image_hosts();
+        let borrowed: Vec<&str> = hosts.iter().map(String::as_str).collect();
+        let provider = adapter_with_hosts(vec![Ok(OTHER_GOOGLE)], &borrowed);
+        assert!(matches!(
+            provider
+                .page_manifest("loc-dinh-ky-lam-chanh-duc", "tap-1")
+                .await
+                .unwrap_err(),
+            SourceError::Parse
+        ));
+    }
+
     #[test]
     fn normalize_image_host_accepts_bare_hosts_and_rejects_everything_else() {
         assert_eq!(
@@ -3008,6 +3056,154 @@ mod tests {
             {
                 let snippet: String = node.html().chars().take(1200).collect();
                 println!("DIAG reading-content = {snippet}");
+            }
+        }
+    }
+
+    /// Live diagnostic for a story whose "tap-N" chapters fail with
+    /// SOURCE_PARSE_ERROR (reported 2026-10-27). Prints what the page actually
+    /// carries: embeds, image hosts, containers.
+    #[tokio::test]
+    #[ignore = "live probe: TTT volume chapters that fail as SOURCE_PARSE_ERROR"]
+    async fn live_diag_ttt_volume_parse() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        let slug = "loc-dinh-ky-lam-chanh-duc";
+        for chapter in ["tap-1", "tap-2"] {
+            println!(
+                "DIAG manifest {chapter} = {:?}",
+                adapter
+                    .page_manifest(slug, chapter)
+                    .await
+                    .map(|manifest| (manifest.pages.len(), manifest.single_file_format))
+                    .map_err(|error| error.code())
+            );
+        }
+        let url = adapter.chapter_url(slug, "tap-1");
+        let html = adapter.http.get_text(&url).await.expect("chapter page");
+        let document = Html::parse_document(&html);
+        let title = Selector::parse("title").unwrap();
+        println!(
+            "DIAG url={url} bytes={} title={:?}",
+            html.len(),
+            document.select(&title).next().map(|node| node
+                .text()
+                .collect::<String>()
+                .trim()
+                .to_string())
+        );
+        for sel in [
+            ".reading-content",
+            "img.wp-manga-chapter-img",
+            ".page-break",
+            ".container-chapter-reader",
+            "iframe",
+            "img",
+        ] {
+            println!(
+                "DIAG sel {sel} = {}",
+                document.select(&Selector::parse(sel).unwrap()).count()
+            );
+        }
+        for node in document.select(&Selector::parse("iframe").unwrap()).take(3) {
+            println!("DIAG iframe src={:?}", node.value().attr("src"));
+        }
+        let mut hosts: std::collections::BTreeMap<String, usize> = Default::default();
+        for node in document.select(&Selector::parse("img").unwrap()) {
+            let Some(raw) = ["src", "data-src", "data-lazy-src", "data-original"]
+                .iter()
+                .filter_map(|attr| node.value().attr(attr))
+                .map(str::trim)
+                .find(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if let Ok(joined) = adapter.base.join(raw) {
+                *hosts
+                    .entry(joined.host_str().unwrap_or("-").to_string())
+                    .or_default() += 1;
+            }
+        }
+        println!("DIAG img hosts {hosts:?}");
+        println!(
+            "DIAG reading-content img = {}, page-box = {}",
+            document
+                .select(&Selector::parse(".reading-content img").unwrap())
+                .count(),
+            document
+                .select(&Selector::parse(".page-box").unwrap())
+                .count()
+        );
+        for node in document
+            .select(&Selector::parse(".reading-content img").unwrap())
+            .take(4)
+        {
+            println!(
+                "DIAG img src={:?} data-src={:?} class={:?}",
+                node.value().attr("src"),
+                node.value().attr("data-src"),
+                node.value().attr("class")
+            );
+        }
+        if let Some(node) = document
+            .select(&Selector::parse(".page-box").unwrap())
+            .next()
+        {
+            let snippet: String = node.html().chars().take(400).collect();
+            println!("DIAG page-box = {snippet}");
+        }
+        if let Ok(manifest) = adapter.page_manifest(slug, "tap-1").await {
+            println!("DIAG pages = {}", manifest.pages.len());
+            match adapter.fetch_image(&manifest.pages[0].url).await {
+                Ok(bytes) => {
+                    let magic = &bytes[..bytes.len().min(16)];
+                    println!("DIAG first page bytes={} magic={:?}", bytes.len(), magic);
+                }
+                Err(error) => println!("DIAG first page err={}", error.code()),
+            }
+        }
+        for sel in [".reading-content", ".container-chapter-reader"] {
+            if let Some(node) = document.select(&Selector::parse(sel).unwrap()).next() {
+                let snippet: String = node.html().chars().take(800).collect();
+                println!("DIAG {sel} = {snippet}");
+            }
+        }
+    }
+
+    /// Live diagnostic for the d3q chapters that failed with INTERNAL_ERROR
+    /// (reported 2026-10-27) — the code must never be INTERNAL for a source
+    /// failure, so this prints the real error pair.
+    #[tokio::test]
+    #[ignore = "live probe: doctruyen3q chapter failing as INTERNAL_ERROR"]
+    async fn live_diag_d3q_internal() {
+        let row = crate::db::repositories::source_repo::SourceRow {
+            id: "doctruyen3q".to_string(),
+            display_name: "DocTruyen3Q".to_string(),
+            adapter: "doctruyen3q".to_string(),
+            base_url: None,
+            image_hosts: None,
+            enabled: true,
+        };
+        let registry = crate::sources::registry::SourceRegistry::from_rows(&[row]);
+        let adapter = registry.get("doctruyen3q").expect("built-in is registered");
+        let slug = "lang-khach-kenshin-ban-net-2019-.3953";
+        for chapter in ["chapter-73.234654", "chapter-70.234657"] {
+            let outcome = adapter.page_manifest(slug, chapter).await;
+            match outcome {
+                Ok(manifest) => println!(
+                    "DIAG d3q {chapter} ok pages={} single={:?}",
+                    manifest.pages.len(),
+                    manifest.single_file_format
+                ),
+                Err(error) => println!(
+                    "DIAG d3q {chapter} err={} ({:?})",
+                    error.code(),
+                    error.safe_message()
+                ),
             }
         }
     }

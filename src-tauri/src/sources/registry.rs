@@ -24,8 +24,11 @@ pub const TTT_DISPLAY_NAME: &str = "Truyen Tuoi Tho";
 /// `img.truyentuoitho.com` is a third shard, seen 2026-10-05 serving the
 /// `.page-box` reader of the "(Full)" titles; it is a SUBDOMAIN of the base
 /// host and Madara matches image hosts exactly, so it has to be listed.
-pub const TTT_IMAGE_HOSTS: &str =
-    "img.resourcehub.shop,truyentuoitho.anooymi.workers.dev,img.truyentuoitho.com";
+/// Chapter-image hosts TTT actually serves from. `blogger.googleusercontent.com`
+/// was added 2026-10-27: whole "tập" chapters (Lộc Đỉnh Ký, Đệ Nhất Mì Vương)
+/// embed their pages as Blogger-hosted images, and the allowlist rejected them
+/// as a foreign host, failing the manifest as SOURCE_PARSE_ERROR.
+pub const TTT_IMAGE_HOSTS: &str = "img.resourcehub.shop,truyentuoitho.anooymi.workers.dev,img.truyentuoitho.com,blogger.googleusercontent.com";
 pub const QQ_BASE_URL: &str = "https://truyenqqko.com/";
 pub const QQ_DISPLAY_NAME: &str = "TruyenQQ";
 pub const NT_BASE_URL: &str = "https://nettruyen.gg/";

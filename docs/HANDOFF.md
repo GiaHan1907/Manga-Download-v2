@@ -350,6 +350,18 @@ Trước đây `ci.yml` chỉ chạy cổng chất lượng + build installer r�
 
 **Giới hạn đã biết:** bản build **unsigned** → SmartScreen sẽ hỏi; release chỉ sinh từ push lên `master` (branch khác không tạo release); mỗi push tốn một lượt Actions (repo private có hạn mức phút/tháng). Release `build-783b8e6` là bản thử đầu tiên của cơ chế cũ (mỗi push một Release) — có thể xoá tay, từ nay chỉ còn `v<version>`.
 
+### 2u. Truyen Tuoi Tho: "tập" nhúng ảnh từ Blogger — allowlist chặn nhầm — 2026-10-27
+
+User báo `SOURCE_PARSE_ERROR` (kèm "Đã thử 5 lần") cho **Lộc Đỉnh Ký (Lâm Chánh Đức)** `tap-1…5` và **Đệ Nhất Mì Vương** `tap-1…2`, đều trên nguồn `madara-truyentuoitho-com`. Probe `live_diag_ttt_volume_parse` (dùng chính stack wreq+ECH của app — curl thường bị SNI-reset với site này) cho thấy:
+
+- Trang chương có `.reading-content` → 132 `.page-box` → **132 `<img src="https://blogger.googleusercontent.com/img/b/…/s0/001.webp">`**, không có iframe Drive, không có script mã hoá.
+- Manifest trả `SOURCE_PARSE_ERROR` vì `collect_page_urls(..., strict=true)` gặp host lạ và **cố ý fail cả chương** — `blogger.googleusercontent.com` chưa nằm trong `TTT_IMAGE_HOSTS`.
+- Sau khi thêm host đó vào danh sách built-in: `tap-1` → **132 trang**, `tap-2` → 131 trang; trang đầu tải được 451.604 byte, magic `FF D8 FF E0` (JPEG dù đuôi `.webp` — `image_validate` sniff magic nên vẫn nhận).
+
+Danh sách host vẫn **exact**: test `a_google_host_outside_the_list_still_fails_closed` chứng minh `lh3.googleusercontent.com` (cũng của Google nhưng không có trong danh sách) vẫn bị từ chối. Đây là host của nguồn built-in (app-shipped), không mở quyền cho nguồn người dùng tự thêm.
+
+**Cách nhận biết lại:** `SOURCE_PARSE_ERROR` cho cả một "tập" của TTT → mở trang, đếm `img` theo host. Nếu ảnh nằm trên một CDN mới, thêm đúng host vào `TTT_IMAGE_HOSTS` (kèm test exact-match), đừng nới rule cho mọi host.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.
