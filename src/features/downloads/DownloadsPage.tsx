@@ -169,6 +169,23 @@ export default function DownloadsPage() {
     return tasks.filter((task) => matcher.match(task.status)).sort(byQueueOrder(firstQueued));
   }, [tasks, filter]);
 
+  // `visible` is already contiguous per manga (server order + comparator), so
+  // one linear pass groups it. Orphans (no manga id) become one-off groups
+  // rather than being silently merged with each other.
+  const groups = useMemo(() => {
+    const out: { key: string; title: string; tasks: DownloadTaskDto[] }[] = [];
+    for (const task of visible) {
+      const key = task.mangaId ?? `~${task.id}`;
+      const last = out[out.length - 1];
+      if (last && last.key === key) {
+        last.tasks.push(task);
+      } else {
+        out.push({ key, title: task.mangaTitle ?? "Không rõ truyện", tasks: [task] });
+      }
+    }
+    return out;
+  }, [visible]);
+
   const counts = useMemo(
     () => Object.fromEntries(FILTERS.map((item) => [item.id, tasks.filter((task) => item.match(task.status)).length])) as Record<FilterId, number>,
     [tasks],
@@ -355,100 +372,121 @@ export default function DownloadsPage() {
           />
         )
       ) : (
-        <div className="downloads-grid">
-          {visible.map((task) => {
-            const liveInfo = live[task.id];
-            const speed = statusTone[task.status] === "warning" ? formatSpeed(liveInfo?.speed ?? null) : null;
-            // ETA is only truthful while pages are actively advancing —
-            // a paused/queued task must not keep showing a stale estimate.
-            const etaActive = task.status === "resolving" || task.status === "downloading";
-            const wait = retryWaitSeconds(task, nowMs);
-            const hint = errorHint(task.errorCode);
-            const parts = [
-              `${task.completedPages}/${task.totalPages} trang`,
-              liveInfo && liveInfo.bytes > 0 ? formatBytes(liveInfo.bytes) : null,
-              speed,
-              etaActive ? formatEtaSeconds(etaSeconds[task.id]) : null,
-              task.targetFormat === "folder" ? "thư mục ảnh" : task.targetFormat === "pdf" ? "PDF" : "CBZ",
-            ].filter(Boolean);
-            return (
-              <DownloadCard
-                key={task.id}
-                title={task.mangaTitle ?? task.chapterId}
-                description={`${task.chapterTitle ?? task.chapterId} · ${parts.join(" · ")}`}
-                progress={progressPercent(task)}
-                status={statusLabel[task.status]}
-                statusTone={statusTone[task.status]}
-                speedHistory={speedHistory[task.id]}
-                actionError={actionErrors[task.id]}
-              >
-                {wait !== null && wait > 0 && (
-                  <span className="download-card__meta">
-                    Tự thử lại lần {task.attempts + 1} sau {formatWait(wait)}
-                  </span>
-                )}
-                {task.status === "failed" && task.errorMessage && (
-                  <div className="download-card__error" role="status">
-                    {/* Message first (Rust already wrote it for humans), then
-                        the next step, then the wire code as reference — the
-                        old single line led with `[SOURCE_…]`, which read as a
-                        stack trace to anyone who is not the author. */}
-                    <p>{task.errorMessage}</p>
-                    {hint && <p className="download-card__hint">{hint}</p>}
-                    {task.attempts > 0 && (
-                      <p className="download-card__hint">
-                        Đã thử {task.attempts} lần · không tự thử lại nữa
-                      </p>
-                    )}
-                    {task.errorCode && (
-                      <p className="download-card__code">Mã lỗi: {task.errorCode}</p>
-                    )}
-                  </div>
-                )}
-                {task.status === "completed" && task.outputRelpath && (
-                  <>
-                    <span className="download-card__meta">
-                      Đã xác minh: {task.outputRelpath}
-                    </span>
-                    <Button variant="secondary" onClick={() => openLocation(task.id)}>
-                      <FolderOpen size={14} aria-hidden="true" />
-                      Mở nơi lưu
-                    </Button>
-                  </>
-                )}
-                {allowedDownloadActions(task.status).map((action) => {
-                  const Icon = actionIcon[action];
-                  return (
-                    <Button
-                      key={action}
-                      variant={action === "cancel" ? "ghost" : "secondary"}
-                      onClick={() => runAction(actions, task.id, action)}
-                    >
-                      <Icon size={14} aria-hidden="true" />
-                      {actionLabel[action]}
-                    </Button>
+        <div className="download-groups">
+          {groups.map((group) => (
+            // The sort already keeps a manga's chapters contiguous; the header
+            // makes that grouping visible instead of inferred from repeated
+            // card titles. Tasks with no manga id stay one-off groups.
+            <section
+              key={group.key}
+              className="download-group"
+              aria-label={`Hàng đợi của ${group.title}`}
+            >
+              <header className="download-group__head">
+                {/* One text node, not title+count side by side: a heading whose
+                    own text is exactly the manga title duplicates the card
+                    titles for screen readers and text queries. */}
+                <h3 className="download-group__title">
+                  {`${group.title} · ${group.tasks.length} chương`}
+                </h3>
+              </header>
+              <div className="downloads-grid">
+                {group.tasks.map((task) => {
+                    const liveInfo = live[task.id];
+                    const speed = statusTone[task.status] === "warning" ? formatSpeed(liveInfo?.speed ?? null) : null;
+                    // ETA is only truthful while pages are actively advancing —
+                    // a paused/queued task must not keep showing a stale estimate.
+                    const etaActive = task.status === "resolving" || task.status === "downloading";
+                    const wait = retryWaitSeconds(task, nowMs);
+                    const hint = errorHint(task.errorCode);
+                    const parts = [
+                      `${task.completedPages}/${task.totalPages} trang`,
+                      liveInfo && liveInfo.bytes > 0 ? formatBytes(liveInfo.bytes) : null,
+                      speed,
+                      etaActive ? formatEtaSeconds(etaSeconds[task.id]) : null,
+                      task.targetFormat === "folder" ? "thư mục ảnh" : task.targetFormat === "pdf" ? "PDF" : "CBZ",
+                    ].filter(Boolean);
+                    return (
+                      <DownloadCard
+                        key={task.id}
+                        title={task.mangaTitle ?? task.chapterId}
+                        description={`${task.chapterTitle ?? task.chapterId} · ${parts.join(" · ")}`}
+                        progress={progressPercent(task)}
+                        status={statusLabel[task.status]}
+                        statusTone={statusTone[task.status]}
+                        speedHistory={speedHistory[task.id]}
+                        actionError={actionErrors[task.id]}
+                      >
+                        {wait !== null && wait > 0 && (
+                          <span className="download-card__meta">
+                            Tự thử lại lần {task.attempts + 1} sau {formatWait(wait)}
+                          </span>
+                        )}
+                        {task.status === "failed" && task.errorMessage && (
+                          <div className="download-card__error" role="status">
+                            {/* Message first (Rust already wrote it for humans), then
+                                the next step, then the wire code as reference — the
+                                old single line led with `[SOURCE_…]`, which read as a
+                                stack trace to anyone who is not the author. */}
+                            <p>{task.errorMessage}</p>
+                            {hint && <p className="download-card__hint">{hint}</p>}
+                            {task.attempts > 0 && (
+                              <p className="download-card__hint">
+                                Đã thử {task.attempts} lần · không tự thử lại nữa
+                              </p>
+                            )}
+                            {task.errorCode && (
+                              <p className="download-card__code">Mã lỗi: {task.errorCode}</p>
+                            )}
+                          </div>
+                        )}
+                        {task.status === "completed" && task.outputRelpath && (
+                          <>
+                            <span className="download-card__meta">
+                              Đã xác minh: {task.outputRelpath}
+                            </span>
+                            <Button variant="secondary" onClick={() => openLocation(task.id)}>
+                              <FolderOpen size={14} aria-hidden="true" />
+                              Mở nơi lưu
+                            </Button>
+                          </>
+                        )}
+                        {allowedDownloadActions(task.status).map((action) => {
+                          const Icon = actionIcon[action];
+                          return (
+                            <Button
+                              key={action}
+                              variant={action === "cancel" ? "ghost" : "secondary"}
+                              onClick={() => runAction(actions, task.id, action)}
+                            >
+                              <Icon size={14} aria-hidden="true" />
+                              {actionLabel[action]}
+                            </Button>
+                          );
+                        })}
+                        {canRemoveTask(task.status) && (
+                          <Button
+                            variant="ghost"
+                            onClick={() =>
+                              void removeTask(task.id)
+                                .then(() => pushToast("Đã gỡ tác vụ khỏi danh sách."))
+                                .catch((err: unknown) =>
+                                  pushToast(
+                                    err instanceof Error ? err.message : "Không gỡ được tác vụ.",
+                                  ),
+                                )
+                            }
+                          >
+                            <Eraser size={14} aria-hidden="true" />
+                            Gỡ khỏi danh sách
+                          </Button>
+                        )}
+                      </DownloadCard>
                   );
                 })}
-                {canRemoveTask(task.status) && (
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      void removeTask(task.id)
-                        .then(() => pushToast("Đã gỡ tác vụ khỏi danh sách."))
-                        .catch((err: unknown) =>
-                          pushToast(
-                            err instanceof Error ? err.message : "Không gỡ được tác vụ.",
-                          ),
-                        )
-                    }
-                  >
-                    <Eraser size={14} aria-hidden="true" />
-                    Gỡ khỏi danh sách
-                  </Button>
-                )}
-              </DownloadCard>
-            );
-          })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
 

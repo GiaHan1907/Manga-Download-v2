@@ -91,14 +91,12 @@ function renderedRows(): string[] {
   });
 }
 
-/** The order the cards are actually rendered in, read off the grid. */
+/** The order the cards are actually rendered in, across every manga group. */
 function renderedChapters(): string[] {
-  const grid = document.querySelector(".downloads-grid");
-  if (!grid) return [];
-  return Array.from(grid.querySelectorAll("p, div"))
-    .map((node) => node.textContent ?? "")
-    .filter((text) => /^Chương [\d?]+ ·/.test(text))
-    .map((text) => text.replace(/\s*·.*$/, "").trim());
+  return Array.from(document.querySelectorAll(".download-card")).map((card) => {
+    const meta = card.querySelector(".download-card__meta")?.textContent ?? "";
+    return meta.replace(/\s*·.*$/, "").trim();
+  });
 }
 
 async function renderPage() {
@@ -142,6 +140,11 @@ describe("Trang Tải xuống: thứ tự chương và mục đã xong", () => {
         "Vua Pháp Thuật|Chương 2",
       ]),
     );
+    // The grouping is visible, not just an ordering coincidence.
+    const heads = Array.from(document.querySelectorAll(".download-group__title")).map((node) =>
+      (node.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    expect(heads).toEqual(["Ninja Loạn Thị · 2 chương", "Vua Pháp Thuật · 2 chương"]);
   });
 
   it("mặc định KHÔNG hiện chương đã hoàn thành, và chip Hoàn thành vẫn xem được", async () => {
