@@ -431,7 +431,7 @@ pub async fn remove_chapter_files(
         if error.kind() != std::io::ErrorKind::NotFound {
             // Filesystem still authoritative: keep DB flags intact. Log only the
             // error KIND — io::Error Display can embed the absolute path.
-            eprintln!(
+            crate::app_log!(
                 "chapter artifact delete failed for {chapter_id}: {:?}",
                 error.kind()
             );
@@ -544,7 +544,7 @@ pub async fn remove_manga(
             }
             let Ok(artifact) = storage::ensure_under_root(&library_root, &library_root.join(&path))
             else {
-                eprintln!("manga erase: path escapes library root for chapter {chapter_id}");
+                crate::app_log!("manga erase: path escapes library root for chapter {chapter_id}");
                 failed_files += 1;
                 continue;
             };
@@ -558,7 +558,7 @@ pub async fn remove_manga(
                 Ok(()) => files_removed += 1,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
-                    eprintln!(
+                    crate::app_log!(
                         "manga erase: artifact delete failed for chapter {chapter_id}: {:?}",
                         error.kind()
                     );
@@ -580,7 +580,9 @@ pub async fn remove_manga(
     }
     tx.commit().await?;
     if delete_files && failed_files > 0 {
-        eprintln!("manga erase: {failed_files} file(s) could not be deleted for manga {manga_id}");
+        crate::app_log!(
+            "manga erase: {failed_files} file(s) could not be deleted for manga {manga_id}"
+        );
     }
     Ok(RemoveMangaDto {
         chapters_removed,

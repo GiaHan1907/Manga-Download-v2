@@ -155,7 +155,7 @@ fn builtin_adapters(rows: &[SourceRow]) -> Vec<Arc<dyn SourceAdapter>> {
         match MadaraGeneric::built_in(spec.id, display_name, base_url, &hosts, spec.profile) {
             Ok(adapter) => adapters.push(Arc::new(adapter)),
             Err(error) => {
-                eprintln!(
+                crate::app_log!(
                     "built-in {} override invalid ({}); using shipped defaults",
                     spec.id,
                     error.code()

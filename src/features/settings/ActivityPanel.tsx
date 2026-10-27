@@ -1,8 +1,11 @@
+import { FolderOpen } from "lucide-react";
 import { Link } from "react-router-dom";
+import Button from "../../components/ui/Button";
 import Skeleton from "../../components/ui/Skeleton";
-import { listRecentActivity } from "../../shared/api/desktop";
+import { listRecentActivity, normalizeIpcError, openLogDir } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { relativeAge } from "../../shared/lib/time";
+import { pushToast } from "../../components/ui/toastStore";
 
 const KIND_LABEL = {
   alert: "Chương mới",
@@ -27,6 +30,22 @@ export default function ActivityPanel() {
       {feed.state === "success" && feed.data.length === 0 && (
         <p className="muted">Chưa có hoạt động nào.</p>
       )}
+      <p className="muted">
+        Sự cố kỹ thuật được ghi ra file trong thư mục log (xoay theo ngày, giữ 5 MB gần nhất).
+      </p>
+      <div className="settings-actions">
+        <Button
+          variant="ghost"
+          onClick={() =>
+            void openLogDir().catch((error: unknown) =>
+              pushToast(normalizeIpcError(error).message),
+            )
+          }
+        >
+          <FolderOpen size={14} aria-hidden="true" />
+          Mở thư mục log
+        </Button>
+      </div>
       {feed.state === "success" && feed.data.length > 0 && (
         <ul className="activity-feed">
           {feed.data.map((item) => (

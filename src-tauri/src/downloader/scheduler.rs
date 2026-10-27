@@ -390,7 +390,7 @@ impl Coordinator {
                 self.publish_now(&moved);
             }
         }
-        eprintln!(
+        crate::app_log!(
             "download queue auto-paused after {NETWORK_FAILURE_BREAKER} consecutive SOURCE_NETWORK failures"
         );
     }

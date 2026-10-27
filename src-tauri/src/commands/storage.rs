@@ -69,3 +69,13 @@ pub async fn choose_download_root(
 pub async fn reset_download_root(state: State<'_, AppState>) -> Result<RootInfoDto, AppError> {
     storage_root::reset_to_default(&state.db, &state.app_data_dir).await
 }
+
+/// Open the log folder so a bug report can carry the file. The path is derived
+/// here from the app data dir; nothing crosses the IPC boundary.
+#[tauri::command]
+pub async fn app_open_log_dir(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let dir = state.app_data_dir.join("logs");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| AppError::io_stage("Không tạo được thư mục log", error))?;
+    crate::commands::downloads::spawn_shell_open(&dir, false)
+}

@@ -611,3 +611,8 @@ export async function exportLibraryBackup(): Promise<BackupSummaryDto | null> {
 export async function importLibraryBackup(): Promise<BackupSummaryDto | null> {
   return invoke<BackupSummaryDto | null>("app_import_library_backup");
 }
+
+/// Rust opens Explorer on the app's log folder; no path crosses IPC.
+export async function openLogDir(): Promise<void> {
+  await invoke<void>("app_open_log_dir");
+}

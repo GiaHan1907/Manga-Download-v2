@@ -156,12 +156,14 @@ pub fn spawn_watcher_loop(app: &tauri::AppHandle) {
             let state = handle.state::<AppState>();
             match perform_tick(&handle, &state, false).await {
                 Ok(report) if report.checked > 0 => {
-                    eprintln!(
+                    crate::app_log!(
                         "watch tick: {} checked, {} new chapters, {} failed",
-                        report.checked, report.alerted_chapters, report.failed
+                        report.checked,
+                        report.alerted_chapters,
+                        report.failed
                     );
                 }
-                Err(error) => eprintln!("watch tick skipped: {}", error.wire_pair().0),
+                Err(error) => crate::app_log!("watch tick skipped: {}", error.wire_pair().0),
                 _ => {}
             }
         }

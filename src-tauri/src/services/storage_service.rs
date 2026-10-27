@@ -100,7 +100,7 @@ pub async fn clear_regenerable_cache(
                 }
                 // Locked/partially-removed staging stays for the next pass —
                 // cleanup is idempotent by design. Kind only: no paths in logs.
-                Err(error) => eprintln!("staging cleanup skipped {name}: {:?}", error.kind()),
+                Err(error) => crate::app_log!("staging cleanup skipped {name}: {:?}", error.kind()),
             }
         }
     }

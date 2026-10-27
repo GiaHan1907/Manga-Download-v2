@@ -1,7 +1,7 @@
 /// The settings screen carries the only durable record of what happened while
 /// the user was elsewhere: a watcher alert, a finished download, a failure.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppRoutes } from "../src/app/router";
 
@@ -81,6 +81,8 @@ beforeEach(() => {
         return Promise.resolve({ isCustom: false, label: "Mặc định (app data)", path: null, linkOk: true });
       case "app_list_recent_activity":
         return Promise.resolve(FEED);
+      case "app_open_log_dir":
+        return Promise.resolve(null);
       default:
         return Promise.resolve(null);
     }
@@ -108,5 +110,15 @@ describe("Nhật ký hoạt động", () => {
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("app_list_recent_activity", { limit: 12 }),
     );
+  });
+
+  it("opens the log folder from the same panel", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Mở thư mục log/ }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("app_open_log_dir"));
   });
 });

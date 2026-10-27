@@ -1,3 +1,4 @@
+mod app_log;
 mod app_state;
 mod commands;
 mod db;
@@ -39,6 +40,7 @@ pub fn run() {
         })
         .setup(move |app| {
             let app_data_dir = app.path().app_data_dir()?;
+            app_log::init(&app_data_dir);
             let pool = tauri::async_runtime::block_on(db::init_pool(&app_data_dir))?;
             if let Ok(settings) = tauri::async_runtime::block_on(services::settings_service::load(&pool)) {
                 flags.apply(&settings);
@@ -46,7 +48,7 @@ pub fn run() {
             // Storage-root preparation is recoverable: log and continue rather
             // than failing startup for directories no feature needs yet.
             if let Err(error) = services::storage_service::prepare(&app_data_dir) {
-                eprintln!("storage preparation skipped: {:?}", error.kind());
+                crate::app_log!("storage preparation skipped: {:?}", error.kind());
             }
             let rows =
                 tauri::async_runtime::block_on(db::repositories::source_repo::list_sources(&pool))?;
@@ -80,14 +82,14 @@ pub fn run() {
                     match downloader::recovery::reconcile_startup(&pool, &app_data_dir).await {
                         Ok(report) => {
                             if report.normalized_tasks > 0 || report.cleared_missing_outputs > 0 {
-                                eprintln!(
+                                crate::app_log!(
                                     "download recovery: {:?} tasks requeued, {} stale offline flags cleared",
                                     report.normalized_tasks, report.cleared_missing_outputs
                                 );
                             }
                         }
                         Err(error) => {
-                            eprintln!("download recovery skipped: {}", error.wire_pair().0)
+                            crate::app_log!("download recovery skipped: {}", error.wire_pair().0)
                         }
                     }
                     // Chapters saved before the parser knew that some sites put
@@ -95,9 +97,9 @@ pub fn run() {
                     // why their Library list looked shuffled. Idempotent.
                     match services::library_service::backfill_chapter_numbers(&pool).await {
                         Ok(filled) if filled > 0 => {
-                            eprintln!("chapter numbers: {filled} rows healed from their slug")
+                            crate::app_log!("chapter numbers: {filled} rows healed from their slug")
                         }
-                        Err(error) => eprintln!(
+                        Err(error) => crate::app_log!(
                             "chapter number backfill skipped: {}",
                             error.wire_pair().0
                         ),
@@ -111,18 +113,18 @@ pub fn run() {
                     {
                         Ok(cleanup) => {
                             if cleanup.removed_dirs > 0 {
-                                eprintln!(
+                                crate::app_log!(
                                     "startup cache cleanup: {} dirs, {} bytes freed",
                                     cleanup.removed_dirs, cleanup.freed_bytes
                                 );
                             }
                         }
                         Err(error) => {
-                            eprintln!("startup cache cleanup skipped: {}", error.wire_pair().0)
+                            crate::app_log!("startup cache cleanup skipped: {}", error.wire_pair().0)
                         }
                     }
                     downloads.start();
-                    eprintln!(
+                    crate::app_log!(
                         "startup: maintenance finished in {} ms",
                         started.elapsed().as_millis()
                     );
@@ -132,7 +134,7 @@ pub fn run() {
             // The tray is an enhancement — a platform refusal must never
             // brick startup (same policy as recovery/cleanup logging).
             if let Err(error) = build_tray(app.handle()) {
-                eprintln!("system tray unavailable: {error}");
+                crate::app_log!("system tray unavailable: {error}");
             }
 
             app.manage(AppState {
@@ -149,6 +151,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::activity::app_list_recent_activity,
             commands::backup::app_export_library_backup,
+            commands::storage::app_open_log_dir,
             commands::backup::app_import_library_backup,
             commands::discovery::list_supported_sources,
             commands::discovery::probe_manga_source,
