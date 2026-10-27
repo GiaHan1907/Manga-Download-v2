@@ -3373,3 +3373,9 @@ button {
   height: 18px;
   width: 18px;
 }
+
+/* ---------- Kiểm tra nguồn: khối kết quả ---------- */
+.source-probe-block {
+  display: grid;
+  gap: var(--space-1);
+}

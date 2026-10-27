@@ -12,6 +12,15 @@ import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useServicesVersion } from "../../shared/hooks/useServices";
 import type { SourceProbeDto, SourceViewDto } from "../../types/source";
 
+/// Codes that usually mean "the source moved, is blocking, or is down" — the
+/// cases where editing the base URL is the actual fix. Anything else (a parse
+/// error, a disabled source) is not a domain problem and gets no pointer.
+const DOMAIN_CODES = ["SOURCE_NETWORK", "SOURCE_NOT_FOUND", "SOURCE_FORBIDDEN", "SOURCE_UPSTREAM"];
+
+function suggestsDomainChange(code: string | null): boolean {
+  return code !== null && DOMAIN_CODES.includes(code);
+}
+
 function RealSources() {
   const [reload, setReload] = useState(0);
   const [name, setName] = useState("");
@@ -163,14 +172,25 @@ function RealSources() {
               )}
             </div>
             {probe[source.id] && (
-              <p
-                className={`source-probe ${probe[source.id].ok ? "source-probe--ok" : "source-probe--bad"}`}
-                role="status"
-              >
-                {probe[source.id].ok
-                  ? `Nguồn trả lời OK · ${probe[source.id].latencyMs} ms · ${probe[source.id].resultCount} kết quả cho “one piece”`
-                  : `${probe[source.id].code}: ${probe[source.id].message}`}
-              </p>
+              <div className="source-probe-block">
+                <p
+                  className={`source-probe ${probe[source.id].ok ? "source-probe--ok" : "source-probe--bad"}`}
+                  role="status"
+                >
+                  {probe[source.id].ok
+                    ? `Nguồn trả lời OK · ${probe[source.id].latencyMs} ms · ${probe[source.id].resultCount} kết quả cho “one piece”`
+                    : `${probe[source.id].code}: ${probe[source.id].message}`}
+                </p>
+                {!probe[source.id].ok && suggestsDomainChange(probe[source.id].code) && source.baseUrl && (
+                  <p className="muted">
+                    Kiểm tra này không tự đoán tên miền mới. Nếu trang đã đổi địa chỉ, sửa URL gốc
+                    bên dưới rồi bấm &quot;Kiểm tra&quot; lại.{" "}
+                    <Button variant="ghost" onClick={() => startEdit(source)}>
+                      Sửa tên miền
+                    </Button>
+                  </p>
+                )}
+              </div>
             )}
             {editingId === source.id && (
             <div className="source-edit-form">

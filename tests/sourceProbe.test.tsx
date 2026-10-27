@@ -96,4 +96,20 @@ describe("Kiểm tra nguồn", () => {
       ),
     ).toBeDefined();
   });
+
+  it("points at the base URL when the failure looks like a moved or blocking host", async () => {
+    probeResult = {
+      ok: false,
+      latencyMs: 30_000,
+      resultCount: 0,
+      code: "SOURCE_NETWORK",
+      message: "Không kết nối được nguồn (mạng/chặn theo khu vực).",
+    };
+    renderSources();
+    fireEvent.click(await screen.findByRole("button", { name: "Kiểm tra" }));
+    expect(await screen.findByText(/Kiểm tra này không tự đoán tên miền mới/)).toBeDefined();
+    // The escape hatch is the existing edit form, not an invented suggestion.
+    fireEvent.click(screen.getByRole("button", { name: "Sửa tên miền" }));
+    expect(await screen.findByLabelText(/Tên miền mới/)).toBeDefined();
+  });
 });
