@@ -114,14 +114,16 @@ pub async fn import_cbz(
     // Copy to a `.part` sibling then rename — a crash never leaves a partial
     // file at the canonical path that reconcile would later call corrupt.
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| AppError::io_stage("Không tạo được thư mục nhập", error))?;
     }
     let part = {
         let mut p = dest.clone().into_os_string();
         p.push(".importing");
         PathBuf::from(p)
     };
-    let copied = std::fs::copy(source, &part).map_err(AppError::Io)?;
+    let copied = std::fs::copy(source, &part)
+        .map_err(|error| AppError::io_stage("Không chép được file vào thư viện", error))?;
     if std::fs::rename(&part, &dest).is_err() {
         let _ = std::fs::remove_file(&part);
         return Err(AppError::validation(

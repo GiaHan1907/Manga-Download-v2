@@ -118,7 +118,8 @@ pub fn write_cbz(
 /// matching sizes and CRC32 values. This is the only evidence allowed to
 /// mark a chapter completed.
 pub fn verify_cbz(archive_path: &Path, pages: &[ExportPage<'_>]) -> Result<(), AppError> {
-    let data = std::fs::read(archive_path)?;
+    let data = std::fs::read(archive_path)
+        .map_err(|error| AppError::io_stage("Không đọc được file chương để kiểm tra", error))?;
     let bad = || AppError::validation("Archive không vượt qua kiểm tra toàn vẹn.");
     if data.len() < 22 {
         return Err(bad());
@@ -237,7 +238,8 @@ pub fn publish_artifact(
         let _ = std::fs::remove_file(part_path);
         return Ok(());
     }
-    std::fs::rename(part_path, final_path)?;
+    std::fs::rename(part_path, final_path)
+        .map_err(|error| AppError::io_stage("Không công bố được file chương", error))?;
     Ok(())
 }
 
@@ -276,21 +278,26 @@ pub fn export_folder(
         return Ok(false);
     }
     let _ = std::fs::remove_dir_all(part_dir);
-    std::fs::create_dir_all(part_dir)?;
+    std::fs::create_dir_all(part_dir)
+        .map_err(|error| AppError::io_stage("Không tạo được thư mục chương", error))?;
     let mut ordered: Vec<&ExportPage> = pages.iter().collect();
     ordered.sort_by_key(|page| page.index);
     for page in ordered {
         let source = staging_dir.join(page.staged_name);
-        let bytes = std::fs::read(&source)?;
+        let bytes = std::fs::read(&source)
+            .map_err(|error| AppError::io_stage("Không đọc được trang đã tải", error))?;
         if bytes.len() as i64 != page.size_bytes {
             return Err(AppError::validation(
                 "Thư mục ảnh không vượt qua kiểm tra toàn vẹn.",
             ));
         }
-        std::fs::write(part_dir.join(page.staged_name), &bytes)?;
+        std::fs::write(part_dir.join(page.staged_name), &bytes).map_err(|error| {
+            AppError::io_stage("Không ghi được trang vào thư mục chương", error)
+        })?;
     }
     verify_folder(part_dir, pages, part_dir)?;
-    std::fs::rename(part_dir, final_dir)?;
+    std::fs::rename(part_dir, final_dir)
+        .map_err(|error| AppError::io_stage("Không công bố được thư mục chương", error))?;
     Ok(true)
 }
 

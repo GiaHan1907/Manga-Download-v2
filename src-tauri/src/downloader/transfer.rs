@@ -48,15 +48,21 @@ pub fn write_and_validate(
         .map_err(|reason| AppError::validation(format!("Ảnh trang không hợp lệ ({reason}).")))?;
     let final_path = staging_dir.join(name);
     let part_path = staging_dir.join(format!("{name}.part"));
-    std::fs::create_dir_all(staging_dir)?;
+    std::fs::create_dir_all(staging_dir)
+        .map_err(|error| AppError::io_stage("Không tạo được thư mục staging của chương", error))?;
 
     use std::io::Write;
-    let mut file = std::fs::File::create(&part_path)?;
-    file.write_all(bytes)?;
-    file.flush()?;
+    let mut file = std::fs::File::create(&part_path).map_err(|error| {
+        AppError::io_stage("Không tạo được file trang (ổ đầy hoặc bị chặn?)", error)
+    })?;
+    file.write_all(bytes)
+        .map_err(|error| AppError::io_stage("Không ghi được trang xuống đĩa", error))?;
+    file.flush()
+        .map_err(|error| AppError::io_stage("Không đẩy được dữ liệu trang xuống đĩa", error))?;
     drop(file);
 
-    let written = std::fs::read(&part_path)?;
+    let written = std::fs::read(&part_path)
+        .map_err(|error| AppError::io_stage("Không đọc lại được trang vừa ghi", error))?;
     if written.len() != bytes.len()
         || image_validate::crc32(&written) != image_validate::crc32(bytes)
     {
@@ -67,9 +73,11 @@ pub fn write_and_validate(
     }
     // Replace any prior final file only within this task's own staging dir.
     if final_path.exists() {
-        std::fs::remove_file(&final_path)?;
+        std::fs::remove_file(&final_path)
+            .map_err(|error| AppError::io_stage("Không thay được trang cũ", error))?;
     }
-    std::fs::rename(&part_path, &final_path)?;
+    std::fs::rename(&part_path, &final_path)
+        .map_err(|error| AppError::io_stage("Không đặt được tên cuối cho trang", error))?;
 
     Ok(StagedPage {
         name: name.to_string(),

@@ -345,7 +345,8 @@ async fn resolve_reveal_path(
 ) -> Result<std::path::PathBuf, AppError> {
     let Some(task_id) = task_id else {
         let root = storage::library_root(app_data_dir);
-        std::fs::create_dir_all(&root)?;
+        std::fs::create_dir_all(&root)
+            .map_err(|error| AppError::io_stage("Không tạo được thư mục thư viện", error))?;
         return Ok(root);
     };
     let row = download_repo::get_task(pool, task_id)

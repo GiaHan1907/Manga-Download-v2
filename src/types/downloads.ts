@@ -187,6 +187,7 @@ export const ERROR_HINT: Record<string, string> = {
   LOCAL_FILE_CORRUPTED: "File lỗi hoặc không đọc được — tải lại chương này.",
   CBZ_INVALID: "Archive CBZ không hợp lệ — tải lại chương này.",
   DELETE_FAILED: "Không xóa được file — kiểm tra ổ đĩa rồi thử lại.",
+  STORAGE_IO: "Không ghi/đọc được file — kiểm tra dung lượng ổ đĩa và quyền truy cập, rồi thử lại.",
   STORAGE_OUTSIDE_LIBRARY_ROOT: "Đường dẫn nằm ngoài thư viện — kiểm tra lại nơi lưu trong Cài đặt.",
 };
 

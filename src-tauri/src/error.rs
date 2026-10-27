@@ -62,6 +62,12 @@ pub enum AppError {
     #[error("io error")]
     Io(#[from] std::io::Error),
 
+    /// A disk operation the user can act on (full disk, denied path, removed
+    /// drive) — carries the stage name so the UI never answers "lỗi nội bộ
+    /// không xác định" to something the user caused and can fix.
+    #[error("{0}: {1}")]
+    IoStage(String, std::io::Error),
+
     #[error("validation error: {0}")]
     Validation(String),
 
@@ -96,6 +102,12 @@ impl AppError {
 
     pub fn not_found<T: Into<String>>(entity: T) -> Self {
         AppError::NotFound(entity.into())
+    }
+
+    /// Name the file operation that failed. `Io` itself collapses to
+    /// INTERNAL_ERROR on the wire; this keeps the actionable detail.
+    pub fn io_stage<T: Into<String>>(stage: T, error: std::io::Error) -> Self {
+        AppError::IoStage(stage.into(), error)
     }
 
     /// Wire code exposed to the UI; test-only accessor for error-mapping tests.
@@ -144,6 +156,13 @@ impl AppError {
             AppError::Io(_) | AppError::Internal => (
                 "INTERNAL_ERROR",
                 "Lỗi nội bộ không xác định.".to_string(),
+                false,
+            ),
+            AppError::IoStage(stage, error) => (
+                "STORAGE_IO",
+                format!("{stage}: {error}."),
+                // Freeing space or reconnecting a drive fixes it; retrying the
+                // same write on its own does not.
                 false,
             ),
             AppError::Source(source) => (
@@ -199,6 +218,13 @@ mod tests {
         assert_eq!(
             code_of(&AppError::Io(std::io::Error::other("x"))),
             "INTERNAL_ERROR"
+        );
+        assert_eq!(
+            code_of(&AppError::io_stage(
+                "Không ghi được file chương",
+                std::io::Error::other("disk full")
+            )),
+            "STORAGE_IO"
         );
     }
 
