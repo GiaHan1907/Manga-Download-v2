@@ -10,6 +10,12 @@ name: CI
 on:
   push:
     branches: [master]
+    # A docs-only push has nothing to build or publish; running the full
+    # ~25-minute gate for it just burns Actions minutes. publish-windows.yml
+    # depends on this workflow, so docs-only pushes also skip the release.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
 
 permissions:
