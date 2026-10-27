@@ -1,3 +1,4 @@
+pub mod activity_service;
 pub mod catalog_service;
 pub mod cover_service;
 pub mod discovery_service;

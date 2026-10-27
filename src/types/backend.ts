@@ -157,3 +157,14 @@ export type CacheCleanupDto = {
 };
 
 export type SettingsPatchDto = Partial<AppSettingsDto>;
+
+/// One line of the "Hoạt động gần đây" feed (watcher alert, finished or failed
+/// download). `kind` is a closed set from Rust.
+export type ActivityItemDto = {
+  kind: "alert" | "downloaded" | "failed";
+  mangaId: string;
+  mangaTitle: string;
+  chapterTitle: string;
+  at: string;
+  code: string | null;
+};

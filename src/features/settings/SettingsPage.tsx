@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ActivityPanel from "./ActivityPanel";
 import Button from "../../components/ui/Button";
 import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
@@ -176,6 +177,8 @@ function SettingsForm({ initial }: { initial: AppSettings }) {
 
       <StoragePanel />
       </div>
+
+      <ActivityPanel />
 
       <div className="settings-actions">
         <Button variant="primary" onClick={() => void save()} disabled={!dirty}>

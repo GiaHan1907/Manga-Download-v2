@@ -128,6 +128,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::activity::app_list_recent_activity,
             commands::discovery::list_supported_sources,
             commands::discovery::probe_manga_source,
             commands::discovery::add_manga_source,

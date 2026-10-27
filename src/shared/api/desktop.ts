@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
+  ActivityItemDto,
   AppSettingsDto,
   CacheCleanupDto,
   DownloadRootDto,
@@ -593,4 +594,9 @@ const APP_ERROR_CODES: ReadonlySet<string> = new Set<AppErrorCode>([
 
 function isAppErrorCode(value: unknown): value is AppError["code"] {
   return typeof value === "string" && APP_ERROR_CODES.has(value);
+}
+
+/// Read-only merged feed of watcher alerts + download outcomes, newest first.
+export async function listRecentActivity(args: { limit?: number } = {}): Promise<ActivityItemDto[]> {
+  return invoke<ActivityItemDto[]>("app_list_recent_activity", args);
 }

@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod discovery;
 pub mod downloads;
 pub mod favorites;

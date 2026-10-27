@@ -3283,3 +3283,69 @@ button {
 .source-probe--bad {
   color: var(--error);
 }
+
+/* ---------- Nhật ký hoạt động (Cài đặt) ---------- */
+.activity-feed {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-feed__row {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.activity-feed__row:last-child {
+  border-bottom: 0;
+}
+
+.activity-feed__kind {
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  padding: 1px 6px;
+}
+
+.activity-feed__kind--alert {
+  color: var(--primary);
+}
+
+.activity-feed__kind--downloaded {
+  color: var(--success);
+}
+
+.activity-feed__kind--failed {
+  color: var(--error);
+}
+
+.activity-feed__title {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.activity-feed__title:hover {
+  text-decoration: underline;
+}
+
+.activity-feed__chapter,
+.activity-feed__code {
+  color: var(--text-muted);
+}
+
+.activity-feed__code {
+  font-size: var(--font-size-xs);
+}
+
+.activity-feed__age {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  margin-left: auto;
+}
