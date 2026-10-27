@@ -11,16 +11,10 @@ import { services } from "../../services/provider";
 import type { AppSettings } from "../../services/settings.service";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import ReaderImage from "./components/ReaderImage";
+import { isTypingTarget } from "../../shared/api/errors";
 
 type ReaderMode = "single" | "double" | "vertical";
 type FitMode = "page" | "width";
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return ["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(target.tagName) || target.isContentEditable;
-}
 
 export default function ReaderPage() {
   const { mangaId = "", chapterId = "" } = useParams();
@@ -109,7 +103,7 @@ function ReaderView({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (isTypingTarget(event.target)) {
+      if (isTypingTarget(event.target, true)) {
         return;
       }
       const forward = direction === "rtl" ? "ArrowLeft" : "ArrowRight";

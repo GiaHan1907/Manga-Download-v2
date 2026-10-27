@@ -1,5 +1,5 @@
 import * as desktop from "../shared/api/desktop";
-import { normalizeIpcError } from "../shared/api/desktop";
+import { rethrowIpc } from "../shared/api/errors";
 import type { DownloadTaskDto, PagedResult } from "../types/backend";
 import type { QueueResultDto, DownloadTaskEvent, ClearHistoryDto } from "../types/downloads";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -29,10 +29,6 @@ export interface DownloadManagerService {
   subscribe(handler: (event: DownloadTaskEvent) => void): Promise<UnlistenFn>;
 }
 
-function rethrow(err: unknown): never {
-  throw new Error(normalizeIpcError(err).message);
-}
-
 /// Mirror of Rust `download_repo::MAX_BATCH_SIZE` — keep in sync.
 const QUEUE_BATCH_LIMIT = 100;
 
@@ -58,7 +54,7 @@ async function queueMany(args: {
 }
 
 export const downloadsApi: DownloadManagerService = {
-  listTasks: (args) => desktop.listLocalDownloadTasks(args).catch(rethrow),
+  listTasks: (args) => desktop.listLocalDownloadTasks(args).catch(rethrowIpc),
   queue: (args) =>
     desktop
       .queueChapterDownloads({
@@ -66,18 +62,18 @@ export const downloadsApi: DownloadManagerService = {
         format: args.format,
         priority: args.priority,
       })
-      .catch(rethrow),
-  queueMany: (args) => queueMany(args).catch(rethrow),
-  pause: (taskId) => desktop.pauseDownload(taskId).catch(rethrow),
-  resume: (taskId) => desktop.resumeDownload(taskId).catch(rethrow),
-  cancel: (taskId) => desktop.cancelDownload(taskId).catch(rethrow),
-  retry: (taskId) => desktop.retryDownload(taskId).catch(rethrow),
-  removeTask: (taskId) => desktop.removeDownloadTask(taskId).catch(rethrow),
-  setPriority: (taskId, priority) => desktop.setDownloadPriority({ taskId, priority }).catch(rethrow),
-  clearHistory: (args) => desktop.clearDownloadHistory(args).catch(rethrow),
-  retryAllFailed: () => desktop.retryAllFailedDownloads().catch(rethrow),
-  cancelForManga: (mangaId) => desktop.cancelDownloadsForManga(mangaId).catch(rethrow),
-  setQueuePaused: (paused) => desktop.setDownloadQueuePaused(paused).catch(rethrow),
-  getQueuePaused: () => desktop.getDownloadQueuePaused().catch(rethrow),
+      .catch(rethrowIpc),
+  queueMany: (args) => queueMany(args).catch(rethrowIpc),
+  pause: (taskId) => desktop.pauseDownload(taskId).catch(rethrowIpc),
+  resume: (taskId) => desktop.resumeDownload(taskId).catch(rethrowIpc),
+  cancel: (taskId) => desktop.cancelDownload(taskId).catch(rethrowIpc),
+  retry: (taskId) => desktop.retryDownload(taskId).catch(rethrowIpc),
+  removeTask: (taskId) => desktop.removeDownloadTask(taskId).catch(rethrowIpc),
+  setPriority: (taskId, priority) => desktop.setDownloadPriority({ taskId, priority }).catch(rethrowIpc),
+  clearHistory: (args) => desktop.clearDownloadHistory(args).catch(rethrowIpc),
+  retryAllFailed: () => desktop.retryAllFailedDownloads().catch(rethrowIpc),
+  cancelForManga: (mangaId) => desktop.cancelDownloadsForManga(mangaId).catch(rethrowIpc),
+  setQueuePaused: (paused) => desktop.setDownloadQueuePaused(paused).catch(rethrowIpc),
+  getQueuePaused: () => desktop.getDownloadQueuePaused().catch(rethrowIpc),
   subscribe: (handler) => desktop.subscribeDownloadTask(handler),
 };

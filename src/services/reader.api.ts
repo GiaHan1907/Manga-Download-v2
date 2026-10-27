@@ -1,5 +1,5 @@
 import * as desktop from "../shared/api/desktop";
-import { normalizeIpcError } from "../shared/api/desktop";
+import { rethrowIpc } from "../shared/api/errors";
 
 /// Phase 07 production reader boundary. Pages are addressed by
 /// (chapterId, pageIndex); bytes arrive per page as a Uint8Array that the
@@ -17,19 +17,15 @@ export interface ReaderService {
   }): ReturnType<typeof desktop.saveReadingProgress>;
 }
 
-function rethrow(err: unknown): never {
-  throw new Error(normalizeIpcError(err).message);
-}
-
 export const readerApi: ReaderService = {
-  openChapter: (chapterId) => desktop.readerOpenChapter(chapterId).catch(rethrow),
+  openChapter: (chapterId) => desktop.readerOpenChapter(chapterId).catch(rethrowIpc),
   getPageBytes: async (chapterId, pageIndex) => {
     try {
       return await desktop.readerGetPageBytes(chapterId, pageIndex);
     } catch (err) {
-      rethrow(err);
+      rethrowIpc(err);
     }
   },
-  getProgress: (mangaId) => desktop.getReadingProgress(mangaId).catch(rethrow),
-  saveProgress: (args) => desktop.saveReadingProgress(args).catch(rethrow),
+  getProgress: (mangaId) => desktop.getReadingProgress(mangaId).catch(rethrowIpc),
+  saveProgress: (args) => desktop.saveReadingProgress(args).catch(rethrowIpc),
 };

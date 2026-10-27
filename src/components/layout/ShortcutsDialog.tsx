@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Dialog from "../ui/Dialog";
+import { isTypingTarget } from "../../shared/api/errors";
 
 /// Fired by the command palette ("Phím tắt") — same shape as the palette's own
 /// open event, so neither component needs state lifted into the shell.
@@ -28,14 +29,6 @@ const READER_KEYS: [string, string][] = [
   ["Esc", "Thoát toàn màn hình, hoặc về trang truyện"],
 ];
 
-function isTyping(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
-}
-
 export default function ShortcutsDialog() {
   const [open, setOpen] = useState(false);
 
@@ -46,7 +39,7 @@ export default function ShortcutsDialog() {
       if (event.key !== "?" || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (isTyping(event.target)) {
+      if (isTypingTarget(event.target)) {
         return;
       }
       event.preventDefault();

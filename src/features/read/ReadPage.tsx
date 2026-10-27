@@ -11,6 +11,7 @@ import ErrorState from "../../components/ui/ErrorState";
 import Skeleton from "../../components/ui/Skeleton";
 import { pushToast } from "../../components/ui/toastStore";
 import { normalizeIpcError, openChapterFile } from "../../shared/api/desktop";
+import { isTypingTarget } from "../../shared/api/errors";
 import type { ReaderManifestDto } from "../../types/library";
 import { localServices } from "../../services/provider";
 import { settingsApi } from "../../services/settings.api";
@@ -46,13 +47,6 @@ function readStoredTheme(): ReaderTheme {
   } catch {
     return "default";
   }
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable;
 }
 
 function guessMime(bytes: Uint8Array): string {
@@ -181,7 +175,7 @@ function ReaderSession({ chapterId }: { chapterId: string }) {
   // Keyboard: RTL swaps left/right visual navigation (tested explicitly).
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (isTyping(event.target)) {
+      if (isTypingTarget(event.target)) {
         return;
       }
       const forward = direction === "rtl" ? event.key === "ArrowLeft" : event.key === "ArrowRight";

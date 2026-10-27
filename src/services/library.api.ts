@@ -1,5 +1,4 @@
 import * as desktop from "../shared/api/desktop";
-import { normalizeIpcError } from "../shared/api/desktop";
 import type {
   DownloadedChapterDto,
   LibraryGenreDto,
@@ -10,6 +9,7 @@ import type {
   ImportResultDto,
 } from "../types/library";
 import type { PagedResult } from "../types/backend";
+import { rethrowIpc } from "../shared/api/errors";
 
 /// Phase 07 production library boundary (SQLite-backed, aggregate queries).
 export interface LibraryApi {
@@ -39,29 +39,25 @@ export interface LibraryApi {
   ackAlerts(mangaId: string): Promise<number>;
 }
 
-function rethrow(err: unknown): never {
-  throw new Error(normalizeIpcError(err).message);
-}
-
 export const libraryApi: LibraryApi = {
-  list: (args) => desktop.libraryList(args).catch(rethrow),
-  genres: () => desktop.libraryGenres().catch(rethrow),
+  list: (args) => desktop.libraryList(args).catch(rethrowIpc),
+  genres: () => desktop.libraryGenres().catch(rethrowIpc),
   downloadedChapters: async (mangaId) => {
     try {
       const result = await desktop.libraryDownloadedChapters(mangaId);
       return result.chapters;
     } catch (err) {
-      rethrow(err);
+      rethrowIpc(err);
     }
   },
-  reconcile: () => desktop.libraryReconcile().catch(rethrow),
-  removeChapter: (chapterId) => desktop.libraryRemoveChapter(chapterId).catch(rethrow),
-  removeMangaFiles: (mangaId) => desktop.libraryRemoveMangaFiles(mangaId).catch(rethrow),
-  removeManga: (args) => desktop.libraryRemoveManga(args).catch(rethrow),
-  importCbz: (args) => desktop.libraryImportCbz(args).catch(rethrow),
-  importCbzPath: (args) => desktop.libraryImportCbzPath(args).catch(rethrow),
-  getWatch: (mangaId) => desktop.libraryGetWatch(mangaId).catch(rethrow),
-  setWatch: (args) => desktop.librarySetWatch(args).catch(rethrow),
-  listAlerts: (mangaId) => desktop.libraryListAlerts(mangaId).catch(rethrow),
-  ackAlerts: (mangaId) => desktop.libraryAckAlerts(mangaId).catch(rethrow),
+  reconcile: () => desktop.libraryReconcile().catch(rethrowIpc),
+  removeChapter: (chapterId) => desktop.libraryRemoveChapter(chapterId).catch(rethrowIpc),
+  removeMangaFiles: (mangaId) => desktop.libraryRemoveMangaFiles(mangaId).catch(rethrowIpc),
+  removeManga: (args) => desktop.libraryRemoveManga(args).catch(rethrowIpc),
+  importCbz: (args) => desktop.libraryImportCbz(args).catch(rethrowIpc),
+  importCbzPath: (args) => desktop.libraryImportCbzPath(args).catch(rethrowIpc),
+  getWatch: (mangaId) => desktop.libraryGetWatch(mangaId).catch(rethrowIpc),
+  setWatch: (args) => desktop.librarySetWatch(args).catch(rethrowIpc),
+  listAlerts: (mangaId) => desktop.libraryListAlerts(mangaId).catch(rethrowIpc),
+  ackAlerts: (mangaId) => desktop.libraryAckAlerts(mangaId).catch(rethrowIpc),
 };

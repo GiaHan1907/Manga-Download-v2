@@ -1,7 +1,7 @@
-import { normalizeIpcError } from "../shared/api/desktop";
 import * as desktop from "../shared/api/desktop";
 import type { AppSettingsDto, SettingsPatchDto } from "../types/backend";
 import { SETTINGS_LIMITS, type AppSettings, type SettingsService } from "./settings.service";
+import { rethrowIpc } from "../shared/api/errors";
 
 function toDto(settings: AppSettings): AppSettingsDto {
   return {
@@ -17,10 +17,6 @@ function toDto(settings: AppSettings): AppSettingsDto {
   };
 }
 
-function rethrow(err: unknown): never {
-  throw new Error(normalizeIpcError(err).message);
-}
-
 /// Phase 04: settings persist through SQLite via IPC (survive app restart).
 /// Client-side bound checks mirror the Rust validation for snappy UX; the
 /// backend remains the authority.
@@ -29,7 +25,7 @@ export const settingsApi: SettingsService = {
     try {
       return await desktop.getBackendSettings();
     } catch (err) {
-      rethrow(err);
+      rethrowIpc(err);
     }
   },
 
@@ -66,7 +62,7 @@ export const settingsApi: SettingsService = {
       const patch: SettingsPatchDto = toDto(settings);
       await desktop.updateBackendSettings(patch);
     } catch (err) {
-      rethrow(err);
+      rethrowIpc(err);
     }
   },
 
@@ -74,7 +70,7 @@ export const settingsApi: SettingsService = {
     try {
       await desktop.resetBackendSettings();
     } catch (err) {
-      rethrow(err);
+      rethrowIpc(err);
     }
   },
 };
