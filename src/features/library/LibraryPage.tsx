@@ -599,6 +599,44 @@ export default function LibraryPage() {
         )}
       </section>
 
+      {selectMode && (
+        <section className="panel bulk-bar" aria-label="Thao tác nhiều truyện">
+          <div className="bulk-bar__row">
+            <span>
+              Đã chọn <strong>{selected.size}</strong> truyện
+            </span>
+            <Button
+              variant="ghost"
+              onClick={() =>
+                setSelected(
+                  new Set(
+                    (page.state === "success" ? page.data.items : []).map((manga) => manga.id),
+                  ),
+                )
+              }
+            >
+              Chọn cả trang
+            </Button>
+            <Button variant="ghost" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
+              Bỏ chọn
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={bulkBusy || selected.size === 0}
+              onClick={() => void runBulk(false)}
+            >
+              Gỡ khỏi Thư viện (giữ file)
+            </Button>
+            <Button
+              variant="primary"
+              disabled={bulkBusy || selected.size === 0}
+              onClick={() => setBulkConfirmDelete(true)}
+            >
+              Gỡ và xoá file
+            </Button>
+          </div>
+        </section>
+      )}
       <div className="library-layout">
         <div className="library-main page-stack">
           {reading.length > 0 && (
@@ -716,44 +754,6 @@ export default function LibraryPage() {
             )}
           </section>
 
-      {selectMode && (
-        <section className="panel bulk-bar" aria-label="Thao tác nhiều truyện">
-          <div className="bulk-bar__row">
-            <span>
-              Đã chọn <strong>{selected.size}</strong> truyện
-            </span>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                setSelected(
-                  new Set(
-                    (page.state === "success" ? page.data.items : []).map((manga) => manga.id),
-                  ),
-                )
-              }
-            >
-              Chọn cả trang
-            </Button>
-            <Button variant="ghost" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
-              Bỏ chọn
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={bulkBusy || selected.size === 0}
-              onClick={() => void runBulk(false)}
-            >
-              Gỡ khỏi Thư viện (giữ file)
-            </Button>
-            <Button
-              variant="primary"
-              disabled={bulkBusy || selected.size === 0}
-              onClick={() => setBulkConfirmDelete(true)}
-            >
-              Gỡ và xoá file
-            </Button>
-          </div>
-        </section>
-      )}
       {bulkNote && (
         // Outside the bar on purpose: the mode closes as soon as the run ends,
         // and the summary is exactly what the user needs to read then.
