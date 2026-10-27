@@ -68,6 +68,12 @@ pub enum AppError {
     #[error("{0}: {1}")]
     IoStage(String, std::io::Error),
 
+    /// Fetched bytes that are not an accepted image. Distinct from a plain
+    /// Validation error because a page fetch may succeed on a second attempt
+    /// when a CDN serves a one-off non-image body.
+    #[error("{0}")]
+    ImageRejected(String),
+
     #[error("validation error: {0}")]
     Validation(String),
 
@@ -110,6 +116,10 @@ impl AppError {
         AppError::IoStage(stage.into(), error)
     }
 
+    pub fn image_rejected<T: Into<String>>(message: T) -> Self {
+        AppError::ImageRejected(message.into())
+    }
+
     /// Wire code exposed to the UI; test-only accessor for error-mapping tests.
     #[cfg(test)]
     pub(crate) fn wire_code(&self) -> &'static str {
@@ -141,7 +151,9 @@ impl AppError {
                 "Không thể khởi tạo cơ sở dữ liệu local.".to_string(),
                 true,
             ),
-            AppError::Validation(message) => ("VALIDATION_ERROR", message.clone(), false),
+            AppError::Validation(message) | AppError::ImageRejected(message) => {
+                ("VALIDATION_ERROR", message.clone(), false)
+            }
             AppError::NotFound(_) => ("NOT_FOUND", "Bản ghi không tồn tại.".to_string(), false),
             AppError::Conflict => (
                 "DB_CONFLICT",
@@ -218,6 +230,12 @@ mod tests {
         assert_eq!(
             code_of(&AppError::Io(std::io::Error::other("x"))),
             "INTERNAL_ERROR"
+        );
+        assert_eq!(
+            code_of(&AppError::image_rejected(
+                "Ảnh trang không hợp lệ (UNSUPPORTED_TYPE)."
+            )),
+            "VALIDATION_ERROR"
         );
         assert_eq!(
             code_of(&AppError::io_stage(

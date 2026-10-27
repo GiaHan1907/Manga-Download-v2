@@ -5,8 +5,9 @@
 //! renamed file exists and validates — interrupted `.part` data is discarded.
 
 use std::path::Path;
+use std::time::Duration;
 
-use crate::downloader::image_validate::{self, ImageKind};
+use crate::downloader::image_validate;
 use crate::error::AppError;
 
 /// Zero-padded staging name for a page index, e.g. `000007.png`.
@@ -14,6 +15,7 @@ pub fn staged_name(page_index: usize, extension: &str) -> String {
     format!("{page_index:06}.{extension}")
 }
 
+#[derive(Debug)]
 pub struct StagedPage {
     pub name: String,
     pub size_bytes: i64,
@@ -23,18 +25,45 @@ pub struct StagedPage {
 /// Fetch one page image and land it as a validated staged file. The caller
 /// short-circuits already-checkpointed pages before invoking this. Returns a
 /// safe error on any validation failure so the worker can decide retry/fail.
-pub async fn fetch_page(
+/// How many times one page may be fetched before its bytes are trusted to be
+/// what the source really serves. A CDN occasionally answers a hot image with a
+/// challenge page or a half-written edge copy (live 2026-10-27: one page of a
+/// 102-page chapter came back non-image once, and the same URL served a valid
+/// PNG seconds later); one refetch turns that into a stored page instead of
+/// failing the whole chapter on a non-retryable VALIDATION_ERROR.
+const PAGE_FETCH_ATTEMPTS: usize = 2;
+const PAGE_REFETCH_DELAY: Duration = Duration::from_millis(400);
+
+pub async fn fetch_page<F, Fut>(
     staging_dir: &Path,
     page_index: usize,
-    fetch: impl std::future::Future<Output = Result<Vec<u8>, crate::sources::adapter::SourceError>>,
-) -> Result<StagedPage, AppError> {
-    let bytes = fetch.await.map_err(AppError::Source)?;
-    let kind: ImageKind =
-        image_validate::validate(&bytes, crate::sources::http::IMAGE_MAX_BYTES as usize).map_err(
-            |reason| AppError::validation(format!("Ảnh trang không hợp lệ ({reason}).")),
-        )?;
-    let name = staged_name(page_index, kind.extension());
-    write_and_validate(staging_dir, &name, &bytes)
+    fetch: F,
+) -> Result<StagedPage, AppError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, crate::sources::adapter::SourceError>>,
+{
+    let mut attempt = 0usize;
+    loop {
+        attempt += 1;
+        let bytes = fetch().await.map_err(AppError::Source)?;
+        match image_validate::validate(&bytes, crate::sources::http::IMAGE_MAX_BYTES as usize) {
+            Ok(kind) => {
+                let name = staged_name(page_index, kind.extension());
+                return write_and_validate(staging_dir, &name, &bytes);
+            }
+            Err(_) if attempt < PAGE_FETCH_ATTEMPTS => {
+                tokio::time::sleep(PAGE_REFETCH_DELAY).await;
+            }
+            Err(reason) => {
+                return Err(rejected_image(reason));
+            }
+        }
+    }
+}
+
+fn rejected_image(reason: &'static str) -> AppError {
+    AppError::image_rejected(format!("Ảnh trang không hợp lệ ({reason})."))
 }
 
 /// Write bytes to `<name>.part`, flush, validate the on-disk copy matches,
@@ -45,7 +74,7 @@ pub fn write_and_validate(
     bytes: &[u8],
 ) -> Result<StagedPage, AppError> {
     image_validate::validate(bytes, crate::sources::http::IMAGE_MAX_BYTES as usize)
-        .map_err(|reason| AppError::validation(format!("Ảnh trang không hợp lệ ({reason}).")))?;
+        .map_err(rejected_image)?;
     let final_path = staging_dir.join(name);
     let part_path = staging_dir.join(format!("{name}.part"));
     std::fs::create_dir_all(staging_dir)
@@ -167,10 +196,10 @@ mod tests {
     #[tokio::test]
     async fn t06_07_fetch_page_validates_renames_and_reports_checksum() {
         let dir = tempfile::tempdir().unwrap();
-        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         png.extend(std::iter::repeat_n(0x11u8, 48));
         let expected = image_validate::crc32_hex(&png);
-        let page = fetch_page(dir.path(), 6, async { Ok(png.clone()) })
+        let page = fetch_page(dir.path(), 6, || async { Ok(png.clone()) })
             .await
             .unwrap();
         assert_eq!(page.name, staged_name(6, "png"));
@@ -182,8 +211,61 @@ mod tests {
     #[tokio::test]
     async fn html_body_never_lands_as_staged_page() {
         let dir = tempfile::tempdir().unwrap();
-        let result = fetch_page(dir.path(), 0, async { Ok(b"<html>nope</html>".to_vec()) }).await;
-        assert!(result.is_err());
+        let result = fetch_page(dir.path(), 0, || async {
+            Ok(b"<html>nope</html>".to_vec())
+        })
+        .await;
+        assert!(matches!(result, Err(AppError::ImageRejected(_))));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn one_bad_body_is_refetched_before_failing_the_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend(std::iter::repeat_n(0x22u8, 48));
+
+        let seen = calls.clone();
+        let page = fetch_page(dir.path(), 0, move || {
+            let seen = seen.clone();
+            let png = png.clone();
+            async move {
+                // First response is a CDN oddity; the retry is the real page.
+                if seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Ok(b"not-an-image".to_vec())
+                } else {
+                    Ok(png)
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(page.name, staged_name(0, "png"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn persistent_garbage_is_reported_as_a_rejected_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = calls.clone();
+        let error = fetch_page(dir.path(), 0, move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(b"still-not-an-image".to_vec())
+            }
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, AppError::ImageRejected(_)));
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            PAGE_FETCH_ATTEMPTS
+        );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 

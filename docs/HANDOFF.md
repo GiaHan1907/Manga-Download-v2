@@ -362,6 +362,18 @@ Danh sách host vẫn **exact**: test `a_google_host_outside_the_list_still_fail
 
 **Cách nhận biết lại:** `SOURCE_PARSE_ERROR` cho cả một "tập" của TTT → mở trang, đếm `img` theo host. Nếu ảnh nằm trên một CDN mới, thêm đúng host vào `TTT_IMAGE_HOSTS` (kèm test exact-match), đừng nới rule cho mọi host.
 
+### 2v. PNG thật bị từ chối vì chữ ký sai trong validator — 2026-10-27
+
+Sau khi thêm host Blogger (§2u), các tập của Lộc Đỉnh Ký/Đệ Nhất Mì Vương tải xong, nhưng **Cô bé tinh nghịch Asari** `tap-85` (TTT, 102 trang PNG) fail `VALIDATION_ERROR` "Ảnh trang không hợp lệ (UNSUPPORTED_TYPE)".
+
+Probe live: các trang tải về đúng là PNG thật (`89 50 4E 47 0D 0A 1A 0A …`), nhưng `image_validate::detect` trả `None`. Nguyên nhân: hằng số `PNG_MAGIC` viết **`0D 1A 0A 00`** thay vì **`0D 0A 1A 0A`** — thiếu một byte và sai thứ tự. Mọi fixture test (checkpoint, engine, exporter, transfer, cover, fixture provider) đều **copy đúng chữ ký sai đó**, nên suite xanh trong khi PNG thật không bao giờ qua được. Đây đúng là bẫy "fixture phản chiếu implementation" đã ghi ở phần tự-review.
+
+Sửa: hằng số đúng + sửa toàn bộ fixture; thêm test hồi quy dùng **một PNG 1×1 thật** (base64 do trình duyệt tạo) và assert rằng chuỗi byte cũ **không** phải PNG. Sau khi sửa, probe trả `Some(Png)` cho các trang mẫu và chương tải được.
+
+Kèm theo: một trang có thể trả về nội dung **không phải ảnh** một lần (CDN trả challenge/half-written edge copy; đúng URL đó vài giây sau trả PNG hợp lệ). Trước đây một trang như vậy làm **cả chương** fail với lỗi không retry được. Nay `fetch_page` thử lại **một lần** khi bytes bị từ chối (`AppError::ImageRejected`), rồi mới báo lỗi; mã wire vẫn là `VALIDATION_ERROR`.
+
+**Cách nhận biết lần sau:** `UNSUPPORTED_TYPE` cho cả một chương mà nguồn nổi tiếng dùng PNG → kiểm tra ngay hằng số chữ ký bằng một file PNG thật, đừng tin fixture tự dựng.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.

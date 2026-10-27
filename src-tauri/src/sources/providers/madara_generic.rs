@@ -3060,6 +3060,42 @@ mod tests {
         }
     }
 
+    /// Live diagnostic for one chapter whose page bytes fail image validation
+    /// (reported 2026-10-27: "Cô bé tinh nghịch Asari" tap-85, UNSUPPORTED_TYPE).
+    #[tokio::test]
+    #[ignore = "live probe: page bytes rejected as UNSUPPORTED_TYPE"]
+    async fn live_diag_ttt_unsupported_page() {
+        let adapter = MadaraGeneric::live(
+            "Truyen Tuoi Tho",
+            "https://truyentuoitho.com/",
+            &ttt_image_hosts(),
+        )
+        .unwrap();
+        let slug = "co-be-tinh-nghich-asari";
+        let manifest = adapter
+            .page_manifest(slug, "tap-85")
+            .await
+            .expect("manifest");
+        println!("DIAG pages = {}", manifest.pages.len());
+        let mut indices: Vec<usize> = (0..8).map(|step| step * manifest.pages.len() / 8).collect();
+        indices.dedup();
+        for index in indices {
+            let url = &manifest.pages[index].url;
+            match adapter.fetch_image(url).await {
+                Ok(bytes) => {
+                    let head = &bytes[..bytes.len().min(24)];
+                    println!(
+                        "DIAG page {index} bytes={} kind={:?} head={:02x?}",
+                        bytes.len(),
+                        crate::downloader::image_validate::detect(&bytes),
+                        head
+                    );
+                }
+                Err(error) => println!("DIAG page {index} err={}", error.code()),
+            }
+        }
+    }
+
     /// Live diagnostic for a story whose "tap-N" chapters fail with
     /// SOURCE_PARSE_ERROR (reported 2026-10-27). Prints what the page actually
     /// carries: embeds, image hosts, containers.

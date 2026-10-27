@@ -103,7 +103,7 @@ mod tests {
     }
 
     fn png_like(seed: u8) -> Vec<u8> {
-        let mut bytes: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        let mut bytes: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         bytes.extend(std::iter::repeat_n(seed, 64));
         bytes
     }

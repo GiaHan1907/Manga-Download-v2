@@ -23,7 +23,11 @@ impl ImageKind {
     }
 }
 
-const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+// The PNG signature is 89 50 4E 47 0D 0A 1A 0A. The previous value had
+// 0D 1A 0A 00, so real PNG pages were rejected as UNSUPPORTED_TYPE while
+// every fixture mirrored the wrong bytes and stayed green (live 2026-10-27:
+// Truyen Tuoi Tho chapters that serve PNG).
+const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 const GIF87A: &[u8] = b"GIF87a";
 const GIF89A: &[u8] = b"GIF89a";
 
@@ -94,7 +98,7 @@ mod tests {
 
     #[test]
     fn detects_known_magic() {
-        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         assert_eq!(detect(&png), Some(ImageKind::Png));
         assert_eq!(detect(&[0xff, 0xd8, 0xff, 0xe0]), Some(ImageKind::Jpeg));
         assert_eq!(detect(b"GIF89a...."), Some(ImageKind::Gif));
@@ -116,7 +120,7 @@ mod tests {
 
     #[test]
     fn valid_image_passes_and_kind_drives_extension() {
-        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         png.extend(std::iter::repeat_n(0x41, 40));
         let kind = validate(&png, 1024).unwrap();
         assert_eq!(kind.extension(), "png");
@@ -132,5 +136,26 @@ mod tests {
             0x414f_a339
         );
         assert_eq!(crc32_hex(b"123456789"), "cbf43926");
+    }
+
+    /// A real 1x1 PNG, decoded from bytes a browser wrote — not from the
+    /// constant in this file. The 2026-10-27 bug: fixtures hand-built
+    /// 89 50 4E 47 0D 1A 0A 00 (one byte short and reordered), so the wrong
+    /// PNG_MAGIC stayed green while every real PNG page was rejected.
+    #[test]
+    fn a_real_png_is_accepted_and_the_mirrored_bytes_are_not() {
+        use base64::Engine as _;
+        let png = base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+            .unwrap();
+        assert_eq!(detect(&png), Some(ImageKind::Png));
+        assert!(validate(&png, 1024 * 1024).is_ok());
+
+        let mirrored = [0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        assert_eq!(
+            detect(&mirrored),
+            None,
+            "the old constant described no real file"
+        );
     }
 }

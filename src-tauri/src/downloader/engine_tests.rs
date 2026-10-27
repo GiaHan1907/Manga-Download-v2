@@ -23,7 +23,7 @@ use crate::sources::dto::{
 use crate::sources::registry::SourceRegistry;
 
 fn image_bytes(seed: u8) -> Vec<u8> {
-    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
     bytes.extend(std::iter::repeat_n(seed, 40));
     bytes
 }

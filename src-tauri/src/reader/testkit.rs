@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 
 /// Valid-enough PNG: magic + IHDR carrying the given dimensions + filler.
 pub fn png_bytes(seed: u8, width: u32, height: u32) -> Vec<u8> {
-    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
     bytes.extend([0u8, 0, 0, 13, b'I', b'H', b'D', b'R']);
     bytes.extend(width.to_be_bytes());
     bytes.extend(height.to_be_bytes());

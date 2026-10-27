@@ -337,7 +337,7 @@ mod tests {
     use crate::downloader::image_validate::crc32_hex;
 
     fn png(seed: u8, size: usize) -> Vec<u8> {
-        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x1a, 0x0a, 0x00];
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
         bytes.extend(std::iter::repeat_n(seed, size));
         bytes
     }

@@ -526,7 +526,7 @@ async fn fetch_and_store_page(
         }
         transfer::store_single_file(&job.staging, format, &bytes)?
     } else {
-        transfer::fetch_page(&job.staging, index, job.adapter.fetch_image(&url)).await?
+        transfer::fetch_page(&job.staging, index, || job.adapter.fetch_image(&url)).await?
     };
     // Bandwidth cap: pace the payload we just pulled before the next page
     // leaves, so a cap in Settings is a cap on the wire, not per chapter.
