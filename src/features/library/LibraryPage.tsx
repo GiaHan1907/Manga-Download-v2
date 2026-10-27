@@ -31,6 +31,7 @@ import { useCoverUrl } from "../../shared/hooks/useCoverUrl";
 import { bumpDomain, useDomainVersion } from "../../shared/hooks/useInvalidation";
 import { useDebouncedValue } from "../discover/hooks/useDebouncedValue";
 import { localServices } from "../../services/provider";
+import Dialog from "../../components/ui/Dialog";
 import MangaDeleteDialog from "./MangaDeleteDialog";
 import { formatBytes } from "../../types/downloads";
 import { relativeAge } from "../../shared/lib/time";
@@ -154,10 +155,16 @@ function MangaTile({
   manga,
   onToggleFavorite,
   onErase,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: {
   manga: LibraryMangaDto;
   onToggleFavorite: (manga: LibraryMangaDto) => void;
   onErase: (manga: LibraryMangaDto) => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (manga: LibraryMangaDto) => void;
 }) {
   const offline = manga.downloadedChapters > 0;
   return (
@@ -189,6 +196,16 @@ function MangaTile({
           </p>
         )}
         <div className="lib-actions">
+          {selectable && (
+            <label className="lib-tile__select">
+              <input
+                type="checkbox"
+                checked={selected}
+                aria-label={`Chọn ${manga.title}`}
+                onChange={() => onToggleSelect?.(manga)}
+              />
+            </label>
+          )}
           <Button to={`/library/${manga.id}`} variant="primary" className="lib-tile__open">
             <BookOpen size={14} aria-hidden="true" /> {offline ? "Đọc tiếp" : "Mở"}
           </Button>
@@ -248,6 +265,13 @@ export default function LibraryPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [eraseTarget, setEraseTarget] = useState<LibraryMangaDto | null>(null);
   const [reconcileNote, setReconcileNote] = useState<string | null>(null);
+  // Bulk selection: a mode, not a permanent checkbox on every tile — the grid
+  // is for browsing first, and a stray click on a cover must never arm a delete.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNote, setBulkNote] = useState<string | null>(null);
+  const [bulkConfirmDelete, setBulkConfirmDelete] = useState(false);
   const debouncedQuery = useDebouncedValue(query, 300);
   const libraryVersion = useDomainVersion("library");
 
@@ -305,6 +329,51 @@ export default function LibraryPage() {
       }
       return next;
     });
+  }
+
+  function toggleSelect(mangaId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(mangaId)) {
+        next.delete(mangaId);
+      } else {
+        next.add(mangaId);
+      }
+      return next;
+    });
+  }
+
+  /// Removes the selection from the library, optionally with its files. Runs one
+  /// manga at a time on purpose: each call is its own transaction, and a refusal
+  /// (active downloads are rejected in Rust) must not abort the rest.
+  async function runBulk(deleteFiles: boolean) {
+    setBulkBusy(true);
+    setBulkConfirmDelete(false);
+    setBulkNote(null);
+    const ids = [...selected];
+    let removed = 0;
+    let files = 0;
+    const failures: string[] = [];
+    for (const mangaId of ids) {
+      try {
+        const outcome = await localServices.libraryV2.removeManga({ mangaId, deleteFiles });
+        removed += 1;
+        files += outcome.filesRemoved ?? 0;
+      } catch (error) {
+        failures.push(normalizeIpcError(error).message);
+      }
+    }
+    bumpDomain("library");
+    bumpDomain("home");
+    bumpDomain("favorites");
+    setSelected(new Set());
+    setSelectMode(false);
+    setBulkNote(
+      failures.length === 0
+        ? `Đã gỡ ${removed} truyện${deleteFiles ? ` và xoá ${files} file` : " (giữ file trên đĩa)"}.`
+        : `Đã gỡ ${removed} truyện, ${failures.length} truyện không gỡ được (${failures[0]}).`,
+    );
+    setBulkBusy(false);
   }
 
   async function toggleFavorite(manga: LibraryMangaDto) {
@@ -443,6 +512,16 @@ export default function LibraryPage() {
               <Rows3 size={14} aria-hidden="true" /> Danh sách
             </button>
           </div>
+          <Button
+            variant={selectMode ? "secondary" : "ghost"}
+            onClick={() => {
+              setSelectMode((on) => !on);
+              setSelected(new Set());
+              setBulkNote(null);
+            }}
+          >
+            {selectMode ? "Xong" : "Chọn nhiều"}
+          </Button>
         </div>
 
         <div className="discover-filters">
@@ -583,6 +662,9 @@ export default function LibraryPage() {
                           manga={manga}
                           onToggleFavorite={(m) => void toggleFavorite(m)}
                           onErase={setEraseTarget}
+                          selectable={selectMode}
+                          selected={selected.has(manga.id)}
+                          onToggleSelect={(m) => toggleSelect(m.id)}
                         />
                       ))
                     : items.map((manga) => (
@@ -633,6 +715,52 @@ export default function LibraryPage() {
               </>
             )}
           </section>
+
+      {selectMode && (
+        <section className="panel bulk-bar" aria-label="Thao tác nhiều truyện">
+          <div className="bulk-bar__row">
+            <span>
+              Đã chọn <strong>{selected.size}</strong> truyện
+            </span>
+            <Button
+              variant="ghost"
+              onClick={() =>
+                setSelected(
+                  new Set(
+                    (page.state === "success" ? page.data.items : []).map((manga) => manga.id),
+                  ),
+                )
+              }
+            >
+              Chọn cả trang
+            </Button>
+            <Button variant="ghost" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
+              Bỏ chọn
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={bulkBusy || selected.size === 0}
+              onClick={() => void runBulk(false)}
+            >
+              Gỡ khỏi Thư viện (giữ file)
+            </Button>
+            <Button
+              variant="primary"
+              disabled={bulkBusy || selected.size === 0}
+              onClick={() => setBulkConfirmDelete(true)}
+            >
+              Gỡ và xoá file
+            </Button>
+          </div>
+        </section>
+      )}
+      {bulkNote && (
+        // Outside the bar on purpose: the mode closes as soon as the run ends,
+        // and the summary is exactly what the user needs to read then.
+        <p className="muted" role="status">
+          {bulkNote}
+        </p>
+      )}
 
           {newest.length > 0 && (
             <section aria-label="Mới thêm vào">
@@ -804,6 +932,28 @@ export default function LibraryPage() {
           {actionError}
         </p>
       )}
+      <Dialog
+        open={bulkConfirmDelete}
+        title={`Gỡ ${selected.size} truyện và xoá file?`}
+        description="File CBZ/PDF của những truyện này sẽ bị xoá khỏi đĩa. Metadata, yêu thích và tiến độ đọc cũng bị gỡ cùng. Không hoàn tác được."
+        onClose={() => setBulkConfirmDelete(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setBulkConfirmDelete(false)}>
+              Hủy
+            </Button>
+            <Button variant="primary" disabled={bulkBusy} onClick={() => void runBulk(true)}>
+              Xác nhận xoá file
+            </Button>
+          </>
+        }
+      >
+        <p className="muted">
+          Nếu chỉ muốn dọn danh sách mà giữ nội dung đã tải, chọn &quot;Gỡ khỏi Thư viện (giữ
+          file)&quot;.
+        </p>
+      </Dialog>
+
       {eraseTarget && (
         <MangaDeleteDialog
           mangaId={eraseTarget.id}
