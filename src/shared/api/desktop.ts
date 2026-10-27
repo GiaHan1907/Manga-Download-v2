@@ -39,6 +39,7 @@ import type {
   RemoteMangaDetailDto,
   SaveResultDto,
   SearchResultDto,
+  SourceProbeDto,
   SourceViewDto,
 } from "../../types/source";
 
@@ -175,6 +176,12 @@ export async function setSourceEnabled(args: {
   enabled: boolean;
 }): Promise<boolean> {
   return invoke<boolean>("set_source_enabled", args);
+}
+
+/// One bounded search through the source's own allowlisted transport. Only the
+/// source id crosses IPC; the probe query and timeout live in Rust.
+export async function probeMangaSource(args: { sourceId: string }): Promise<SourceProbeDto> {
+  return invoke<SourceProbeDto>("probe_manga_source", args);
 }
 
 export async function searchManga(args: {

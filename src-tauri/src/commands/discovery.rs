@@ -23,6 +23,17 @@ pub async fn list_supported_sources(
     discovery_service::list_sources_view(&registry, &state.db).await
 }
 
+/// Read-only reachability check for one source: one bounded search through the
+/// adapter's own allowlisted transport. The renderer sends only a source id.
+#[tauri::command]
+pub async fn probe_manga_source(
+    source_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::sources::dto::SourceProbeDto, AppError> {
+    let registry = snapshot(&state)?;
+    discovery_service::probe_source(&registry, &state.db, &source_id).await
+}
+
 #[tauri::command]
 pub async fn add_manga_source(
     display_name: String,

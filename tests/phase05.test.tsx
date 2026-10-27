@@ -288,7 +288,8 @@ describe("T05 sources management", () => {
     renderAt("/settings/sources");
     const heading = await screen.findByText("Truyen Tuoi Tho");
     const row = heading.closest(".source-row") as HTMLElement;
-    fireEvent.click(row.querySelector("button") as Element);
+    // By name, not "the first button": the row also carries Kiểm tra / Bật / Xoá.
+    fireEvent.click(within(row).getByRole("button", { name: "Sửa" }));
     const domainInput = screen.getByLabelText(/Tên miền mới/);
     fireEvent.change(domainInput, { target: { value: "https://truyentuoitho.work/" } });
     fireEvent.click(screen.getByRole("button", { name: "Lưu tên miền" }));

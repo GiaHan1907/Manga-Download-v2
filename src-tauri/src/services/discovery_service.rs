@@ -855,6 +855,71 @@ pub async fn save(
     })
 }
 
+/// Fixed term for the reachability check. The probe answers "can this source
+/// search right now", not "does this title exist", so the term only has to be
+/// one a manga catalog indexes.
+const PROBE_QUERY: &str = "one piece";
+/// A source may legitimately be slow; 20 s is long enough for a paced first
+/// request and short enough that the row does not spin forever.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// One bounded search through the adapter's own allowlisted transport. A
+/// failing source is an answer, not an error (`ok: false` + wire code), so the
+/// Sources screen can stay a status read; only an unknown or disabled source
+/// is rejected outright.
+pub async fn probe_source(
+    registry: &SourceRegistry,
+    pool: &SqlitePool,
+    source_id: &str,
+) -> Result<crate::sources::dto::SourceProbeDto, AppError> {
+    use crate::sources::dto::SourceProbeDto;
+
+    validate_id(source_id, "sourceId")?;
+    let views = list_sources_view(registry, pool).await?;
+    let view = views
+        .iter()
+        .find(|view| view.info.id == source_id)
+        .ok_or_else(|| AppError::validation("sourceId không thuộc danh sách nguồn đã đăng ký."))?;
+    if !view.enabled {
+        return Err(AppError::validation(
+            "Nguồn đang tắt — bật nó trước khi kiểm tra.",
+        ));
+    }
+    let adapter = registry
+        .get(source_id)
+        .ok_or_else(|| AppError::validation("sourceId không thuộc danh sách nguồn đã đăng ký."))?;
+
+    let started = std::time::Instant::now();
+    let outcome = tokio::time::timeout(PROBE_TIMEOUT, adapter.search(PROBE_QUERY, 1)).await;
+    let latency_ms = started.elapsed().as_millis() as u64;
+    Ok(match outcome {
+        Ok(Ok(page)) => SourceProbeDto {
+            ok: true,
+            latency_ms,
+            result_count: page.items.len(),
+            code: None,
+            message: None,
+        },
+        Ok(Err(error)) => {
+            let (code, message) = AppError::from(error).wire_pair();
+            SourceProbeDto {
+                ok: false,
+                latency_ms,
+                result_count: 0,
+                code: Some(code.to_string()),
+                message: Some(message),
+            }
+        }
+        Err(_) => SourceProbeDto {
+            ok: false,
+            latency_ms,
+            result_count: 0,
+            code: Some("SOURCE_NETWORK".to_string()),
+            message: Some("Nguồn không phản hồi trong 20 giây.".to_string()),
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1285,6 +1350,88 @@ mod tests {
             number,
             Some(1.0),
             "the refresh-save must heal the stale number"
+        );
+    }
+
+    /// "Kiểm tra" is a status read: a working source answers with latency and
+    /// a result count, and a disabled source is never dialed at all.
+    #[tokio::test]
+    async fn probe_reports_reachability_and_refuses_disabled_or_unknown_sources() {
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = fixture_registry();
+
+        let ok = probe_source(&registry, &pool, "fixture").await.unwrap();
+        assert!(ok.ok);
+        assert!(ok.code.is_none(), "a working source carries no code");
+        assert!(ok.latency_ms < 20_000);
+        assert!(ok.result_count <= 2, "the fixture caps a page at two items");
+
+        source_repo::upsert_source(&pool, "fixture", "Fixture", "madara", None, None)
+            .await
+            .unwrap();
+        source_repo::set_enabled(&pool, "fixture", false)
+            .await
+            .unwrap();
+        assert!(matches!(
+            probe_source(&registry, &pool, "fixture").await,
+            Err(AppError::Validation(_))
+        ));
+
+        assert!(probe_source(&registry, &pool, "not-a-source")
+            .await
+            .is_err());
+    }
+
+    /// A source that fails is still a *successful* probe: the row shows the
+    /// source's own wire code instead of a generic IPC failure.
+    #[tokio::test]
+    async fn probe_maps_a_source_failure_to_its_wire_code() {
+        use crate::sources::dto::{Capability, RemoteSearchPage, SourceStatus};
+        use url::Url;
+
+        struct Failing;
+
+        #[async_trait::async_trait]
+        impl SourceAdapter for Failing {
+            fn info(&self) -> SourceInfo {
+                SourceInfo {
+                    id: "failing".to_string(),
+                    display_name: "Failing".to_string(),
+                    capabilities: vec![Capability::Search],
+                    status: SourceStatus::Ready,
+                    attribution: None,
+                }
+            }
+            fn owns_url(&self, _url: &Url) -> bool {
+                false
+            }
+            async fn search(
+                &self,
+                _query: &str,
+                _page: u32,
+            ) -> Result<RemoteSearchPage, SourceError> {
+                Err(SourceError::Network)
+            }
+            async fn resolve_url(&self, _url: &Url) -> Result<String, SourceError> {
+                Err(SourceError::Network)
+            }
+            async fn manga_detail(
+                &self,
+                _source_manga_id: &str,
+            ) -> Result<RemoteMangaDetail, SourceError> {
+                Err(SourceError::Network)
+            }
+        }
+
+        let (_dir, pool) = crate::db::test_pool().await;
+        let registry = SourceRegistry::with_adapters(vec![std::sync::Arc::new(Failing)]);
+        let probe = probe_source(&registry, &pool, "failing").await.unwrap();
+        assert!(!probe.ok);
+        assert_eq!(probe.code.as_deref(), Some("SOURCE_NETWORK"));
+        assert_eq!(probe.result_count, 0);
+        assert!(
+            probe.message.is_some(),
+            "the row needs words, not just a code"
         );
     }
 }

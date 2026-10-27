@@ -10,7 +10,7 @@ import { normalizeIpcError } from "../../shared/api/desktop";
 import { useAsyncData } from "../../shared/hooks/useAsyncData";
 import { bumpDomain } from "../../shared/hooks/useInvalidation";
 import { useServicesVersion } from "../../shared/hooks/useServices";
-import type { SourceViewDto } from "../../types/source";
+import type { SourceProbeDto, SourceViewDto } from "../../types/source";
 
 function RealSources() {
   const [reload, setReload] = useState(0);
@@ -23,6 +23,8 @@ function RealSources() {
   const [editName, setEditName] = useState("");
   const [editUrl, setEditUrl] = useState("");
   const [editHosts, setEditHosts] = useState("");
+  const [probe, setProbe] = useState<Record<string, SourceProbeDto>>({});
+  const [probingId, setProbingId] = useState<string | null>(null);
 
   function startEdit(source: SourceViewDto) {
     setEditingId(source.id);
@@ -49,6 +51,22 @@ function RealSources() {
       setActionError(normalizeIpcError(error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Reachability check: the probe itself lives in Rust (fixed query, 20 s cap,
+  // the source's own allowlisted transport). The answer is left on the row so
+  // it stays readable after the toast-less wait.
+  async function checkSource(sourceId: string) {
+    setProbingId(sourceId);
+    setActionError(null);
+    try {
+      const result = await localServices.source.probe(sourceId);
+      setProbe((prev) => ({ ...prev, [sourceId]: result }));
+    } catch (error: unknown) {
+      setActionError(normalizeIpcError(error).message);
+    } finally {
+      setProbingId(null);
     }
   }
 
@@ -95,6 +113,13 @@ function RealSources() {
               {source.attribution && <p className="muted">{source.attribution}</p>}
             </div>
             <div className="chip-row">
+              <Button
+                variant="ghost"
+                disabled={busy || probingId === source.id}
+                onClick={() => void checkSource(source.id)}
+              >
+                {probingId === source.id ? "Đang kiểm tra…" : "Kiểm tra"}
+              </Button>
               {source.baseUrl && (
                 <Button
                   variant="ghost"
@@ -137,6 +162,16 @@ function RealSources() {
                 </Button>
               )}
             </div>
+            {probe[source.id] && (
+              <p
+                className={`source-probe ${probe[source.id].ok ? "source-probe--ok" : "source-probe--bad"}`}
+                role="status"
+              >
+                {probe[source.id].ok
+                  ? `Nguồn trả lời OK · ${probe[source.id].latencyMs} ms · ${probe[source.id].resultCount} kết quả cho “one piece”`
+                  : `${probe[source.id].code}: ${probe[source.id].message}`}
+              </p>
+            )}
             {editingId === source.id && (
             <div className="source-edit-form">
               <Input

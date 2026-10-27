@@ -10,6 +10,7 @@ import type {
   RemoteMangaDetailDto,
   SaveResultDto,
   SearchResultDto,
+  SourceProbeDto,
   SourceViewDto,
 } from "../types/source";
 
@@ -28,6 +29,8 @@ export interface SourceService {
     imageHosts?: string[];
   }): Promise<SourceViewDto>;
   setSourceEnabled(args: { sourceId: string; enabled: boolean }): Promise<boolean>;
+  /// Reachability check: one bounded search inside Rust (fixed query, 20 s cap).
+  probe(sourceId: string): Promise<SourceProbeDto>;
   search(args: {
     query: string;
     sourceIds?: string[];
@@ -67,6 +70,7 @@ export const sourceApi: SourceService = {
   removeSource: (sourceId) => desktop.removeMangaSource(sourceId),
   updateSource: (args) => desktop.updateMangaSource(args),
   setSourceEnabled: (args) => desktop.setSourceEnabled(args),
+  probe: (sourceId) => desktop.probeMangaSource({ sourceId }),
   search: (args) => desktop.searchManga(args),
   homeFeed: (sourceId) => desktop.getHomeFeed(sourceId),
   ranking: (args) => desktop.getHomeRanking(args.sourceId, args.period),

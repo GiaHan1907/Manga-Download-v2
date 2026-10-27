@@ -109,3 +109,14 @@ export const BROWSE_SORT_LABEL: Record<BrowseSort, string> = {
   "views-desc": "Lượt xem: cao nhất",
   "views-asc": "Lượt xem: thấp nhất",
 };
+
+/// Result of an explicit reachability check ("Kiểm tra") for one source.
+/// `ok: false` is still a successful probe — it carries the source's own wire
+/// code so the row can say what happened.
+export interface SourceProbeDto {
+  ok: boolean;
+  latencyMs: number;
+  resultCount: number;
+  code: string | null;
+  message: string | null;
+}

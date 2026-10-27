@@ -141,3 +141,17 @@ pub struct PageManifest {
     /// it — it is opened with an external application.
     pub single_file_format: Option<String>,
 }
+
+/// Result of an explicit "Kiểm tra nguồn" probe: a fixed, bounded search
+/// through the adapter's own allowlisted transport. A source that answers with
+/// a failure is still a successful probe — `ok: false` carries the wire code so
+/// the row can show what the source actually said.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceProbeDto {
+    pub ok: bool,
+    pub latency_ms: u64,
+    pub result_count: usize,
+    pub code: Option<String>,
+    pub message: Option<String>,
+}
