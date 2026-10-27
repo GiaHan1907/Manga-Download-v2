@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -126,6 +127,18 @@ impl HttpPolicy {
             };
         }
         let port = parsed.port_or_known_default().unwrap_or(443);
+        let key = (host.to_string(), port);
+        if let Some(public) = dns_cache()
+            .lock()
+            .ok()
+            .and_then(|mut cache| cache.get(&key, Instant::now()))
+        {
+            return if public {
+                Ok(())
+            } else {
+                Err(SourceError::Network)
+            };
+        }
         let addrs: Vec<IpAddr> = match (host, port).to_socket_addrs() {
             Ok(iter) => iter.map(|socket| socket.ip()).collect(),
             Err(_) => return Err(SourceError::Network),
@@ -133,11 +146,75 @@ impl HttpPolicy {
         if addrs.is_empty() {
             return Err(SourceError::Network);
         }
-        if addrs.iter().any(|ip| !is_public_ip(ip)) {
+        let public = addrs.iter().all(is_public_ip);
+        if let Ok(mut cache) = dns_cache().lock() {
+            cache.put(key, public, Instant::now());
+        }
+        if !public {
             return Err(SourceError::Network);
         }
         Ok(())
     }
+}
+
+/// How long a resolved host stays trusted. Short enough to notice a host being
+/// re-pointed, long enough that a 300-page chapter asks the resolver once.
+const DNS_CACHE_TTL: Duration = Duration::from_secs(60);
+/// Bounded: a session touches a handful of hosts.
+const DNS_CACHE_MAX: usize = 256;
+
+/// Resolution results, keyed by (host, port). A request used to resolve its
+/// host every time — one DNS round trip per page image — because the guard is
+/// called per request.
+#[derive(Debug)]
+struct DnsCache {
+    entries: HashMap<(String, u16), (Instant, bool)>,
+}
+
+impl DnsCache {
+    fn new() -> Self {
+        DnsCache {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// `Some(public)` while the entry is fresh; stale entries are dropped.
+    fn get(&mut self, key: &(String, u16), now: Instant) -> Option<bool> {
+        match self.entries.get(key) {
+            Some((at, public)) if now.duration_since(*at) < DNS_CACHE_TTL => Some(*public),
+            Some(_) => {
+                self.entries.remove(key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn put(&mut self, key: (String, u16), public: bool, now: Instant) {
+        if self.entries.len() >= DNS_CACHE_MAX && !self.entries.contains_key(&key) {
+            // Drop everything expired first; a full cache of fresh hosts is
+            // vanishingly unlikely (do not evict live entries blindly).
+            let stale: Vec<(String, u16)> = self
+                .entries
+                .iter()
+                .filter(|(_, (at, _))| now.duration_since(*at) >= DNS_CACHE_TTL)
+                .map(|(key, _)| key.clone())
+                .collect();
+            for key in stale {
+                self.entries.remove(&key);
+            }
+            if self.entries.len() >= DNS_CACHE_MAX {
+                return;
+            }
+        }
+        self.entries.insert(key, (now, public));
+    }
+}
+
+static DNS_CACHE: std::sync::OnceLock<Mutex<DnsCache>> = std::sync::OnceLock::new();
+
+fn dns_cache() -> &'static Mutex<DnsCache> {
+    DNS_CACHE.get_or_init(|| Mutex::new(DnsCache::new()))
 }
 
 pub(crate) fn is_public_ip(ip: &IpAddr) -> bool {
@@ -565,6 +642,29 @@ mod tests {
                 "a non-public resolve must be refused, never fail-open"
             );
         }
+    }
+
+    #[test]
+    fn dns_cache_holds_for_the_ttl_and_drops_stale_entries() {
+        let now = Instant::now();
+        let mut cache = DnsCache::new();
+        let key = ("example.com".to_string(), 443);
+
+        assert_eq!(cache.get(&key, now), None);
+        cache.put(key.clone(), true, now);
+        assert_eq!(cache.get(&key, now + Duration::from_secs(30)), Some(true));
+        // Past the TTL the entry is gone (and removed, so a re-resolve is forced).
+        assert_eq!(cache.get(&key, now + DNS_CACHE_TTL), None);
+        assert!(cache.entries.is_empty(), "stale entry must be dropped");
+    }
+
+    #[test]
+    fn dns_cache_remembers_a_negative_answer_so_it_keeps_failing_closed() {
+        let now = Instant::now();
+        let mut cache = DnsCache::new();
+        let key = ("private.invalid".to_string(), 443);
+        cache.put(key.clone(), false, now);
+        assert_eq!(cache.get(&key, now + Duration::from_secs(1)), Some(false));
     }
 
     #[test]
