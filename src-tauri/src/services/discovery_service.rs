@@ -383,10 +383,11 @@ pub async fn search(
         ));
     }
     let rows = source_repo::list_sources(pool).await?;
-    let mut items = Vec::new();
-    let mut source_errors = Vec::new();
-    let mut has_more = false;
 
+    // Resolve the target adapters first, in registry order: the requests run
+    // in parallel below, but the RESULT order stays deterministic.
+    let mut targets: Vec<std::sync::Arc<dyn SourceAdapter>> = Vec::new();
+    let mut source_errors: Vec<SearchSourceError> = Vec::new();
     match source_ids.filter(|ids| !ids.is_empty()) {
         None => {
             for adapter in registry.adapters() {
@@ -394,46 +395,64 @@ pub async fn search(
                 if rows.iter().any(|row| row.id == id && !row.enabled) {
                     continue;
                 }
-                collect(
-                    adapter.as_ref(),
-                    query,
-                    page,
-                    &mut items,
-                    &mut source_errors,
-                    &mut has_more,
-                )
-                .await;
+                targets.push(std::sync::Arc::clone(adapter));
             }
         }
         Some(ids) => {
-            let requested: Vec<String> = ids.into_iter().take(10).collect();
-            for id in requested {
+            for id in ids.into_iter().take(10) {
                 match require_enabled(registry, &rows, &id) {
-                    Ok(adapter) => {
-                        collect(
-                            adapter.as_ref(),
-                            query,
-                            page,
-                            &mut items,
-                            &mut source_errors,
-                            &mut has_more,
-                        )
-                        .await
-                    }
-                    Err(error) => {
-                        let (code, message) = match &error {
-                            AppError::Source(source) => (source.code(), source.safe_message()),
-                            AppError::Validation(message) => ("VALIDATION_ERROR", message.as_str()),
-                            _ => ("INTERNAL_ERROR", "Lỗi nội bộ không xác định."),
-                        };
-                        source_errors.push(SearchSourceError {
-                            source_id: id,
-                            code: code.to_string(),
-                            message: message.to_string(),
-                        });
-                    }
+                    Ok(adapter) => targets.push(adapter),
+                    Err(error) => source_errors.push(source_error(&id, &error)),
                 }
             }
+        }
+    }
+
+    // Fan out: one task per source, each bounded by SEARCH_SOURCE_TIMEOUT. The
+    // transport paces per HOST, so parallel sources still keep their own
+    // politeness; and a source that hangs or is slow no longer delays the rest
+    // (the old loop awaited each one in turn).
+    let mut set = tokio::task::JoinSet::new();
+    for (index, adapter) in targets.into_iter().enumerate() {
+        let query = query.to_string();
+        set.spawn(async move {
+            let id = adapter.info().id;
+            let outcome =
+                tokio::time::timeout(SEARCH_SOURCE_TIMEOUT, adapter.search(&query, page)).await;
+            (index, id, outcome)
+        });
+    }
+    let mut joined = Vec::with_capacity(set.len());
+    while let Some(result) = set.join_next().await {
+        // A panicked task must not take the whole search down; its source is
+        // simply missing from the answer.
+        if let Ok(triple) = result {
+            joined.push(triple);
+        }
+    }
+    joined.sort_by_key(|(index, _, _)| *index);
+
+    let mut items = Vec::new();
+    let mut has_more = false;
+    for (_, id, outcome) in joined {
+        match outcome {
+            Ok(Ok(page_result)) => {
+                has_more |= page_result.has_more;
+                items.extend(page_result.items);
+            }
+            Ok(Err(error)) => source_errors.push(SearchSourceError {
+                source_id: id,
+                code: error.code().to_string(),
+                message: error.safe_message().to_string(),
+            }),
+            Err(_) => source_errors.push(SearchSourceError {
+                source_id: id,
+                code: "SOURCE_NETWORK".to_string(),
+                message: format!(
+                    "Nguồn không trả lời trong {} giây.",
+                    SEARCH_SOURCE_TIMEOUT.as_secs()
+                ),
+            }),
         }
     }
 
@@ -449,25 +468,21 @@ pub async fn search(
     })
 }
 
-async fn collect(
-    adapter: &dyn SourceAdapter,
-    query: &str,
-    page: u32,
-    items: &mut Vec<crate::sources::dto::RemoteMangaSummary>,
-    source_errors: &mut Vec<SearchSourceError>,
-    has_more: &mut bool,
-) {
-    let id = adapter.info().id;
-    match adapter.search(query, page).await {
-        Ok(page_result) => {
-            *has_more |= page_result.has_more;
-            items.extend(page_result.items);
-        }
-        Err(error) => source_errors.push(SearchSourceError {
-            source_id: id,
-            code: error.code().to_string(),
-            message: error.safe_message().to_string(),
-        }),
+/// Per-source deadline for one search fan-out. The guarded transport bounds a
+/// single request; this bounds a source that keeps answering page-by-page
+/// slowly once the fan-out has started.
+const SEARCH_SOURCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
+fn source_error(id: &str, error: &AppError) -> SearchSourceError {
+    let (code, message) = match error {
+        AppError::Source(source) => (source.code(), source.safe_message()),
+        AppError::Validation(message) => ("VALIDATION_ERROR", message.as_str()),
+        _ => ("INTERNAL_ERROR", "Lỗi nội bộ không xác định."),
+    };
+    SearchSourceError {
+        source_id: id.to_string(),
+        code: code.to_string(),
+        message: message.to_string(),
     }
 }
 
@@ -1351,6 +1366,106 @@ mod tests {
             Some(1.0),
             "the refresh-save must heal the stale number"
         );
+    }
+
+    /// The fan-out runs sources in parallel (politeness is per host) while the
+    /// result order stays in registry order — the old loop awaited each source
+    /// in turn, so one slow site delayed every other result.
+    #[tokio::test]
+    async fn search_fans_out_in_parallel_but_keeps_registry_order() {
+        use crate::sources::dto::{Capability, RemoteMangaSummary, RemoteSearchPage, SourceStatus};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use url::Url;
+
+        struct Probe {
+            id: &'static str,
+            in_flight: Arc<AtomicUsize>,
+            peak: Arc<AtomicUsize>,
+        }
+
+        #[async_trait::async_trait]
+        impl SourceAdapter for Probe {
+            fn info(&self) -> SourceInfo {
+                SourceInfo {
+                    id: self.id.to_string(),
+                    display_name: self.id.to_string(),
+                    capabilities: vec![Capability::Search],
+                    status: SourceStatus::Ready,
+                    attribution: None,
+                }
+            }
+            fn owns_url(&self, _url: &Url) -> bool {
+                false
+            }
+            async fn search(
+                &self,
+                _query: &str,
+                _page: u32,
+            ) -> Result<RemoteSearchPage, SourceError> {
+                let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                self.peak.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                self.in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(RemoteSearchPage {
+                    items: vec![RemoteMangaSummary {
+                        source_id: self.id.to_string(),
+                        source_manga_id: format!("{}-1", self.id),
+                        source_display_name: self.id.to_string(),
+                        title: format!("Kết quả {}", self.id),
+                        author: None,
+                        cover_key: None,
+                        status: "ongoing".to_string(),
+                    }],
+                    has_more: false,
+                })
+            }
+            async fn resolve_url(&self, _url: &Url) -> Result<String, SourceError> {
+                Err(SourceError::UnsupportedOperation)
+            }
+            async fn manga_detail(
+                &self,
+                _source_manga_id: &str,
+            ) -> Result<RemoteMangaDetail, SourceError> {
+                Err(SourceError::UnsupportedOperation)
+            }
+        }
+
+        let (_dir, pool) = crate::db::test_pool().await;
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let registry = SourceRegistry::with_adapters(vec![
+            Arc::new(Probe {
+                id: "alpha",
+                in_flight: in_flight.clone(),
+                peak: peak.clone(),
+            }),
+            Arc::new(Probe {
+                id: "beta",
+                in_flight: in_flight.clone(),
+                peak: peak.clone(),
+            }),
+        ]);
+
+        let result = search(&registry, &pool, "one piece", None, 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "both sources must be in flight at the same time"
+        );
+        let ids: Vec<&str> = result
+            .items
+            .iter()
+            .map(|item| item.source_id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["alpha", "beta"],
+            "registry order, not completion order"
+        );
+        assert!(result.source_errors.is_empty());
     }
 
     /// "Kiểm tra" is a status read: a working source answers with latency and
