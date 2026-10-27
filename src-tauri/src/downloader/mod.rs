@@ -8,6 +8,7 @@
 pub mod checkpoint;
 pub mod exporter;
 pub mod image_validate;
+pub mod limiter;
 pub mod progress;
 pub mod recovery;
 pub mod scheduler;

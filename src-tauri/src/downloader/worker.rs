@@ -40,6 +40,9 @@ pub struct WorkerDeps {
     pub events: Arc<ProgressEmitter>,
     pub flags: WorkerFlags,
     pub image_concurrency: i64,
+    /// Page-download cap in KB/s from Settings (0 = unlimited). Read once per
+    /// chapter run; the limiter itself is process-wide (see `limiter`).
+    pub speed_limit_kbps: u64,
 }
 
 /// Live byte accounting for progress frames (never persisted — design §8).
@@ -87,6 +90,7 @@ struct PageJob {
     running_total: Arc<Mutex<u64>>,
     /// `Some("pdf")` when this chapter is ONE file rather than an image list.
     single_file: Option<String>,
+    speed_limit_kbps: u64,
 }
 
 pub async fn run_task(
@@ -260,6 +264,7 @@ async fn attempt_run(
         },
         running_total: Arc::new(Mutex::new(0u64)),
         single_file: single_file.clone(),
+        speed_limit_kbps: deps.speed_limit_kbps,
     });
     loop {
         let pages = download_repo::list_pages(&deps.pool, &task_id).await?;
@@ -523,6 +528,9 @@ async fn fetch_and_store_page(
     } else {
         transfer::fetch_page(&job.staging, index, job.adapter.fetch_image(&url)).await?
     };
+    // Bandwidth cap: pace the payload we just pulled before the next page
+    // leaves, so a cap in Settings is a cap on the wire, not per chapter.
+    crate::downloader::limiter::pace(staged.size_bytes as u64, job.speed_limit_kbps).await;
     {
         let mut total = job.running_total.lock().unwrap();
         *total = total.saturating_add(staged.size_bytes as u64);

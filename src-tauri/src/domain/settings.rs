@@ -7,6 +7,10 @@ pub const CHAPTER_CONCURRENCY_MIN: i64 = 1;
 pub const CHAPTER_CONCURRENCY_MAX: i64 = 5;
 pub const IMAGE_CONCURRENCY_MIN: i64 = 1;
 pub const IMAGE_CONCURRENCY_MAX: i64 = 8;
+/// 0 = no cap. The ceiling is deliberately generous: this is a throttle for
+/// "do not saturate the line", not a second concurrency knob.
+pub const SPEED_LIMIT_MIN_KBPS: i64 = 0;
+pub const SPEED_LIMIT_MAX_KBPS: i64 = 100_000;
 
 const READER_MODES: [&str; 3] = ["single", "double", "vertical"];
 const READING_DIRECTIONS: [&str; 2] = ["ltr", "rtl"];
@@ -27,6 +31,10 @@ pub struct AppSettings {
     /// Feature plan F1: global default for the new-chapter watcher. Per-manga
     /// `mangas.watch_enabled` (NULL here means "follow this value") overrides.
     pub watch_enabled: bool,
+    /// Page-download bandwidth cap in KB/s; 0 = unlimited. Applied across the
+    /// whole engine, not per chapter.
+    #[serde(default)]
+    pub speed_limit_kbps: i64,
 }
 
 impl Default for AppSettings {
@@ -40,6 +48,7 @@ impl Default for AppSettings {
             notifications_enabled: true,
             close_to_tray: false,
             watch_enabled: true,
+            speed_limit_kbps: 0,
         }
     }
 }
@@ -63,6 +72,11 @@ impl AppSettings {
         if !(IMAGE_CONCURRENCY_MIN..=IMAGE_CONCURRENCY_MAX).contains(&self.image_concurrency) {
             return Err(AppError::validation(
                 "imageConcurrency phải là số nguyên từ 1 đến 8.",
+            ));
+        }
+        if !(SPEED_LIMIT_MIN_KBPS..=SPEED_LIMIT_MAX_KBPS).contains(&self.speed_limit_kbps) {
+            return Err(AppError::validation(
+                "speedLimitKbps phải là số nguyên từ 0 (không giới hạn) đến 100000 KB/s.",
             ));
         }
         if !OUTPUT_FORMATS.contains(&self.output_format.as_str()) {
@@ -96,6 +110,9 @@ impl AppSettings {
         }
         if let Some(value) = patch.watch_enabled {
             next.watch_enabled = value;
+        }
+        if let Some(value) = patch.speed_limit_kbps {
+            next.speed_limit_kbps = value;
         }
         next
     }
@@ -188,6 +205,7 @@ mod tests {
             "notificationsEnabled",
             "closeToTray",
             "watchEnabled",
+            "speedLimitKbps",
         ];
         expected.sort();
         assert_eq!(keys, expected);

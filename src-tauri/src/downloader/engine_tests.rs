@@ -267,6 +267,7 @@ impl World {
                 shutdown,
             },
             image_concurrency: 2,
+            speed_limit_kbps: 0,
         });
         worker::run_task(claimed, deps)
             .await
@@ -564,6 +565,7 @@ async fn pause_midflight_then_resume_skips_stored_pages() {
             shutdown: Arc::new(AtomicBool::new(false)),
         },
         image_concurrency: 4,
+        speed_limit_kbps: 0,
     });
     // The gate stays open (already released), so remaining pages resolve
     // without blocking even though the hold behavior is unchanged.

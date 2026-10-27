@@ -335,6 +335,7 @@ pub struct SettingsPatchInput {
     pub notifications_enabled: Option<bool>,
     pub close_to_tray: Option<bool>,
     pub watch_enabled: Option<bool>,
+    pub speed_limit_kbps: Option<i64>,
 }
 
 /// Phase 08 — Home overview aggregates (single SQL pass, no N+1).

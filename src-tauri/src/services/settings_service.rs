@@ -56,6 +56,7 @@ mod tests {
             notifications_enabled: None,
             close_to_tray: None,
             watch_enabled: None,
+            speed_limit_kbps: None,
         }
     }
 

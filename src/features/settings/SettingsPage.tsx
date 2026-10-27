@@ -117,6 +117,24 @@ function SettingsForm({ initial }: { initial: AppSettings }) {
         </label>
         <label className="input-field">
           <span className="input-field__label">
+            Giới hạn tốc độ tải (KB/s, 0 = không giới hạn)
+          </span>
+          <input
+            className="input"
+            type="number"
+            min={SETTINGS_LIMITS.speedLimitKbps.min}
+            max={SETTINGS_LIMITS.speedLimitKbps.max}
+            value={draft.speedLimitKbps}
+            onChange={(event) =>
+              setDraft({ ...draft, speedLimitKbps: Number(event.target.value) })
+            }
+          />
+        </label>
+        <p className="muted">
+          Áp cho toàn bộ engine (mọi chương đang tải chung một đường), không phải cho từng chương.
+        </p>
+        <label className="input-field">
+          <span className="input-field__label">
             Ảnh đồng thời ({SETTINGS_LIMITS.imageConcurrency.min}–{SETTINGS_LIMITS.imageConcurrency.max})
           </span>
           <input

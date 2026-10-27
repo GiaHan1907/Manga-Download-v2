@@ -13,6 +13,7 @@ function toDto(settings: AppSettings): AppSettingsDto {
     notificationsEnabled: settings.notificationsEnabled,
     closeToTray: settings.closeToTray,
     watchEnabled: settings.watchEnabled,
+    speedLimitKbps: settings.speedLimitKbps,
   };
 }
 
@@ -33,7 +34,7 @@ export const settingsApi: SettingsService = {
   },
 
   async save(settings: AppSettings): Promise<void> {
-    const { chapterConcurrency, imageConcurrency } = SETTINGS_LIMITS;
+    const { chapterConcurrency, imageConcurrency, speedLimitKbps } = SETTINGS_LIMITS;
     if (
       !Number.isInteger(settings.chapterConcurrency) ||
       settings.chapterConcurrency < chapterConcurrency.min ||
@@ -50,6 +51,15 @@ export const settingsApi: SettingsService = {
     ) {
       throw new Error(
         `Số ảnh đồng thời phải là số nguyên từ ${imageConcurrency.min} đến ${imageConcurrency.max}.`,
+      );
+    }
+    if (
+      !Number.isInteger(settings.speedLimitKbps) ||
+      settings.speedLimitKbps < speedLimitKbps.min ||
+      settings.speedLimitKbps > speedLimitKbps.max
+    ) {
+      throw new Error(
+        `Giới hạn tốc độ phải là số nguyên từ ${speedLimitKbps.min} (không giới hạn) đến ${speedLimitKbps.max} KB/s.`,
       );
     }
     try {

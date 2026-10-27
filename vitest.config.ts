@@ -13,5 +13,9 @@ export default defineConfig({
     // gate is worse than a slow one.
     testTimeout: 15_000,
     hookTimeout: 15_000,
+    // Each file builds its own jsdom; letting every core run one at once made
+    // the slowest assertions time out non-deterministically on a loaded
+    // machine. Four at a time keeps a full run reproducible.
+    maxWorkers: 4,
   },
 });

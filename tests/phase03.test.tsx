@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   outputFormat: "cbz",
   notificationsEnabled: true,
   closeToTray: false,
+  watchEnabled: true,
+  speedLimitKbps: 0,
 };
 
 function installBackendMock() {

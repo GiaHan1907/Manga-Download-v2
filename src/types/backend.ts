@@ -110,6 +110,8 @@ export type AppSettingsDto = {
   closeToTray: boolean;
   /** Feature plan F1: global watcher default (per-manga override in Library). */
   watchEnabled: boolean;
+  /** Page-download bandwidth cap in KB/s across the whole engine; 0 = no cap. */
+  speedLimitKbps: number;
 };
 
 /// Phase 08 — Home overview aggregates (library_stats).

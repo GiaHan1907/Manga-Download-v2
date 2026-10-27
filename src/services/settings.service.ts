@@ -11,11 +11,15 @@ export interface AppSettings {
   notificationsEnabled: boolean;
   closeToTray: boolean;
   watchEnabled: boolean;
+  /// Page-download bandwidth cap in KB/s; 0 = unlimited.
+  speedLimitKbps: number;
 }
 
 export const SETTINGS_LIMITS = {
   chapterConcurrency: { min: 1, max: 5 },
   imageConcurrency: { min: 1, max: 8 },
+  /// KB/s across the whole engine; 0 = no cap (mirrors SPEED_LIMIT_MAX_KBPS).
+  speedLimitKbps: { min: 0, max: 100_000 },
 } as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -27,6 +31,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notificationsEnabled: true,
   closeToTray: false,
   watchEnabled: true,
+  speedLimitKbps: 0,
 };
 
 export interface SettingsService {

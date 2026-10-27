@@ -157,11 +157,16 @@ impl Coordinator {
             let Some(task) = claimed else { return };
             // dispatch already gated capacity, so spawn_worker cannot reject:
             // a claimed task always gets a worker (no `resolving` zombie).
-            self.spawn_worker(task, settings.image_concurrency);
+            self.spawn_worker(task, settings.image_concurrency, settings.speed_limit_kbps);
         }
     }
 
-    fn spawn_worker(self: &Arc<Self>, task: download_repo::TaskRow, image_concurrency: i64) {
+    fn spawn_worker(
+        self: &Arc<Self>,
+        task: download_repo::TaskRow,
+        image_concurrency: i64,
+        speed_limit_kbps: i64,
+    ) {
         let cancel = Arc::new(AtomicBool::new(false));
         let pause = Arc::new(AtomicBool::new(false));
         {
@@ -185,6 +190,7 @@ impl Coordinator {
                 shutdown: Arc::clone(&self.shutdown),
             },
             image_concurrency,
+            speed_limit_kbps: speed_limit_kbps.max(0) as u64,
         });
         // Weak handle: worker completion bookkeeping disappears with the
         // coordinator; the worker's own DB effects stay valid regardless.

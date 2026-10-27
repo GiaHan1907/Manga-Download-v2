@@ -70,6 +70,7 @@ mod tests {
         let flipped = AppSettings {
             notifications_enabled: false,
             close_to_tray: true,
+            speed_limit_kbps: 0,
             ..AppSettings::default()
         };
         flags.apply(&flipped);
