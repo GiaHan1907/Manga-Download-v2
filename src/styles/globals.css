@@ -107,18 +107,12 @@ button {
   padding: 0 var(--space-4);
 }
 
+/* The real app icon (same artwork as the exe), not a letter mark. */
 .window-titlebar__icon {
-  display: grid;
   width: 1.75rem;
   height: 1.75rem;
-  place-items: center;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--primary);
-  background: transparent;
-  color: var(--accent-text);
-  font-family: var(--font-sans);
-  font-size: 1.05rem;
-  font-weight: 700;
+  object-fit: cover;
 }
 
 .window-titlebar__text {

@@ -1,11 +1,13 @@
 import { Minus, Square, X } from "lucide-react";
 import { windowService } from "../../services/windowService";
 
+import appIcon from "../../assets/app-icon.png";
+
 export default function WindowTitlebar() {
   return (
     <header className="window-titlebar">
       <div className="window-titlebar__drag-region" data-tauri-drag-region onDoubleClick={() => void windowService.toggleMaximize()}>
-        <div className="window-titlebar__icon" aria-hidden="true">M</div>
+        <img className="window-titlebar__icon" src={appIcon} alt="" aria-hidden="true" />
         <div className="window-titlebar__text" data-tauri-drag-region>
           <div className="window-titlebar__name" data-tauri-drag-region>
             Manga Downloader 1989
