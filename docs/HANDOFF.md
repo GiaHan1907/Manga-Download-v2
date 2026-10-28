@@ -376,6 +376,22 @@ Một trang có thể trả về nội dung **không phải ảnh** một lần 
 
 **Cách nhận biết lần sau:** `UNSUPPORTED_TYPE` cho cả một chương mà nguồn nổi tiếng dùng PNG → kiểm tra ngay hằng số chữ ký bằng một file PNG thật, đừng tin fixture tự dựng.
 
+### 2w. Icon mới, repo public và auto-update có chữ ký — 2026-10-28
+
+**Icon:** bộ `src-tauri/icons` (desktop + android + ios) sinh lại từ ảnh người dùng cung cấp bằng `npx tauri icon`; script sinh icon cũ (`scripts/make-icon.mjs`) đã xoá vì nó sẽ ghi đè logo mới bằng hình cũ.
+
+**Repo public:** đã rà lịch sử và cây làm việc trước khi đổi (không có `.env`, token, khoá riêng, DB/log bị commit). Repo hiện public để asset release tải được mà không cần token — đó là điều kiện bắt buộc cho updater.
+
+**Auto-update (Tauri updater, minisign):**
+- Cặp khoá sinh bằng `npx tauri signer generate`; **private key nằm ngoài repo** tại `~/.tauri/manga1989.key` (+ `.key.pw` chứa mật khẩu) và đã đưa lên GitHub Secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. **Mất key hoặc mật khẩu = không phát hành được bản cập nhật nữa** — phải sao lưu hai file này.
+- Public key nhúng trong `tauri.conf.json` → `plugins.updater.pubkey`; endpoint `https://github.com/GiaHan1907/Manga-Download-v2/releases/latest/download/latest.json`.
+- `bundle.createUpdaterArtifacts: true`: với NSIS trên Windows, **chính file `setup.exe` là artifact cập nhật**, chữ ký nằm cạnh nó (`*.exe.sig`). Không có `.nsis.zip`.
+- CI ký artifact (`TAURI_SIGNING_*` truyền vào bước build); publish tạo thêm `latest.json` (`version`, `notes`, `pub_date`, `signature` = nội dung `.sig`, `url` = setup.exe của release) và tải lên cùng `.exe.sig`. Endpoint luôn là release **latest**.
+- App: Cài đặt → **Cập nhật** (kiểm tra, cài & khởi động lại); thêm một lần kiểm tra im lặng 10 giây sau khi mở app (chỉ hiện toast khi có bản mới). Chữ ký được plugin kiểm tra trước khi chạy installer.
+- Version đã lên **1.0.1** (đổi icon + updater). Release 1.0.0 không có `latest.json` nên app 1.0.0 (bản không có updater) không tự cập nhật — lần này vẫn cài tay; từ 1.0.1 trở đi mới có vòng cập nhật tự động.
+
+**Cách kiểm tra updater khi có release mới:** `curl -s https://github.com/GiaHan1907/Manga-Download-v2/releases/latest/download/latest.json` phải trả JSON có `version` mới, `signature` khớp file `.exe.sig` và `url` tải được. Nếu check trong app báo "Không kiểm tra được bản cập nhật", xem log (Cài đặt → Mở thư mục log) — dòng `update check failed:` có lý do thật.
+
 ## 3. Bất biến kiến trúc (không được phá)
 
 1. Mọi `invoke()` app-command đi qua `src/shared/api/desktop.ts`; window API đi qua `src/services/windowService.ts`.
@@ -395,7 +411,7 @@ Một trang có thể trả về nội dung **không phải ảnh** một lần 
 - [ ] **Phase 06 live pending (T06-24b):** tải thật 1 chapter → CBZ trên Windows với nguồn Madara cùng host allowlist; nếu host ảnh khác host site → engine chặn, cần source-policy review.
 - [ ] Xác nhận **đóng app bằng nút X** dừng worker sạch (shutdown đã nối `RunEvent::ExitRequested`; cần test trên bản `tauri build`) — phục vụ packaging gate.
 - [ ] **Phase 10 còn mở (blocker hợp lệ, không phải defect):** (a) chạy `docs/phase-10/WINDOWS_INSTALL_UPGRADE_TEST.md` 15 mục trên VM/profile sạch; (b) ~~live download journey R-1~~ ĐÓNG 2026-09-23 ở mức headless (probe `#[ignore] live_r1`: Ninja Loạn Thị ch.1 từ truyentuoitho.com, 188/188 trang → CBZ 49.578.260 B (≈47,3 MiB) verify, attempts=0; phát sinh feature image-host allowlist + AJAX chapter-list); còn xác nhận thao tác thực tế trong app UI; (c) Codex Reviewer ACCEPT RC + owner approval + Release Engineer publish + verify remote hash (T10-39/40); (d) nếu phân phối công khai: quyết định code-signing cert + license audit + kế hoạch updater riêng.
-- [ ] ~~Icon app thật~~ — đã làm ở Phase 10 (`scripts/make-icon.mjs` + `npx tauri icon`, full set trong `src-tauri/icons/`).
+- [x] ~~Icon app thật~~ — Phase 10, và **thay bằng logo mới 2026-10-28** (sinh lại toàn bộ `src-tauri/icons` từ ảnh người dùng bằng `npx tauri icon`).
 - [ ] Cân nhắc self-host font Inter (CSP `'self'` cấm CDN).
 - [ ] `AppError::Internal` (Rust) giờ đã dùng ở các đường panic-safe của download engine.
 - [ ] **Phase 07 manual (T07-24..32):** verify trên Windows đóng gói — fullscreen thật, click-X khi đang đọc, reader chapter 300 trang thật, library ~1k bản ghi, ngắt mạng khi đọc offline. `docs/phase-07/test-results.md` đã đánh NOT RUN thẳng thắn.

@@ -1,6 +1,6 @@
 [package]
 name = "manga-downloader-1989"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 
 [lib]
@@ -33,6 +33,7 @@ regex = "1"
 tokio = { version = "1", features = ["time", "sync", "rt", "macros", "net", "io-util"] }
 flate2 = "1.1.10"
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 
 [target.'cfg(windows)'.dependencies]
 junction = "1"

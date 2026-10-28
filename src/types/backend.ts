@@ -179,3 +179,11 @@ export type BackupSummaryDto = {
   progress: number;
   skipped: number;
 };
+
+/// Result of asking GitHub for a newer release.
+export type UpdateCheckDto = {
+  current: string;
+  available: boolean;
+  version: string | null;
+  notes: string | null;
+};

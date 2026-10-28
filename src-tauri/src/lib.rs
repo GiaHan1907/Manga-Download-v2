@@ -28,6 +28,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" && window_flags.close_to_tray() {
@@ -152,6 +153,8 @@ pub fn run() {
             commands::activity::app_list_recent_activity,
             commands::backup::app_export_library_backup,
             commands::storage::app_open_log_dir,
+            commands::update::app_check_update,
+            commands::update::app_install_update,
             commands::backup::app_import_library_backup,
             commands::discovery::list_supported_sources,
             commands::discovery::probe_manga_source,

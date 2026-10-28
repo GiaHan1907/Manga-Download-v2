@@ -67,10 +67,20 @@ jobs:
 
           # Stable name per version: a later push of the same version replaces
           # this asset instead of piling up files in the Release.
+          # Windows/NSIS: the updater artifact IS the setup exe; Tauri v2 writes
+          # its minisign signature next to it as `<installer>.sig`.
+          sig_file="$(find staging -type f -name '*.exe.sig' | head -n 1)"
+          if [ -z "$sig_file" ]; then
+            echo "Thiếu chữ ký updater (*.exe.sig) — không tạo latest.json thiếu chữ ký." >&2
+            exit 1
+          fi
+
           asset="Manga-Downloader-1989-Setup-v${version}.exe"
           cp "$setup" "$asset"
+          cp "$sig_file" "${asset}.sig"
           size="$(stat -c %s "$asset")"
           sha256="$(sha256sum "$asset" | cut -d' ' -f1)"
+          signature="$(cat "$sig_file")"
 
           cat > notes.md <<EOF
           Bản build mới nhất của phiên bản ${version}, tự động từ mỗi push lên \`master\`.
@@ -85,14 +95,32 @@ jobs:
           Tải bản mới nhất: ${REPO_URL}/releases/latest
           EOF
 
+          # Updater feed: the app polls releases/latest/download/latest.json,
+          # verifies `signature` against its embedded public key, then downloads
+          # `url`. Stable asset names per version, replaced on every push.
+          cat > latest.json <<EOF
+          {
+            "version": "${version}",
+            "notes": "Bản build tự động từ commit ${short}.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "${signature}",
+                "url": "${REPO_URL}/releases/download/${tag}/${asset}"
+              }
+            }
+          }
+          EOF
+
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$tag" "$asset" "${asset}.sig" latest.json \
+              --clobber --repo "$GITHUB_REPOSITORY"
             # No --latest here: updating an older version must not demote a
             # newer Release that is already the latest.
             gh release edit "$tag" --title "Manga Downloader 1989 v${version}" \
               --notes-file notes.md --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$tag" "$asset" \
+            gh release create "$tag" "$asset" "${asset}.sig" latest.json \
               --repo "$GITHUB_REPOSITORY" \
               --target "$SHA" \
               --title "Manga Downloader 1989 v${version}" \

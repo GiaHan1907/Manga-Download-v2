@@ -4,6 +4,7 @@ import type { AppError, AppErrorCode, AppHealth, AppInfo } from "./contracts";
 import type {
   ActivityItemDto,
   AppSettingsDto,
+  UpdateCheckDto,
   BackupSummaryDto,
   CacheCleanupDto,
   DownloadRootDto,
@@ -615,4 +616,14 @@ export async function importLibraryBackup(): Promise<BackupSummaryDto | null> {
 /// Rust opens Explorer on the app's log folder; no path crosses IPC.
 export async function openLogDir(): Promise<void> {
   await invoke<void>("app_open_log_dir");
+}
+
+/// Updater checks the release endpoint configured in tauri.conf.json and
+/// verifies signatures against the embedded public key.
+export async function checkForUpdate(): Promise<UpdateCheckDto> {
+  return invoke<UpdateCheckDto>("app_check_update");
+}
+
+export async function installUpdate(): Promise<void> {
+  await invoke<void>("app_install_update");
 }
